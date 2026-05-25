@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(cd \"d:\\\\New folder \\(9\\)\\\\KiraTakipPro_v5_1_9_regression_hotfix\"; Get-ChildItem -Recurse -Path supabase -Force | Where-Object {-not $_.PSIsContainer} | ForEach-Object {$_.FullName.Replace\\(\"d:\\\\New folder \\(9\\)\\\\KiraTakipPro_v5_1_9_regression_hotfix\\\\\", \"\"\\)} | Sort-Object)",
+      "Bash(node -e ' *)",
+      "Bash(node src/tests/integrity.js)",
+      "Bash(npm run *)"
+    ]
+  }
+}

@@ -1,0 +1,31 @@
+KIRA TAKIP PRO - SON KULLANICI LİSANS SÖZLEŞMESİ
+KIRA TAKIP PRO - END USER LICENSE AGREEMENT
+
+Copyright © 2026 Kira Takip Pro. Tüm hakları saklıdır. / All rights reserved.
+
+Bu yazılım tescilli olup ticari bir üründür. Yazılı izin alınmaksızın kopyalanamaz,
+dağıtılamaz, değiştirilemez veya alt lisans verilemez.
+
+This software is proprietary and commercial. Unauthorized copying, distribution,
+modification, or sublicensing is strictly prohibited without prior written consent.
+
+Bu yazılımı kurarak aşağıdaki koşulları kabul etmiş sayılırsınız:
+By installing this software, you agree to the following terms:
+
+1. KULLANIM / USE
+   Yazılım yalnızca lisanslı kullanıcı tarafından kullanılabilir.
+   Software may only be used by the licensed end-user.
+
+2. KISITLAMALAR / RESTRICTIONS
+   Yazılımın kaynak kodu tersine mühendislik yoluyla çözümlenemez.
+   Reverse engineering of source code is prohibited.
+
+3. GARANTİ REDDİ / DISCLAIMER OF WARRANTY
+   Yazılım "OLDUĞU GİBİ" sunulmaktadır; herhangi bir garanti verilmemektedir.
+   Software is provided "AS IS" without warranty of any kind.
+
+4. SORUMLULUK SINIRI / LIMITATION OF LIABILITY
+   Yazılımın kullanımından doğan hiçbir zarardan üretici sorumlu tutulamaz.
+   The producer shall not be liable for any damages arising from software use.
+
+İletişim / Contact: support@kiratakippro.com

@@ -1,0 +1,325 @@
+{
+  "runAt": "2026-05-24T01:33:12.461Z",
+  "passed": 62,
+  "failed": 0,
+  "warned": 1,
+  "total": 63,
+  "results": [
+    {
+      "name": "JSON backup serialisation is complete",
+      "status": "PASS",
+      "dur": 1
+    },
+    {
+      "name": "JSON backup file is valid and parseable",
+      "status": "PASS",
+      "dur": 1
+    },
+    {
+      "name": "Backup includes all tenant records",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Backup includes all payment records",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Backup includes correct financial totals",
+      "status": "PASS",
+      "dur": 1
+    },
+    {
+      "name": "Backup timestamps are valid ISO format",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Multiple backup files can coexist",
+      "status": "PASS",
+      "dur": 3
+    },
+    {
+      "name": "Old backups are cleaned when limit exceeded",
+      "status": "PASS",
+      "dur": 23
+    },
+    {
+      "name": "Restored data has identical tenant records",
+      "status": "PASS",
+      "dur": 1
+    },
+    {
+      "name": "Restored payments match original exactly",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Restored expenses match original exactly",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Users survive restore with roles intact",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Audit history survives restore",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "WA log survives restore",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Alper account data survives restore",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Server password hashes survive restore and verify correctly",
+      "status": "PASS",
+      "dur": 122
+    },
+    {
+      "name": "Truncated JSON detected and rejected",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Empty JSON file detected and rejected",
+      "status": "PASS",
+      "dur": 1
+    },
+    {
+      "name": "JSON with null values handled gracefully",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "JSON with missing fields falls back to defaults",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Corrupted field in one tenant does not corrupt others",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Missing backup file returns error, not crash",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Backup directory missing → created automatically",
+      "status": "PASS",
+      "dur": 2
+    },
+    {
+      "name": "Interrupted backup does not corrupt source DB",
+      "status": "PASS",
+      "dur": 1
+    },
+    {
+      "name": "Interrupted restore: pre-restore backup exists before overwrite",
+      "status": "PASS",
+      "dur": 5
+    },
+    {
+      "name": "Sync version increments on every push",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Conflict detected when client version is stale",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "No conflict when client is one behind",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "No conflict on first push (cv=0)",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Duplicate payment detection (same tenant + month)",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Duplicate expense import detection",
+      "status": "PASS",
+      "dur": 1
+    },
+    {
+      "name": "WA log prevents duplicate reminders for same tenant+month",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Concurrent edit: last write wins with version tracking",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Payment addition creates audit entry",
+      "status": "PASS",
+      "dur": 45
+    },
+    {
+      "name": "User management actions tracked in audit",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Login attempts (success + failure) tracked",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Audit timestamps are in correct chronological order",
+      "status": "PASS",
+      "dur": 1
+    },
+    {
+      "name": "Expense deletion tracked in audit",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Audit history FIFO trim at 500 entries",
+      "status": "PASS",
+      "dur": 1
+    },
+    {
+      "name": "Cannot delete admin user (self-protection)",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Cannot deactivate yourself",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "PIN validation: min 4 numeric digits",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Server password validation: min 6 characters",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Role validation: only admin|editor|manager|viewer allowed",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Duplicate username rejected on create",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Phone number sanitised before WA send",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Token tamper detection",
+      "status": "PASS",
+      "dur": 1
+    },
+    {
+      "name": "Expired token rejected",
+      "status": "PASS",
+      "dur": 1
+    },
+    {
+      "name": "Tenant name cannot be empty",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Rent values are non-negative numbers",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Payment amounts are non-negative",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Expense amounts are non-negative",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Month string format validation",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Import with negative rent treated as error",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Import with excessive rent flagged as warning",
+      "status": "WARN",
+      "msg": "Rent 9999999 exceeds sanity cap — verify",
+      "dur": 0
+    },
+    {
+      "name": "Log file is writable",
+      "status": "PASS",
+      "dur": 1
+    },
+    {
+      "name": "Server log captures errors with timestamp",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "WA send failure is logged with error details",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Sync errors logged with direction and version",
+      "status": "PASS",
+      "dur": 1
+    },
+    {
+      "name": "Import failure preserves existing data",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Full data round-trip: JSON serialize → parse → verify",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Financial calculations consistent before/after round-trip",
+      "status": "PASS",
+      "dur": 0
+    },
+    {
+      "name": "Overdue detection consistent before/after round-trip",
+      "status": "PASS",
+      "dur": 0
+    }
+  ]
+}

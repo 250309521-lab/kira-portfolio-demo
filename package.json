@@ -1,0 +1,94 @@
+{
+  "name": "kira-takip-pro",
+  "version": "6.0.0",
+  "description": "Kira Takip Pro - Emlak Yönetim Sistemi",
+  "main": "src/main.js",
+  "author": {
+    "name": "Kira Takip Pro",
+    "email": "support@kiratakippro.com"
+  },
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "syntax-check": "node scripts/check-syntax.js",
+    "prebuild": "node scripts/check-syntax.js",
+    "build": "electron-builder build --win --x64",
+    "build:dir": "electron-builder build --win --x64 --dir",
+    "lint": "echo 'No linter configured'",
+    "test": "node src/tests/run.js",
+    "test:integrity": "node src/tests/integrity.js",
+    "test:all": "node src/tests/run.js && node src/tests/integrity.js"
+  },
+  "dependencies": {
+    "electron-store": "^8.2.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "electron": "^29.3.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.kiratakippro.customer",
+    "productName": "KiraTakipPro Customer",
+    "copyright": "Copyright © 2026 Kira Takip Pro",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "build/icon.*",
+      "node_modules/**/*",
+      "!node_modules/.cache",
+      "!**/*.map",
+      "!**/test/**",
+      "!**/*.test.js"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "publisherName": "Kira Takip Pro",
+      "legalTrademarks": "Kira Takip Pro",
+      "fileAssociations": [
+        {
+          "ext": "ktpbackup",
+          "name": "Kira Takip Backup",
+          "description": "Kira Takip Pro Backup File"
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Kira Takip Pro",
+      "menuCategory": "Kira Takip Pro",
+      "deleteAppDataOnUninstall": false,
+      "license": "build/license.txt",
+      "include": "build/installer.nsh"
+    },
+    "portable": {
+      "artifactName": "KiraTakipPro-Customer-${version}-portable.exe"
+    },
+    "artifactName": "KiraTakipPro-Customer-Setup-${version}.exe"
+  }
+}
