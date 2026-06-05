@@ -51,7 +51,7 @@ const DEFAULT_STORE = {
       name: 'Yönetici',
       avatar: 'Y',
       role: 'admin',
-      pin_hash: '1234',
+      pin_hash: '',
       color: '#3b82f6',
       active: 1,
       created_at: new Date().toISOString(),
@@ -108,7 +108,8 @@ function autoBackup(trigger = 'auto') {
     if (!store) initDatabase();
     saveStore();
     const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const filename = `backup-${ts}-${trigger}.json`;
+    const safeTrigger = String(trigger || 'auto').replace(/[^a-z0-9_-]/gi, '_').slice(0, 40);
+    const filename = `backup-${ts}-${safeTrigger}.json`;
     const destPath = path.join(BACKUP_DIR, filename);
     fs.copyFileSync(DB_PATH, destPath);
     const stats = fs.statSync(destPath);
@@ -187,20 +188,27 @@ function setupIPC() {
 
   ipcMain.handle('backup:restore', async (_, backupPath) => {
     if (!backupPath) return { ok: false, error: 'No backup path provided' };
-    if (!fs.existsSync(backupPath)) return { ok: false, error: 'Backup file not found: ' + backupPath };
+    // Confine restores to the approved backup directory
+    const resolved = path.resolve(String(backupPath));
+    const backupDirResolved = path.resolve(BACKUP_DIR);
+    if (!resolved.startsWith(backupDirResolved + path.sep) && resolved !== backupDirResolved) {
+      log('WARN', 'backup:restore blocked — path outside BACKUP_DIR', { path: resolved });
+      return { ok: false, error: 'Invalid backup path' };
+    }
+    if (!fs.existsSync(resolved)) return { ok: false, error: 'Backup file not found' };
     try {
-      const stat = fs.statSync(backupPath);
+      const stat = fs.statSync(resolved);
       if (stat.size === 0) return { ok: false, error: 'Backup file is empty — aborting restore' };
       const preRestoreBackup = autoBackup('pre-restore');
-      const content = fs.readFileSync(backupPath, 'utf8');
+      const content = fs.readFileSync(resolved, 'utf8');
       const parsed = JSON.parse(content);
       if (!parsed || typeof parsed !== 'object') return { ok: false, error: 'Invalid backup format' };
       store = parsed;
       saveStore();
-      log('INFO', 'Data restored successfully', { from: backupPath });
+      log('INFO', 'Data restored successfully', { from: resolved });
       return { ok: true, preRestoreBackup: preRestoreBackup?.filename };
     } catch (err) {
-      log('ERROR', 'Restore failed', { error: err.message, backupPath });
+      log('ERROR', 'Restore failed', { error: err.message, backupPath: resolved });
       return { ok: false, error: err.message };
     }
   });
@@ -406,6 +414,9 @@ function createWindow() {
       mainWindow.show();
       mainWindow.maximize();
       if (IS_DEV) mainWindow.webContents.openDevTools({ mode: 'detach' });
+      mainWindow.webContents.on('devtools-opened', () => {
+        if (!IS_DEV) mainWindow.webContents.closeDevTools();
+      });
       // Trigger splash fade simultaneously — user sees main revealed as splash fades
       if (splashWin) splashWin.webContents.send('splash:fadeout');
     }, waitMs);
