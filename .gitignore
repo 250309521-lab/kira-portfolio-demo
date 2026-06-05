@@ -8,3 +8,4 @@ test-results/
 .vscode/
 renderer.html
 src/tests/integrity-results.json
+src/renderer.min.html

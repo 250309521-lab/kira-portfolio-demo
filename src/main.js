@@ -386,7 +386,7 @@ function createWindow() {
   });
 
   if (!IS_DEV) mainWindow.setMenuBarVisibility(false);
-  mainWindow.loadFile(path.join(__dirname, 'renderer.html'));
+  mainWindow.loadFile(path.join(__dirname, IS_DEV ? 'renderer.html' : 'renderer.min.html'));
   mainWindow.once('ready-to-show', () => {
     const MIN_SPLASH = 1800;
     const elapsed = splashStart ? Date.now() - splashStart : MIN_SPLASH;

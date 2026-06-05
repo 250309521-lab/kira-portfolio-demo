@@ -12,7 +12,7 @@
     "start": "electron .",
     "dev": "electron . --dev",
     "syntax-check": "node scripts/check-syntax.js",
-    "prebuild": "node scripts/check-syntax.js",
+    "prebuild": "node scripts/check-syntax.js && node scripts/build-renderer.js",
     "build": "electron-builder build --win --x64",
     "build:dir": "electron-builder build --win --x64 --dir",
     "lint": "echo 'No linter configured'",
@@ -26,8 +26,10 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
+    "clean-css": "^5.3.3",
     "electron": "^29.3.0",
-    "electron-builder": "^24.13.3"
+    "electron-builder": "^24.13.3",
+    "terser": "^5.48.0"
   },
   "build": {
     "appId": "com.kiratakippro.customer",
@@ -43,7 +45,8 @@
       "node_modules/**/*",
       "!node_modules/.cache",
       "!**/*.map",
-      "!src/tests/**"
+      "!src/tests/**",
+      "!src/renderer.html"
     ],
     "win": {
       "target": [
