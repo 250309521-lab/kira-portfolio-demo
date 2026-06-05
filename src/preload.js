@@ -46,4 +46,7 @@ contextBridge.exposeInMainWorld('electron', {
   readClipboard: () => ipcRenderer.invoke('clipboard:read'),
   isElectron: true,
   platform:   process.platform,
+
+  // ── License / Machine Identity ─────────────────────────────────────────────
+  getMachineId: () => ipcRenderer.invoke('license:getMachineId'),
 });

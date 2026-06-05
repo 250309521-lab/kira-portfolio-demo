@@ -14,6 +14,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
+const { getMachineFingerprint } = require('./machine-id');
 
 const IS_DEV = process.argv.includes('--dev') || !app.isPackaged;
 const APP_VER = app.getVersion();
@@ -325,6 +326,15 @@ function setupIPC() {
   });
 
   ipcMain.handle('clipboard:read', () => clipboard.readText());
+
+  ipcMain.handle('license:getMachineId', () => {
+    const fp = getMachineFingerprint();
+    if (!fp) {
+      log('WARN', 'license:getMachineId — Machine GUID unavailable');
+      return { ok: false, error: 'Machine GUID unavailable' };
+    }
+    return { ok: true, fingerprint: fp };
+  });
 }
 
 let mainWindow  = null;
