@@ -25,6 +25,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "electron": "^29.3.0",
     "electron-builder": "^24.13.3"
   },
@@ -42,8 +43,7 @@
       "node_modules/**/*",
       "!node_modules/.cache",
       "!**/*.map",
-      "!**/test/**",
-      "!**/*.test.js"
+      "!src/tests/**"
     ],
     "win": {
       "target": [
