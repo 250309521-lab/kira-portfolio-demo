@@ -141,23 +141,23 @@ test('Invalid: 3 digits', () => assert(!validatePIN('123')));
 test('Invalid: 7 digits', () => assert(!validatePIN('1234567')));
 test('Invalid: empty', () => assert(!validatePIN('')));
 
-// ── Alper net calculation ─────────────────────────────────────────────────────
-console.log('\nAlper Calculations:');
+// ── Mgmt net calculation ──────────────────────────────────────────────────────
+console.log('\nMgmt Calculations:');
 
-test('Alper net = col - exp', () => {
+test('Mgmt net = col - exp', () => {
   const entry = { col: 197000, exp: 15668 };
   assertEqual(entry.col - entry.exp, 181332);
 });
-test('Net from Alper Aug 2025 (actual -14218)', () => {
+test('Net from Mgmt Aug 2025 (actual -14218)', () => {
   // From Excel: col=153000, exp=88218, but net=-14218 because other deductions
   // Pure calc: 153000-88218=64782 (positive)
   const entry = { col: 153000, exp: 88218 };
   assertEqual(entry.col - entry.exp, 64782);
 });
 test('Negative net from Excel (Agustos 2025)', () => {
-  // Alper net was -14218 because additional items not in basic calc
-  const alperNet = -14218;
-  assert(alperNet < 0, 'Negative net is valid');
+  // Mgmt net was -14218 because additional items not in basic calc
+  const mgmtNet = -14218;
+  assert(mgmtNet < 0, 'Negative net is valid');
 });
 
 // ── Phone number validation ───────────────────────────────────────────────────
@@ -499,7 +499,7 @@ function makeExportEnvelope(data, importHistory) {
     tenants:       data.tenants     || {},
     payments:      data.payments    || {},
     expenses:      data.expenses    || {},
-    alper:         data.alper       || {},
+    mgmt:          data.mgmt        || {},
     tanNet:        data.tanNet      || {},
     gayNet:        data.gayNet      || {},
     history:       data.history     || [],
@@ -528,7 +528,7 @@ test('Export envelope excludes importSnapshots', function() {
 });
 test('Export envelope includes all required DATA fields', function() {
   var env = makeExportEnvelope({}, []);
-  var required = ['buildings','tenants','payments','expenses','alper','tanNet','gayNet',
+  var required = ['buildings','tenants','payments','expenses','mgmt','tanNet','gayNet',
                   'history','waLog','users','settings','importHistory'];
   required.forEach(function(k) { assert(k in env, 'Missing: '+k); });
 });

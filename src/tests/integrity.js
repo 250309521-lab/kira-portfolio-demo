@@ -119,7 +119,7 @@ const SAMPLE_DATA = {
       { tur:'DOĞALGAZ', no:'9876543210', tutar:30302, tarih:'2026-04-20', notlar:'' },
     ]},
   },
-  alper: {
+  mgmt: {
     'Nisan 2026': { col:197000, exp:15668, net:181332 }
   },
   users: [
@@ -182,7 +182,7 @@ test('JSON backup serialisation is complete', () => {
   assert(parsed.tenants, 'tenants missing');
   assert(parsed.payments, 'payments missing');
   assert(parsed.expenses, 'expenses missing');
-  assert(parsed.alper, 'alper missing');
+  assert(parsed.mgmt, 'mgmt missing');
   assert(parsed.users, 'users missing');
   assert(parsed.history, 'history missing');
   assert(parsed.waLog, 'waLog missing');
@@ -316,13 +316,13 @@ test('WA log survives restore', () => {
   assertEqual(restored.waLog[0].mo, 'Nisan 2026', 'waLog month');
 });
 
-test('Alper account data survives restore', () => {
+test('Mgmt account data survives restore', () => {
   const restored = JSON.parse(JSON.stringify(SAMPLE_DATA));
-  const alper = restored.alper['Nisan 2026'];
-  assert(alper, 'alper entry present');
-  assertEqual(alper.col, 197000, 'alper collected');
-  assertEqual(alper.exp, 15668, 'alper expenses');
-  assertEqual(alper.net, 181332, 'alper net');
+  const mgmt = restored.mgmt['Nisan 2026'];
+  assert(mgmt, 'mgmt entry present');
+  assertEqual(mgmt.col, 197000, 'mgmt collected');
+  assertEqual(mgmt.exp, 15668, 'mgmt expenses');
+  assertEqual(mgmt.net, 181332, 'mgmt net');
 });
 
 test('Server password hashes survive restore and verify correctly', () => {

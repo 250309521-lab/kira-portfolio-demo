@@ -380,8 +380,8 @@
 [data-theme="light"] .bld-ctx-item.ctx-danger:hover { background:rgba(244,63,94,.08); }
 [data-theme="light"] .sb-toggle-btn { background:rgba(255,255,255,.65); border-color:rgba(30,50,100,.15); color:#3a5a8a; }
 [data-theme="light"] .sb-toggle-btn:hover { background:#fff; border-color:rgba(37,99,235,.3); color:#1e40af; }
-[data-theme="light"] .alper-stat { background:rgba(37,99,235,.07); border:1px solid rgba(30,50,100,.1); }
-[data-theme="light"] .alper-stat-lbl { color:#5a7aa8; }
+[data-theme="light"] .mgmt-stat { background:rgba(37,99,235,.07); border:1px solid rgba(30,50,100,.1); }
+[data-theme="light"] .mgmt-stat-lbl { color:#5a7aa8; }
 [data-theme="light"] .a-tab:hover:not(.active) { background:rgba(37,99,235,.08); color:#1e40af; }
 [data-theme="light"] .a-tab.active { background:rgba(37,99,235,.15); color:#1e40af; }
 
@@ -413,7 +413,7 @@
 [data-theme="light"] .overdue-name { color:#080f1e; }
 [data-theme="light"] .overdue-meta { color:#3a5a8a; }
 /* Alper hero section */
-[data-theme="light"] .alper-hero { background:linear-gradient(135deg,rgba(139,92,246,.07),rgba(20,184,166,.04)); border-color:rgba(139,92,246,.2); }
+[data-theme="light"] .mgmt-hero { background:linear-gradient(135deg,rgba(139,92,246,.07),rgba(20,184,166,.04)); border-color:rgba(139,92,246,.2); }
 /* Analytics tabs container */
 [data-theme="light"] .analytics-tabs { background:rgba(255,255,255,.7); border-color:rgba(30,50,100,.14); }
 /* Section headers */
@@ -546,8 +546,8 @@
 
 /* TYPOGRAPHY HIERARCHY — secondary and muted text */
 [data-theme="light"] .c-faint { color: var(--text-4) !important; }
-[data-theme="light"] .alper-stat-val { color: var(--text-1) !important; }
-[data-theme="light"] .alper-stat-lbl { color: var(--text-4) !important; }
+[data-theme="light"] .mgmt-stat-val { color: var(--text-1) !important; }
+[data-theme="light"] .mgmt-stat-lbl { color: var(--text-4) !important; }
 [data-theme="light"] .detail-label { color: var(--text-4) !important; }
 [data-theme="light"] .panel-section-title { color: var(--text-3) !important; font-weight: 600; letter-spacing: .03em; }
 [data-theme="light"] .pay-hist-row td { color: var(--text-2) !important; }
@@ -694,12 +694,12 @@
 
 /* ═══ 2. CARD / SURFACE HIERARCHY ══════════════════════════════ */
 /* Secondary stat cards (alper, wa-stat, bld-stat) */
-[data-theme="light"] .alper-stat {
+[data-theme="light"] .mgmt-stat {
   background: rgba(255,255,255,.88) !important;
   border-color: rgba(30,50,100,.14) !important;
   box-shadow: 0 1px 4px rgba(30,50,100,.08) !important;
 }
-[data-theme="light"] .alper-stat-val { color: var(--text-1) !important; }
+[data-theme="light"] .mgmt-stat-val { color: var(--text-1) !important; }
 [data-theme="light"] .wa-stat-card {
   background: rgba(255,255,255,.90) !important;
   border-color: rgba(30,50,100,.15) !important;
@@ -1049,7 +1049,7 @@
   box-shadow: 0 1px 3px rgba(0,0,0,.07) !important;
 }
 /* Alper stat boxes */
-[data-theme="light"] .alper-stat {
+[data-theme="light"] .mgmt-stat {
   background: #f3f7ff !important;
   border: 1px solid rgba(30,50,100,.18) !important;
   box-shadow: 0 1px 2px rgba(0,0,0,.06) !important;
@@ -1385,7 +1385,7 @@
 /* Trend axis month labels */
 [data-theme="light"] [style*="color:var(--i3)"] { color: #1e3a6a !important; }
 /* Alper hero section */
-[data-theme="light"] .alper-hero {
+[data-theme="light"] .mgmt-hero {
   background: linear-gradient(135deg, rgba(139,92,246,.08), rgba(20,184,166,.05)) !important;
   border-color: rgba(139,92,246,.24) !important;
 }
@@ -1442,7 +1442,7 @@
   border: 1px solid rgba(30,50,100,.18) !important;
 }
 /* Alper stat boxes */
-[data-theme="light"] .alper-stat {
+[data-theme="light"] .mgmt-stat {
   background: #f3f7ff !important;
   border: 1px solid rgba(30,50,100,.18) !important;
   box-shadow: 0 1px 2px rgba(0,0,0,.06) !important;
@@ -1809,7 +1809,7 @@
 [data-theme="light"] .wa-stat-card,
 [data-theme="light"] .wa-reminder-card,
 [data-theme="light"] .settings-section,
-[data-theme="light"] .alper-stat {
+[data-theme="light"] .mgmt-stat {
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,.95),
     0 0 0 1px rgba(30,50,100,.06),
@@ -1862,7 +1862,7 @@
    but above the #d8e5f5 page bg, giving clear L2 elevation reading */
 [data-theme="light"] .rank-item { background: #f5f9ff !important; }
 [data-theme="light"] .info-item { background: #f5f9ff !important; }
-[data-theme="light"] .alper-stat { background: #f5f9ff !important; }
+[data-theme="light"] .mgmt-stat { background: #f5f9ff !important; }
 [data-theme="light"] .rank-item:hover { background: #fdfeff !important; }
 
 /* ── T9: HOVER ELEVATION — slightly off-white (not glaring white) ── */
@@ -3069,22 +3069,22 @@ tbody td:first-child{color:var(--i1)}
 /* ═══════════════════════════════════════════════════════════════════
    ALPER HERO
 ═══════════════════════════════════════════════════════════════════ */
-.alper-hero{
+.mgmt-hero{
   background:linear-gradient(135deg,rgba(139,92,246,.09),rgba(20,184,166,.05));
   border:1px solid rgba(139,92,246,.18);border-radius:var(--r3);
   padding:18px 22px;margin-bottom:16px;position:relative;overflow:hidden;
 }
-.alper-hero::before{
+.mgmt-hero::before{
   content:'';position:absolute;top:-50px;right:-50px;
   width:180px;height:180px;border-radius:50%;
   background:radial-gradient(circle,rgba(139,92,246,.08),transparent 70%);
 }
-.alper-hero-title{font-size:14.5px;font-weight:700;color:var(--violet-l);margin-bottom:4px}
-.alper-hero-desc{font-size:12px;color:var(--i4);line-height:1.6;margin-bottom:14px}
-.alper-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-.alper-stat{background:rgba(0,0,0,.18);border-radius:var(--r2);padding:11px;text-align:center}
-.alper-stat-val{font-size:16px;font-weight:700}
-.alper-stat-lbl{font-size:10px;color:var(--i4);margin-top:3px}
+.mgmt-hero-title{font-size:14.5px;font-weight:700;color:var(--violet-l);margin-bottom:4px}
+.mgmt-hero-desc{font-size:12px;color:var(--i4);line-height:1.6;margin-bottom:14px}
+.mgmt-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.mgmt-stat{background:rgba(0,0,0,.18);border-radius:var(--r2);padding:11px;text-align:center}
+.mgmt-stat-val{font-size:16px;font-weight:700}
+.mgmt-stat-lbl{font-size:10px;color:var(--i4);margin-top:3px}
 
 /* ═══════════════════════════════════════════════════════════════════
    3D VISUALIZATION
@@ -3215,7 +3215,7 @@ tbody td:first-child{color:var(--i1)}
 #content > * { max-width: 100%; min-width: 0; }
 .widget      { min-width: 0; }
 canvas       { max-width: 100%; }
-.alper-stats { grid-template-columns: repeat(auto-fill, minmax(110px,1fr)) !important; }
+.mgmt-stats { grid-template-columns: repeat(auto-fill, minmax(110px,1fr)) !important; }
 #analytics-content{width:100%;max-width:100%;min-width:0;}
 #analytics-content > .smart-grid{
   width:100%;
@@ -3740,7 +3740,7 @@ body.dash-compact .table-card{margin-bottom:10px}
 [data-theme="light"] .wiz-tbl tr:nth-child(even) td{background:rgba(230,238,252,.3);}
 [data-theme="light"] #import-wiz{background:#e4eaf5;border-color:rgba(30,50,100,.18);}
 [data-theme="light"] .wiz-tbl th{background:rgba(220,232,248,.9);color:#1e3a6a;}
-[data-theme="light"] #import-hist-panel{background:#e4eaf5;border-color:rgba(30,50,100,.18);box-shadow:0 20px 60px rgba(30,50,100,.2);}
+[data-theme="light"] #import-hist-panel{background:#e4eaf5 !important;border-color:rgba(30,50,100,.18) !important;box-shadow:0 20px 60px rgba(30,50,100,.2) !important;}
 [data-theme="light"] .wiz-hdr{border-bottom-color:rgba(30,50,100,.14);}
 [data-theme="light"] .wiz-steps{border-bottom-color:rgba(30,50,100,.14);}
 [data-theme="light"] .wiz-ftr{border-top-color:rgba(30,50,100,.14);}
@@ -3866,7 +3866,7 @@ body.dash-compact .table-card{margin-bottom:10px}
   .kpi-grid { grid-template-columns: repeat(auto-fill, minmax(128px,1fr)); gap: 10px; }
   .smart-grid { grid-template-columns: repeat(auto-fill, minmax(172px,1fr)); gap: 10px; }
   .analytics-chart-row { grid-template-columns: 1fr; }
-  .alper-stats { grid-template-columns: repeat(auto-fill, minmax(118px,1fr)); }
+  .mgmt-stats { grid-template-columns: repeat(auto-fill, minmax(118px,1fr)); }
 }
 
 /* 768 — tablet portrait: two-column forms, stack charts */
@@ -4057,7 +4057,7 @@ tbody tr[onclick] { cursor: pointer; }
     <button class="nav active" id="nb-dash" onclick="goto('dash')"><span class="ni">📊</span>Dashboard</button>
     <button class="nav" id="nb-pay" onclick="goto('pay')"><span class="ni">💳</span>Tüm Ödemeler</button>
     <button class="nav" id="nb-exp" onclick="goto('exp')"><span class="ni">💸</span>Tüm Giderler</button>
-    <button class="nav" id="nb-alper" onclick="goto('alper')"><span class="ni">🤝</span>Yönetim Hesabı</button>
+    <button class="nav" id="nb-mgmt" onclick="goto('mgmt')"><span class="ni">🤝</span>Yönetim Hesabı</button>
     <button class="nav" id="nb-charts" onclick="goto('charts')"><span class="ni">📈</span>Grafikler</button>
     <button class="nav" id="nb-wa" onclick="goto('wa')"><span class="ni">💬</span>WhatsApp</button>
     <button class="nav" id="nb-rep" onclick="goto('rep')"><span class="ni">📄</span>Raporlar</button>
@@ -4219,7 +4219,7 @@ function buildAllMonths(extra){
         else if(k&&typeof o[k]==='object') scan(o[k]);
       });};
       scan(DATA.payments);scan(DATA.expenses);
-      scan(DATA.alper);scan(DATA.tanNet);scan(DATA.gayNet);
+      scan(DATA.mgmt);scan(DATA.tanNet);scan(DATA.gayNet);
     }
   }catch(e){}
   if(extra) extra.forEach(m=>{if(m&&typeof m==='string') set.add(m);});
@@ -4245,13 +4245,23 @@ let _lastExpTur='';      // persists last expense category across modal opens
 // USERS (multi-user with PIN)
 // ═══════════════════════════════════════════════
 const DEFAULT_USERS=[
-  {id:'admin', name:'Yönetici',  role:'admin',   pin:'1234', color:'#4a8af4', avatar:'Y'},
-  {id:'mudur', name:'Müdür',     role:'manager', pin:'5678', color:'#7b6cf6', avatar:'M'},
-  {id:'gorucu',name:'Görüntüleyici', role:'viewer', pin:'9999', color:'#06d6a0', avatar:'G'},
+  {id:'admin', name:'Yönetici',  role:'admin',   color:'#4a8af4', avatar:'Y'},
+  {id:'mudur', name:'Müdür',     role:'manager', color:'#7b6cf6', avatar:'M'},
+  {id:'gorucu',name:'Görüntüleyici', role:'viewer', color:'#06d6a0', avatar:'G'},
 ];
 let USERS=[];
 let currentUser=null;
 let loginSelectedUser=null;
+
+// B1: PIN rate-limiting state (in-memory; intentionally resets on app restart)
+const _pinAttempts={};      // { uid: { count, lockUntil } }
+const PIN_MAX_ATTEMPTS=3;
+const PIN_LOCKOUT_MS=30000; // 30 seconds
+let   _lockoutTimer=null;
+
+// CH-1: Inactivity auto-logout state (in-memory; resets on app restart)
+const IDLE_TIMEOUT_MS=30*60*1000; // 30 minutes
+let   _idleTimer=null;
 
 // ═══════════════════════════════════════════════
 // DATA
@@ -4262,7 +4272,7 @@ const BASE_EXPENSES={'BINA1':{'Ocak 2025':[{tur:'ELEKTRİK',no:'',tutar:2000,tar
 const BASE_TENANTS={'BINA1':[{id:'D1',unit:'D1',fl:'1.KAT',name:'Demo Kiracı 1',rent:20000,dep:20000,bas:'2025-01-01',bit:'',gun:1,sekil:'',active:true,notes:'',phone:''},{id:'D2',unit:'D2',fl:'2.KAT',name:'Demo Kiracı 2',rent:18000,dep:18000,bas:'2025-01-01',bit:'',gun:1,sekil:'',active:true,notes:'',phone:''}],'BINA2':[{id:'D3',unit:'D1',fl:'',name:'Demo Kiracı 3',rent:18000,dep:18000,bas:'2025-01-01',bit:'',gun:1,sekil:'',active:true,notes:'',phone:''}],'BINA3':[{id:'D4',unit:'D1',fl:'',name:'Demo Kiracı 4',rent:15000,dep:15000,bas:'2025-01-01',bit:'',gun:1,sekil:'',active:true,notes:'',phone:''}]};
 
 // ── Alper table (demo) ───────────────────────────────────
-const BASE_ALPER={
+const BASE_MGMT={
   'Ocak 2025':  {net:30000, col:38000, exp:8000},
 };
 
@@ -4287,7 +4297,7 @@ function initData(){
       tenants:   JSON.parse(JSON.stringify(BASE_TENANTS)),
       payments:  JSON.parse(JSON.stringify(BASE_PAYMENTS)),
       expenses:  JSON.parse(JSON.stringify(BASE_EXPENSES)),
-      alper:     JSON.parse(JSON.stringify(BASE_ALPER)),
+      mgmt:      JSON.parse(JSON.stringify(BASE_MGMT)),
       tanNet:    JSON.parse(JSON.stringify(BASE_TANNET)),
       gayNet:    JSON.parse(JSON.stringify(BASE_GAYNET)),
       history:   [],
@@ -4308,7 +4318,7 @@ function initData(){
     tenants:   {},
     payments:  {},
     expenses:  {},
-    alper:     {},
+    mgmt:      {},
     tanNet:    {},
     gayNet:    {},
     history:   [],
@@ -4349,7 +4359,8 @@ function loadLocal(){
     if(p.tenants)  DATA.tenants  = p.tenants;
     if(p.payments) DATA.payments = p.payments;
     if(p.expenses) DATA.expenses = p.expenses;
-    if(p.alper)    DATA.alper    = p.alper;
+    if(p.alper !== undefined && p.mgmt === undefined) p.mgmt = p.alper; // compat: key renamed alper→mgmt in v6.1
+    if(p.mgmt)     DATA.mgmt     = p.mgmt;
     if(p.tanNet)   DATA.tanNet   = p.tanNet;
     if(p.gayNet)   DATA.gayNet   = p.gayNet;
     if(p.history)         DATA.history         = p.history;
@@ -4445,7 +4456,7 @@ async function cloudSync(dir='push'){
     if(dir==='push'){
       const payload = {
         tenants:DATA.tenants, payments:DATA.payments,
-        expenses:DATA.expenses, alper:DATA.alper,
+        expenses:DATA.expenses, mgmt:DATA.mgmt,
         history:DATA.history, waLog:DATA.waLog,
         users:DATA.users, settings:DATA.settings
       };
@@ -4482,7 +4493,8 @@ async function cloudSync(dir='push'){
       if(d.tenants)  DATA.tenants  = d.tenants;
       if(d.payments) DATA.payments = d.payments;
       if(d.expenses) DATA.expenses = d.expenses;
-      if(d.alper)    DATA.alper    = d.alper;
+      if(d.alper !== undefined && d.mgmt === undefined) d.mgmt = d.alper; // compat: renamed alper→mgmt in v6.1
+      if(d.mgmt)     DATA.mgmt     = d.mgmt;
       if(d.history)  DATA.history  = d.history;
       if(d.waLog)    DATA.waLog    = d.waLog;
       // Don't overwrite local users from server — use server /users endpoint
@@ -4597,7 +4609,7 @@ var STRINGS={
     obCloud:        '☁️ Bulut verisini yükle',
     // Navigation
     navGeneral:'Genel',navBuildings:'Binalar',navTools:'Araçlar',
-    navPay:'Tüm Ödemeler',navExp:'Tüm Giderler',navAlper:'Yönetim Hesabı',
+    navPay:'Tüm Ödemeler',navExp:'Tüm Giderler',navMgmt:'Yönetim Hesabı',
     navCharts:'Grafikler',navRep:'Raporlar',navHist:'Geçmiş',navViz:'3D Görünüm',
     navWA:'WhatsApp',navCloud:'Bulut Sync',navUsers:'Kullanıcılar',
     navImport:'İçe Aktar',navImportHist:'Import Geçmişi',navSettings:'Ayarlar',
@@ -4613,7 +4625,7 @@ var STRINGS={
     statusPaid:'Ödendi',statusPartial:'Kısmi',statusUnpaid:'Ödenmedi',statusVacant:'BOŞ',
     // Page titles
     pageDash:'📊 Dashboard',pagePay:'💳 Tüm Ödemeler',pageExp:'💸 Tüm Giderler',
-    pageAlper:'🤝 Yönetim Hesabı',pageCharts:'📈 Grafikler',pageWA:'💬 WhatsApp',
+    pageMgmt:'🤝 Yönetim Hesabı',pageCharts:'📈 Grafikler',pageWA:'💬 WhatsApp',
     pageRep:'📄 Raporlar',pageHist:'🕐 Geçmiş',pageViz:'🌐 3D Görünüm',
     // Dashboard
     dashBldSummary:'🏢 Bina Özeti',dashOverdue:'⚠️ Gecikmiş Ödemeler',
@@ -4652,13 +4664,13 @@ var STRINGS={
     // Month bar
     monthBarPrev:'Önceki ay',monthBarNext:'Sonraki ay',monthBarRegion:'Dönem seçici',
     // Alper page
-    alperHeroTitle:'🤝 Yönetim Hesabı',alperHeroDesc:'Kiracılardan tahsil edilen kiralar ve operasyonel giderler bu hesapta izlenir.',
-    alperAccumulated:'Toplam Birikmiş',alperCollection:'Toplam Tahsilat',alperMonthCount:'Ay',
-    alperMonthlyTable:'📅 Aylık Borç Tablosu',colNetDebt:'Net Borç',colMonth:'Ay',colRate:'Kur',
-    alperForeignNet:'📊 Döviz Net Geliri',colNetTL:'Net (TL)',colNetEur:'Net (€)',
-    alperAddMonth:'+ Ay',
+    mgmtHeroTitle:'🤝 Yönetim Hesabı',mgmtHeroDesc:'Kiracılardan tahsil edilen kiralar ve operasyonel giderler bu hesapta izlenir.',
+    mgmtAccumulated:'Toplam Birikmiş',mgmtCollection:'Toplam Tahsilat',mgmtMonthCount:'Ay',
+    mgmtMonthlyTable:'📅 Aylık Borç Tablosu',colNetDebt:'Net Borç',colMonth:'Ay',colRate:'Kur',
+    mgmtForeignNet:'📊 Döviz Net Geliri',colNetTL:'Net (TL)',colNetEur:'Net (€)',
+    mgmtAddMonth:'+ Ay',
     // Charts
-    chartsCount:'Grafik',chartAlperMonthly:'📈 Yönetim Hesabı Aylık Net',
+    chartsCount:'Grafik',chartMgmtMonthly:'📈 Yönetim Hesabı Aylık Net',
     chartBldCollection:'🏢 Bina Tahsilat',chartForeignNet:'📉 Döviz Net Geliri',
     chartPayStatus:'💳 Ödeme Durumu',chartNetDebt:'Net Borç',
     // WA page
@@ -4691,7 +4703,7 @@ var STRINGS={
     analyticsMonthly:'Aylık',analyticsYearly:'Yıllık',analyticsCompare:'Karşılaştırma',
     analyticsHeatmap:'Isı Haritası',analyticsNav:'◗Analitik',
     chartMonthlyTitle:'Tahsilat vs Gider',chartPayDist:'Ödeme Durumu Dağılımı',
-    chartYearlyTrend:'Yıllık Tahsilat Trendi',chartAlperNet:'Aylık Net Gelir (Yönetim Hesabı)',
+    chartYearlyTrend:'Yıllık Tahsilat Trendi',chartMgmtNet:'Aylık Net Gelir (Yönetim Hesabı)',
     chartBldCompare:'Bina Karşılaştırması',chartHeatmap:'📊 Tahsilat Isı Haritası — Son 12 Ay',
     // Settings
     settingsTitle:'⚙️ Ayarlar',settingsAutoSave:'Otomatik Kayıt',
@@ -4701,7 +4713,7 @@ var STRINGS={
     settingsResetAll:'🗑 Tüm Verileri Sıfırla',settingsDevTools:'🛠 Geliştirici Test Araçları',
     settingsDevDesc:'Stres testi için demo veri. Müşteri iş akışına dahil değildir.',
     settingsDemoSeed:'🌱 Demo Veri Oluştur',settingsDemoClear:'🧹 Demo Veriyi Temizle',
-    settingsSaved:'✅ Ayarlar kaydedildi',settingsCurrency:'Para Birimi',
+    settingsSaved:'✅ Ayarlar kaydedildi',settingsCurrency:'Para Birimi',settingsLang:'Dil',
     save:'💾 Kaydet',saved:'Güncellendi',
     // Sync bar
     syncConnected:'Bulut Bağlı',syncOffline:'Bağlantı Yok',syncLast:'Son sync:',syncUnknown:'Bilinmiyor',
@@ -4736,6 +4748,7 @@ var STRINGS={
     usersRoleLabel:'Rol',usersPinLabel:'PIN (4-6 rakam) *',usersColorLabel:'Renk',
     usersAddBtn:'✅ Ekle',usersPinChange:'🔑 PIN Değiştir',
     usersPinNew:'Yeni PIN (4-6 rakam)',usersPinRepeat:'PIN Tekrar',
+    usersPinEditLabel:'Yeni PIN (boş=değişmez)',usersPinMinHint:'min 4 hane',
     usersFooter:'👑 Admin: tam erişim &nbsp;|&nbsp; 🔑 Editor: veri girişi &nbsp;|&nbsp; 👁 Görüntüleyici: okuma',
     usersOwnOnly:'(sadece kendi profilinizi düzenleyebilirsiniz)',
     usersNoPermission:'⚠️ Bu işlem için yetkiniz yok',
@@ -4770,7 +4783,7 @@ var STRINGS={
     // Settings modals
     resetDataTitle:'🗑 Tüm Verileri Sıfırla',restoreTitle:'↩ Yedekten Geri Yükle',
     // Alper month modal
-    alperMonthEditTitle:'✏️ Ay Düzenle',alperMonthNewTitle:'➕ Yeni Ay Ekle',
+    mgmtMonthEditTitle:'✏️ Ay Düzenle',mgmtMonthNewTitle:'➕ Yeni Ay Ekle',
     // Misc
     bldNotFound:'❌ Bina bulunamadı',unknownOp:'⚠️ Bilinmeyen İşlem',
     errMinChars:'❌ En az 2 karakter gereklidir.',
@@ -4788,6 +4801,8 @@ var STRINGS={
     nameRequired:'❌ İsim zorunlu',
     pinEmpty:'❌ PIN boş olamaz',pinInvalid:'❌ Geçersiz PIN (4-6 rakam, sadece sayı)',
     pinMismatch:'❌ PIN tekrarı eşleşmiyor',pinUpdated:'🔑 PIN güncellendi',
+    pinLocked:'🔒 Hesap kilitlendi. {n} sn.',pinAttemptsLeft:'{n} hak kaldı',
+    idleLogout:'⏱ Güvenlik nedeniyle oturumunuz kapatıldı.',
     userActivated:'✅ Aktifleştirildi',userDeactivated:'⏸ Pasif yapıldı',
     userDeleted:'Kullanıcı silindi',
     jsonLoaded:'✅ Veri yüklendi',jsonError:'❌ JSON formatı hatalı',
@@ -4818,7 +4833,7 @@ var STRINGS={
     supaServerNewer:'⚠️ Sunucu daha yeni. Önce Pull yapın.',
     supaPullFailed:'❌ Pull birleştirme başarısız: ',supaNoPush:'ℹ️ Sunucuda veri yok — önce Push yapın',
     // Alper
-    alperMonthRequired:'❌ Ay seçilmedi',alperMonthAdded:'✅ eklendi',alperMonthUpdated:'✅ güncellendi',
+    mgmtMonthRequired:'❌ Ay seçilmedi',mgmtMonthAdded:'✅ eklendi',mgmtMonthUpdated:'✅ güncellendi',
     // WA
     waSaveLog:'📝 Kayıt edildi',waOpened:'💬 WhatsApp açıldı',
     // Chart empty
@@ -4951,7 +4966,7 @@ var STRINGS={
     bldAdded:'✅ Bina eklendi: ',expSavedRepeat:'✅ Gider eklendi — tekrar girin',
     expDeleted:'🗑 Gider silindi',phoneSaved:'📱 Telefon kaydedildi',
     dashPrefSaved:'✅ Panel tercihleri kaydedildi',
-    deleteConfirm:'⚠️ Evet, sil',alperDeleted:'silindi',
+    deleteConfirm:'⚠️ Evet, sil',mgmtDeleted:'silindi',
     // Smart Import Wizard i18n
     wizStepFile:'Dosya',wizStepConfig:'Yapılandır',wizStepPreview:'Önizleme',wizStepMap:'Eşleştir',wizStepValidate:'Doğrula',wizStepConfirm:'Onayla',
     wizNavBack:'← Geri',wizFileWaiting:'Dosya yükleyince ilerler',
@@ -5037,7 +5052,7 @@ var STRINGS={
     obCloud:        '☁️ Load cloud data',
     // Navigation
     navGeneral:'General',navBuildings:'Buildings',navTools:'Tools',
-    navPay:'All Payments',navExp:'All Expenses',navAlper:'Mgmt Account',
+    navPay:'All Payments',navExp:'All Expenses',navMgmt:'Mgmt Account',
     navCharts:'Charts',navRep:'Reports',navHist:'History',navViz:'3D View',
     navWA:'WhatsApp',navCloud:'Cloud Sync',navUsers:'Users',
     navImport:'Import',navImportHist:'Import History',navSettings:'Settings',
@@ -5053,7 +5068,7 @@ var STRINGS={
     statusPaid:'Paid',statusPartial:'Partial',statusUnpaid:'Unpaid',statusVacant:'VACANT',
     // Page titles
     pageDash:'📊 Dashboard',pagePay:'💳 All Payments',pageExp:'💸 All Expenses',
-    pageAlper:'🤝 Mgmt Account',pageCharts:'📈 Charts',pageWA:'💬 WhatsApp',
+    pageMgmt:'🤝 Mgmt Account',pageCharts:'📈 Charts',pageWA:'💬 WhatsApp',
     pageRep:'📄 Reports',pageHist:'🕐 History',pageViz:'🌐 3D View',
     // Dashboard
     dashBldSummary:'🏢 Building Summary',dashOverdue:'⚠️ Overdue Payments',
@@ -5092,13 +5107,13 @@ var STRINGS={
     // Month bar
     monthBarPrev:'Previous month',monthBarNext:'Next month',monthBarRegion:'Period selector',
     // Alper page
-    alperHeroTitle:'🤝 Mgmt Account',alperHeroDesc:'Rents collected from tenants and operational expenses are tracked here.',
-    alperAccumulated:'Total Accumulated',alperCollection:'Total Collection',alperMonthCount:'Months',
-    alperMonthlyTable:'📅 Monthly Debt Table',colNetDebt:'Net Debt',colMonth:'Month',colRate:'Rate',
-    alperForeignNet:'📊 Foreign Currency Net',colNetTL:'Net (TL)',colNetEur:'Net (€)',
-    alperAddMonth:'+ Month',
+    mgmtHeroTitle:'🤝 Mgmt Account',mgmtHeroDesc:'Rents collected from tenants and operational expenses are tracked here.',
+    mgmtAccumulated:'Total Accumulated',mgmtCollection:'Total Collection',mgmtMonthCount:'Months',
+    mgmtMonthlyTable:'📅 Monthly Debt Table',colNetDebt:'Net Debt',colMonth:'Month',colRate:'Rate',
+    mgmtForeignNet:'📊 Foreign Currency Net',colNetTL:'Net (TL)',colNetEur:'Net (€)',
+    mgmtAddMonth:'+ Month',
     // Charts
-    chartsCount:'Charts',chartAlperMonthly:'📈 Mgmt Account Monthly Net',
+    chartsCount:'Charts',chartMgmtMonthly:'📈 Mgmt Account Monthly Net',
     chartBldCollection:'🏢 Building Collection',chartForeignNet:'📉 Foreign Currency Net',
     chartPayStatus:'💳 Payment Status',chartNetDebt:'Net Debt',
     // WA page
@@ -5131,7 +5146,7 @@ var STRINGS={
     analyticsMonthly:'Monthly',analyticsYearly:'Yearly',analyticsCompare:'Comparison',
     analyticsHeatmap:'Heatmap',analyticsNav:'◗Analytics',
     chartMonthlyTitle:'Collection vs Expenses',chartPayDist:'Payment Status Distribution',
-    chartYearlyTrend:'Yearly Collection Trend',chartAlperNet:'Monthly Net Income (Mgmt Account)',
+    chartYearlyTrend:'Yearly Collection Trend',chartMgmtNet:'Monthly Net Income (Mgmt Account)',
     chartBldCompare:'Building Comparison',chartHeatmap:'📊 Collection Heatmap — Last 12 Months',
     // Settings
     settingsTitle:'⚙️ Settings',settingsAutoSave:'Auto Save',
@@ -5141,7 +5156,7 @@ var STRINGS={
     settingsResetAll:'🗑 Reset All Data',settingsDevTools:'🛠 Developer Test Tools',
     settingsDevDesc:'Demo data for stress testing. Not part of customer workflow.',
     settingsDemoSeed:'🌱 Generate Demo Data',settingsDemoClear:'🧹 Clear Demo Data',
-    settingsSaved:'✅ Settings saved',settingsCurrency:'Currency',
+    settingsSaved:'✅ Settings saved',settingsCurrency:'Currency',settingsLang:'Language',
     save:'💾 Save',saved:'Saved',
     // Sync bar
     syncConnected:'Cloud Connected',syncOffline:'No Connection',syncLast:'Last sync:',syncUnknown:'Unknown',
@@ -5176,6 +5191,7 @@ var STRINGS={
     usersRoleLabel:'Role',usersPinLabel:'PIN (4-6 digits) *',usersColorLabel:'Color',
     usersAddBtn:'✅ Add',usersPinChange:'🔑 Change PIN',
     usersPinNew:'New PIN (4-6 digits)',usersPinRepeat:'Confirm PIN',
+    usersPinEditLabel:'New PIN (blank=unchanged)',usersPinMinHint:'min 4 digits',
     usersFooter:'👑 Admin: full access &nbsp;|&nbsp; 🔑 Editor: data entry &nbsp;|&nbsp; 👁 Viewer: read only',
     usersOwnOnly:'(you can only edit your own profile)',
     usersNoPermission:'⚠️ You do not have permission for this action',
@@ -5210,7 +5226,7 @@ var STRINGS={
     // Settings modals
     resetDataTitle:'🗑 Reset All Data',restoreTitle:'↩ Restore from Backup',
     // Alper month modal
-    alperMonthEditTitle:'✏️ Edit Month',alperMonthNewTitle:'➕ New Month',
+    mgmtMonthEditTitle:'✏️ Edit Month',mgmtMonthNewTitle:'➕ New Month',
     // Misc
     bldNotFound:'❌ Building not found',unknownOp:'⚠️ Unknown Operation',
     errMinChars:'❌ Minimum 2 characters required.',
@@ -5228,6 +5244,8 @@ var STRINGS={
     nameRequired:'❌ Name is required',
     pinEmpty:'❌ PIN cannot be empty',pinInvalid:'❌ Invalid PIN (4-6 digits, numbers only)',
     pinMismatch:'❌ PIN confirmation does not match',pinUpdated:'🔑 PIN updated',
+    pinLocked:'🔒 Locked for {n}s.',pinAttemptsLeft:'{n} left',
+    idleLogout:'⏱ Session closed due to inactivity.',
     userActivated:'✅ Activated',userDeactivated:'⏸ Deactivated',
     userDeleted:'User deleted',
     jsonLoaded:'✅ Data loaded',jsonError:'❌ Invalid JSON format',
@@ -5258,7 +5276,7 @@ var STRINGS={
     supaServerNewer:'⚠️ Server is newer. Pull first.',
     supaPullFailed:'❌ Pull merge failed: ',supaNoPush:'ℹ️ No data on server — Push first',
     // Alper
-    alperMonthRequired:'❌ Month not selected',alperMonthAdded:'✅ added',alperMonthUpdated:'✅ updated',
+    mgmtMonthRequired:'❌ Month not selected',mgmtMonthAdded:'✅ added',mgmtMonthUpdated:'✅ updated',
     // WA
     waSaveLog:'📝 Logged',waOpened:'💬 WhatsApp opened',
     // Chart empty
@@ -5391,7 +5409,7 @@ var STRINGS={
     bldAdded:'✅ Building added: ',expSavedRepeat:'✅ Expense added — enter again',
     expDeleted:'🗑 Expense deleted',phoneSaved:'📱 Phone saved',
     dashPrefSaved:'✅ Panel preferences saved',
-    deleteConfirm:'⚠️ Yes, delete',alperDeleted:'deleted',
+    deleteConfirm:'⚠️ Yes, delete',mgmtDeleted:'deleted',
     // Smart Import Wizard i18n
     wizStepFile:'File',wizStepConfig:'Configure',wizStepPreview:'Preview',wizStepMap:'Map',wizStepValidate:'Validate',wizStepConfirm:'Confirm',
     wizNavBack:'← Back',wizFileWaiting:'Upload a file to continue',
@@ -5541,7 +5559,7 @@ function refreshUIText(){
   // Sidebar nav items (icons preserved via innerHTML rebuild)
   var navRebuild={
     'nb-pay':  ['💳',t('navPay')], 'nb-exp':  ['💸',t('navExp')],
-    'nb-alper':['🤝',t('navAlper')],'nb-charts':['📈',t('navCharts')],
+    'nb-mgmt':['🤝',t('navMgmt')],'nb-charts':['📈',t('navCharts')],
     'nb-wa':   ['💬',t('navWA')],  'nb-rep':   ['📄',t('navRep')],
     'nb-hist': ['🕐',t('navHist')],'nb-viz':   ['🌐',t('navViz')],
     'nb-cloud':['🔄',t('navCloud')],'nb-users': ['👥',t('navUsers')],
@@ -5584,8 +5602,8 @@ function refreshUIText(){
   if(typeof S!=='undefined'&&S&&S.page){
     var _tbTitle=document.getElementById('topbar-title');
     if(_tbTitle){
-      var _pIcon={pay:'💳 ',exp:'💸 ',alper:'🤝 ',charts:'📈 ',wa:'💬 ',rep:'📄 ',hist:'🕐 ',viz:'🌐 '};
-      var _pNav ={pay:'navPay',exp:'navExp',alper:'navAlper',charts:'navCharts',wa:'navWA',rep:'navRep',hist:'navHist',viz:'navViz'};
+      var _pIcon={pay:'💳 ',exp:'💸 ',mgmt:'🤝 ',charts:'📈 ',wa:'💬 ',rep:'📄 ',hist:'🕐 ',viz:'🌐 ',analytics:''};
+      var _pNav ={pay:'navPay',exp:'navExp',mgmt:'navMgmt',charts:'navCharts',wa:'navWA',rep:'navRep',hist:'navHist',viz:'navViz',analytics:'analyticsNav'};
       if(_pNav[S.page]) _tbTitle.textContent=(_pIcon[S.page]||'')+t(_pNav[S.page]);
     }
   }
@@ -5654,30 +5672,139 @@ function selectUser(uid){
   setTimeout(()=>document.getElementById('pin-inp').focus(),100);
 }
 
-function checkPin(){
+// ── Security helpers ─────────────────────────────────────────────────────────
+async function _hashPin(pin){
+  const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(String(pin)));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+function _esc(s){
+  return String(s==null?'':s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// B3: PBKDF2 PIN hashing — stronger than bare SHA-256; per-user salt prevents precomputation
+async function _hashPinV2(pin,salt){
+  const enc=new TextEncoder();
+  const key=await crypto.subtle.importKey('raw',enc.encode(String(pin)),'PBKDF2',false,['deriveBits']);
+  const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt:enc.encode(String(salt)),iterations:100000,hash:'SHA-256'},key,256);
+  return Array.from(new Uint8Array(bits)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+function _genSalt(){
+  return Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+// B1: Rate-limiting helpers
+function _getPinAttempts(uid){if(!_pinAttempts[uid])_pinAttempts[uid]={count:0,lockUntil:0};return _pinAttempts[uid];}
+function _isLockedOut(uid){const s=_getPinAttempts(uid);return s.lockUntil>0&&Date.now()<s.lockUntil;}
+function _resetAttempts(uid){const s=_getPinAttempts(uid);s.count=0;s.lockUntil=0;}
+function _recordFailedAttempt(uid){const s=_getPinAttempts(uid);s.count++;if(s.count>=PIN_MAX_ATTEMPTS)s.lockUntil=Date.now()+PIN_LOCKOUT_MS;}
+function _showLockout(uid){
+  if(_lockoutTimer){clearInterval(_lockoutTimer);_lockoutTimer=null;}
+  const el=document.getElementById('login-err');
+  if(!el) return;
+  function tick(){
+    const s=_pinAttempts[uid];
+    if(!s||!s.lockUntil||Date.now()>=s.lockUntil){
+      el.textContent='';
+      clearInterval(_lockoutTimer);_lockoutTimer=null;
+      _resetAttempts(uid);
+      return;
+    }
+    el.textContent=t('pinLocked').replace('{n}',Math.ceil((s.lockUntil-Date.now())/1000));
+  }
+  tick();
+  _lockoutTimer=setInterval(tick,1000);
+}
+
+// CH-1: Inactivity auto-logout helpers
+function _resetIdleTimer(){
+  if(!currentUser) return;
+  if(_idleTimer) clearTimeout(_idleTimer);
+  _idleTimer=setTimeout(_idleLogout,IDLE_TIMEOUT_MS);
+}
+function _idleLogout(){
+  if(!currentUser) return;
+  saveLocal();
+  closeMod();
+  closePanel();
+  logout();
+  const _el=document.getElementById('login-err');
+  if(_el){
+    _el.textContent=t('idleLogout');
+    setTimeout(function(){if(_el.textContent===t('idleLogout'))_el.textContent='';},5000);
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function checkPin(){
   const inp=document.getElementById('pin-inp');
   if(!inp) return;
   const val=inp.value;
   if(val.length<4) return;
   if(!loginSelectedUser){
-    // Guard: user selection lost — re-render login to recover
     console.warn('[BOOT] checkPin called with null loginSelectedUser — re-rendering login');
     renderLogin();
     return;
   }
-  if(val===loginSelectedUser.pin){
+
+  // B1: Reject immediately if account is locked; show countdown and abort
+  const uid=loginSelectedUser.id;
+  if(_isLockedOut(uid)){
+    _showLockout(uid);
+    inp.value='';
+    return;
+  }
+
+  // B3: Verify using whichever credential is stored, newest first
+  let verified=false, needsUpgrade=false;
+  if(loginSelectedUser.pin_hash_v2&&loginSelectedUser.pin_salt){
+    // PBKDF2 (current standard)
+    verified=(await _hashPinV2(val,loginSelectedUser.pin_salt))===loginSelectedUser.pin_hash_v2;
+  } else if(loginSelectedUser.pin_hash){
+    // SHA-256 (legacy) — upgrade to PBKDF2 on success
+    verified=(await _hashPin(val))===loginSelectedUser.pin_hash;
+    if(verified) needsUpgrade=true;
+  } else if(loginSelectedUser.pin!==undefined){
+    // Plaintext (very legacy) — upgrade to PBKDF2 on success
+    verified=(val===loginSelectedUser.pin);
+    if(verified) needsUpgrade=true;
+  }
+
+  if(verified){
+    // B3: Transparently upgrade legacy credential to PBKDF2
+    if(needsUpgrade){
+      const salt=_genSalt();
+      loginSelectedUser.pin_hash_v2=await _hashPinV2(val,salt);
+      loginSelectedUser.pin_salt=salt;
+      delete loginSelectedUser.pin_hash;
+      delete loginSelectedUser.pin;
+      saveLocal();
+    }
+    // B1: Successful login clears any accumulated failures
+    _resetAttempts(uid);
+    if(_lockoutTimer){clearInterval(_lockoutTimer);_lockoutTimer=null;}
     currentUser=loginSelectedUser;
     __boot('login','user: '+loginSelectedUser.id);
     document.getElementById('login-screen').style.display='none';
     initApp();
   } else {
-    document.getElementById('login-err').textContent=t('pinError');
+    // B1: Record failure; show lockout or remaining-attempts hint
+    _recordFailedAttempt(uid);
+    if(_isLockedOut(uid)){
+      _showLockout(uid);
+    } else {
+      const remaining=PIN_MAX_ATTEMPTS-_getPinAttempts(uid).count;
+      const el=document.getElementById('login-err');
+      el.textContent=t('pinError')+(remaining>0?'  '+t('pinAttemptsLeft').replace('{n}',remaining):'');
+      setTimeout(()=>{if(el.textContent&&!el.textContent.startsWith('🔒'))el.textContent='';},2000);
+    }
     inp.value='';
-    setTimeout(()=>document.getElementById('login-err').textContent='',2000);
   }
 }
 
 function logout(){
+  if(_idleTimer){clearTimeout(_idleTimer);_idleTimer=null;}
   currentUser=null;
   document.getElementById('login-screen').style.display='flex';
   document.getElementById('pin-wrap').style.display='none';
@@ -5794,7 +5921,7 @@ function renderBuildingNav(){
       const safeId=b.id.replace(/'/g,"\\'");
       const kebab=canEdit()?`<span class="bld-kebab" onclick="event.stopPropagation();showBldMenu('${safeId}',this)" title="${t('bldOptionsTitle')}">⋮</span>`:'';
       return `<button class="nav" id="nb-${did}" onclick="goto('bld','${safeId}')">` +
-             `<span class="ni">🏢</span>${b.name}` +
+             `<span class="ni">🏢</span>${_esc(b.name)}` +
              `<span class="nbadge" id="bdg-${did}" style="display:none">0</span>` +
              kebab+
              `</button>`;
@@ -5883,7 +6010,7 @@ function needsOnboarding(){
   if(!DATA.initialized) return true;
   // Recovery: initialized flag set but data is inconsistent
   const hasBuilding=(DATA.buildings||[]).some(b=>b.active);
-  const hasAdmin=(DATA.users||[]).some(u=>u.role==='admin'&&u.pin);
+  const hasAdmin=(DATA.users||[]).some(u=>u.role==='admin'&&(u.pin||u.pin_hash));
   return !hasBuilding||!hasAdmin;
 }
 
@@ -6109,7 +6236,7 @@ async function _obCloudFetch(){
   }
 }
 
-function obCommit(){
+async function obCommit(){
   const bldName=(document.getElementById('ob-bld')?.value||'').trim();
   const err=document.getElementById('ob-err2');
   if(!_obPin||_obPin.length<4){ if(err) err.textContent=t('obErrPinInvalid'); return; }
@@ -6122,13 +6249,15 @@ function obCommit(){
   const bldShort=bldName.split(/\s+/).map(w=>w.replace(/[^a-zA-ZğüşöçıĞÜŞÖÇİ]/gi,'')[0]||'')
     .join('').toUpperCase().slice(0,3) || bldName.replace(/[^a-zA-Z]/g,'').toUpperCase().slice(0,3) || 'BLD';
 
+  const adminPinHash=await _hashPin(_obPin);
+
   // Single mutation point — all DATA writes happen here
   DATA.initialized=true;
   DATA.buildings=[{id:bldId,name:bldName,short:bldShort,color:'',active:true,order:0,metadata:{}}];
   DATA.tenants[bldId]=[];
   DATA.payments[bldId]={};
   DATA.expenses[bldId]=[];
-  DATA.users=[{id:'admin',name:adminName,role:'admin',pin:_obPin,color:'#4a8af4',avatar:adminAvatar}];
+  DATA.users=[{id:'admin',name:adminName,role:'admin',pin_hash:adminPinHash,color:'#4a8af4',avatar:adminAvatar}];
   _obPin=''; _obName=''; // clear transients immediately
 
   syncBuildingConstants();
@@ -6145,13 +6274,13 @@ function obCommit(){
 function goto(page,bld){
   S.page=page; S.bld=bld||null; S.search='';
   document.querySelectorAll('.nav').forEach(n=>n.classList.remove('active'));
-  const idMap={dash:'nb-dash',pay:'nb-pay',exp:'nb-exp',alper:'nb-alper',
+  const idMap={dash:'nb-dash',pay:'nb-pay',exp:'nb-exp',mgmt:'nb-mgmt',
     charts:'nb-charts',wa:'nb-wa',rep:'nb-rep',hist:'nb-hist',viz:'nb-viz',
     bld:bld?'nb-'+bldDomId(bld):''};
   const el=document.getElementById(idMap[page]);
   if(el) el.classList.add('active');
   const titles={dash:t('pageDash'),pay:t('pagePay'),exp:t('pageExp'),
-    alper:t('pageAlper'),charts:t('pageCharts'),wa:t('pageWA'),
+    mgmt:t('pageMgmt'),charts:t('pageCharts'),wa:t('pageWA'),
     rep:t('pageRep'),hist:t('pageHist'),viz:t('pageViz'),
     bld:'🏢 '+(BL[bld]||bld)};
   const ptEl=document.getElementById('topbar-title');
@@ -6183,13 +6312,13 @@ function gotoFiltered(page,filter,bld){
   S.search='';
   S.filter=filter||'';
   document.querySelectorAll('.nav').forEach(n=>n.classList.remove('active'));
-  const idMap={dash:'nb-dash',pay:'nb-pay',exp:'nb-exp',alper:'nb-alper',
+  const idMap={dash:'nb-dash',pay:'nb-pay',exp:'nb-exp',mgmt:'nb-mgmt',
     charts:'nb-charts',wa:'nb-wa',rep:'nb-rep',hist:'nb-hist',viz:'nb-viz',
     bld:bld?'nb-'+bldDomId(bld):''};
   const el=document.getElementById(idMap[page]);
   if(el) el.classList.add('active');
   const titles={dash:window.t('pageDash'),pay:window.t('pagePay'),exp:window.t('pageExp'),
-    alper:window.t('pageAlper'),charts:window.t('pageCharts'),wa:window.t('pageWA'),
+    mgmt:window.t('pageMgmt'),charts:window.t('pageCharts'),wa:window.t('pageWA'),
     rep:window.t('pageRep'),hist:window.t('pageHist'),viz:window.t('pageViz'),
     bld:'🏢 '+(BL[bld]||bld||'')};
   const ttEl=document.getElementById('topbar-title');
@@ -6350,7 +6479,7 @@ function render(){
   if(!c) return;
   c.className='fade';void c.offsetWidth;
   const pages={dash:renderDash,pay:renderPay,exp:renderExp,
-    alper:renderAlper,charts:renderCharts,wa:renderWA,
+    mgmt:renderMgmt,charts:renderCharts,wa:renderWA,
     rep:renderRep,hist:renderHist,viz:renderViz,bld:()=>renderBld(S.bld)};
   c.innerHTML=(pages[S.page]||renderDash)();
   if(S.page==='charts') initCharts();
@@ -6398,7 +6527,7 @@ function renderDash(){
     const bit=new Date(ten.bit);
     const days=Math.ceil((bit-now)/864e5);
     if(days>=0&&days<=60)
-      alerts+=`<tr><td><b>${BL[b]}</b></td><td>${ten.unit}</td><td>${ten.name}</td>
+      alerts+=`<tr><td><b>${_esc(BL[b])}</b></td><td>${_esc(ten.unit)}</td><td>${_esc(ten.name)}</td>
         <td>${formatDate(ten.bit)}</td>
         <td class="${days<=30?'c-red':'c-orange'} fw7">${days} ${t('daysLabel')}</td>
         <td class="c-blue">${TL(ten.rent)}</td></tr>`;
@@ -6407,8 +6536,8 @@ function renderDash(){
   // Overdue
   let overdue='';
   BK.forEach(b=>(DATA.tenants[b]||[]).filter(ten=>isDue(ten,m)).forEach(ten=>{
-    overdue+=`<tr><td><b>${BL[b]}</b></td><td>${ten.unit}</td>
-      <td><span class="blink">🔴</span> <b>${ten.name}</b></td>
+    overdue+=`<tr><td><b>${_esc(BL[b])}</b></td><td>${_esc(ten.unit)}</td>
+      <td><span class="blink">🔴</span> <b>${_esc(ten.name)}</b></td>
       <td class="c-orange">${t('dayOfMonth')} ${ten.gun}.</td>
       <td class="cr fw7">${TL(ten.rent)}</td>
       <td>${canEdit()?`<button class="btn btn-xs bsu-" onclick="openMod('pay-add','${b}:${ten.id}')">${t('btnEnter')}</button>`:''}
@@ -6491,7 +6620,7 @@ function renderBld(bname){
     const late=isDue(t,m);
     return `<tr class="cp" onclick="openPanel('${bname}','${t.id}')">
       <td><b>${t.unit}</b><span class="c-muted" style="font-size:10px;margin-left:4px">${t.fl||''}</span></td>
-      <td>${late?'<span class="blink">🔴</span> ':''}<b>${t.name||'—'}</b>${t.notes?` <span style="color:var(--i3);font-size:10px" title="${t.notes}">ⓘ</span>`:''}</td>
+      <td>${late?'<span class="blink">🔴</span> ':''}<b>${_esc(t.name||'—')}</b>${t.notes?` <span style="color:var(--i3);font-size:10px" title="${_esc(t.notes)}">ⓘ</span>`:''}</td>
       <td class="cb fw7">${t.rent?TL(t.rent):'—'}</td>
       <td class="${p.paid>=(t.rent||0)?'c-green':p.paid>0?'c-orange':'c-red'} fw7">${t.rent?TL(p.paid):'—'}</td>
       <td class="${diff>0?'c-green':diff<0?'c-red':'c-muted'}">${t.rent?(diff>0?'+':'')+TL(diff):'—'}</td>
@@ -6609,8 +6738,8 @@ function openPanel(bname,tid){
   document.getElementById('panel').innerHTML=`
     <button class="panel-close" onclick="closePanel()">✕</button>
     <div style="font-size:36px;margin-top:6px">🏠</div>
-    <div class="panel-name">${t.name||window.t('statusVacant')}</div>
-    <div class="panel-sub">${BL[bname]} — ${t.unit}${t.fl?' ('+t.fl+')':''}</div>
+    <div class="panel-name">${_esc(t.name||window.t('statusVacant'))}</div>
+    <div class="panel-sub">${_esc(BL[bname])} — ${_esc(t.unit)}${t.fl?' ('+_esc(t.fl)+')':''}</div>
     <span class="badge ${st.cls}">${st.lbl}</span>
 
     <div class="div-line"></div>
@@ -6631,7 +6760,7 @@ function openPanel(bname,tid){
       <div class="info-item"><div class="info-lbl">${window.t('colPayDay')}</div><div class="info-val">${window.t('dayOfMonth')} ${t.gun||1}.</div></div>
       <div class="info-item"><div class="info-lbl">${window.t('colPhone')}</div><div class="info-val">${t.phone||'—'}</div></div>
     </div>
-    ${t.notes?`<div class="info-item" style="margin-bottom:12px"><div class="info-lbl">${window.t('panelNotes')}</div><div class="info-val" style="font-size:12px">${t.notes}</div></div>`:''}
+    ${t.notes?`<div class="info-item" style="margin-bottom:12px"><div class="info-lbl">${window.t('panelNotes')}</div><div class="info-val" style="font-size:12px">${_esc(t.notes)}</div></div>`:''}
 
     <div class="sec-hdr">${window.t('panelPayHist')}</div>
     <div>${histRows||'<div class="c-muted" style="font-size:12px">'+window.t('emptyRecords')+'</div>'}</div>
@@ -6666,7 +6795,7 @@ function openMod(type,arg){
   const noEditTypes=['cloud','users','settings','dash-prefs','reset-data','restore-confirm'];
   if(!canEdit()&&!noEditTypes.includes(type)) return;
   const md=document.getElementById('modal');
-  const t={
+  const tpl={
     'bld-add':()=>tplBldAdd(),
     'bld-rename':()=>tplBldRename(arg||''),
     'bld-archive':()=>tplBldArchive(arg||''),
@@ -6681,10 +6810,10 @@ function openMod(type,arg){
     'dash-prefs':()=>tplDashPrefs(),
     'reset-data':()=>tplResetData(),
     'restore-confirm':()=>tplRestoreConfirm(arg||''),
-    'alper-month':()=>tplAlperMonth(arg||''),
+    'mgmt-month':()=>tplMgmtMonth(arg||''),
   };
   // Unknown type → show error state instead of silently using pay-add
-  const tplFn = t[type];
+  const tplFn = tpl[type];
   if(!tplFn){
     md.innerHTML=`<div class="modal-title">${t('unknownOp')}</div>
       <p style="color:var(--i3);font-size:13px">"${type}" ${t('typeNotConfigured')}</p>
@@ -6869,7 +6998,7 @@ window.commitBldSettings=commitBldSettings;
 // ── PAY ADD ──────────────────────────────────
 function tplPayAdd(pre){
   const[pb,pt]=pre.split(':');
-  const bOpts=BK.map(b=>`<option value="${b}" ${b===pb?'selected':''}>${BL[b]}</option>`).join('');
+  const bOpts=BK.map(b=>`<option value="${b}" ${b===pb?'selected':''}>${_esc(BL[b])}</option>`).join('');
   const mOpts=ALL_MONTHS.map(mo=>`<option value="${mo}" ${mo===S.month?'selected':''}>${monthLabel(mo)}</option>`).join('');
   return `<div class="modal-title">${t('payAddTitle')}</div>
   <div class="form-grid-2">
@@ -6897,7 +7026,7 @@ function refreshTenSel(){
   const sel=document.getElementById('m_t');
   if(!sel||!b) return;
   const ts=sortU((DATA.tenants[b]||[]).filter(t=>t.active&&t.rent>0));
-  sel.innerHTML=ts.map(t=>`<option value="${t.id}">${t.unit} – ${t.name}</option>`).join('');
+  sel.innerHTML=ts.map(t=>`<option value="${t.id}">${_esc(t.unit)} – ${_esc(t.name)}</option>`).join('');
   autoRent();
 }
 
@@ -7089,7 +7218,7 @@ function saveTen(){
   const name=document.getElementById('nt_n').value.trim();
   if(!unit||!name){ toast('❌ Daire no ve isim zorunlu!','red'); return; }
   const id=BS[b]+Date.now();
-  const t={
+  const ten={
     id,unit,
     fl:document.getElementById('nt_fl').value.trim(),
     name,
@@ -7104,7 +7233,7 @@ function saveTen(){
     active:true,
   };
   if(!DATA.tenants[b]) DATA.tenants[b]=[];
-  DATA.tenants[b].push(t);
+  DATA.tenants[b].push(ten);
   addHist(`${BL[b]} ${unit} – ${name} eklendi`);
   closeMod();render();updateBadges();
   toast(t('tenantAdded'),'green');
@@ -7117,13 +7246,13 @@ function tplTenEdit(arg){
   if(!t) return '<div>'+window.t('tenNotFound')+'</div>';
   const mo=S.month;
   const p=getP(tid,mo);
-  return `<div class="modal-title">${window.t('tenEditTitle')} — ${t.unit}</div>
+  return `<div class="modal-title">${window.t('tenEditTitle')} — ${_esc(t.unit)}</div>
   <div class="form-grid-2">
-    <div class="form-row"><label class="form-label">${window.t('labelUnitNo')}</label><input class="form-input" id="et_u" value="${t.unit}"></div>
-    <div class="form-row"><label class="form-label">${window.t('labelFloor')}</label><input class="form-input" id="et_fl" value="${t.fl||''}"></div>
+    <div class="form-row"><label class="form-label">${window.t('labelUnitNo')}</label><input class="form-input" id="et_u" value="${_esc(t.unit)}"></div>
+    <div class="form-row"><label class="form-label">${window.t('labelFloor')}</label><input class="form-input" id="et_fl" value="${_esc(t.fl||'')}"></div>
   </div>
   <div class="form-grid-2">
-    <div class="form-row"><label class="form-label">${window.t('usersNameLabel').replace(' *','')}</label><input class="form-input" id="et_n" value="${t.name}"></div>
+    <div class="form-row"><label class="form-label">${window.t('usersNameLabel').replace(' *','')}</label><input class="form-input" id="et_n" value="${_esc(t.name)}"></div>
     <div class="form-row"><label class="form-label">${window.t('labelPhone')}</label><input class="form-input" id="et_ph" value="${t.phone||''}" placeholder="905xxxxxxxxx"></div>
   </div>
   <div class="form-grid-2">
@@ -7137,7 +7266,7 @@ function tplTenEdit(arg){
   </div>
   <div class="form-grid-2">
     <div class="form-row"><label class="form-label">${window.t('labelPayMethod')}</label><select class="form-select" id="et_ps">${SEKIL.map(s=>`<option ${p.sekil===s?'selected':''}>${s}</option>`).join('')}</select></div>
-    <div class="form-row"><label class="form-label">${window.t('labelPayNote')}</label><input class="form-input" id="et_pn" value="${p.notes||''}"></div>
+    <div class="form-row"><label class="form-label">${window.t('labelPayNote')}</label><input class="form-input" id="et_pn" value="${_esc(p.notes||'')}"></div>
   </div>
   <div class="form-grid-2">
     <div class="form-row"><label class="form-label">${window.t('labelContractStart')}</label><input class="form-input" id="et_bs" type="date" value="${t.bas||''}"></div>
@@ -7147,7 +7276,7 @@ function tplTenEdit(arg){
     <div class="form-row"><label class="form-label">${window.t('colPayDay')}</label><input class="form-input" id="et_g" type="number" value="${t.gun||1}" min="1" max="31"></div>
     <div class="form-row"><label class="form-label">${window.t('labelGenPayMethod')}</label><select class="form-select" id="et_sk">${SEKIL.map(s=>`<option ${t.sekil===s?'selected':''}>${s}</option>`).join('')}</select></div>
   </div>
-  <div class="form-row"><label class="form-label">${window.t('colNote')}</label><input class="form-input" id="et_nt" value="${t.notes||''}"></div>
+  <div class="form-row"><label class="form-label">${window.t('colNote')}</label><input class="form-input" id="et_nt" value="${_esc(t.notes||'')}"></div>
   <div class="modal-footer">
     <button class="btn btn-ghost" onclick="closeMod()">${window.t('cancel')}</button>
     <button class="btn btn-danger btn-sm" id="btn-remove-ten" onclick="removeTenConfirm('${bname}','${tid}')">${window.t('panelRemoveBtn')}</button>
@@ -7157,26 +7286,26 @@ function tplTenEdit(arg){
 }
 
 function updateTen(bname,tid,mo){
-  const t=(DATA.tenants[bname]||[]).find(x=>x.id===tid);
-  if(!t) return;
-  t.unit=document.getElementById('et_u').value.trim().toUpperCase();
-  t.fl=document.getElementById('et_fl').value.trim();
-  t.name=document.getElementById('et_n').value.trim();
-  t.phone=document.getElementById('et_ph').value.trim();
-  t.rent=parseFloat(document.getElementById('et_r').value)||0;
-  t.dep=parseFloat(document.getElementById('et_d').value)||0;
-  t.bas=document.getElementById('et_bs').value;
-  t.bit=document.getElementById('et_bt').value;
-  t.gun=parseInt(document.getElementById('et_g').value)||1;
-  t.sekil=document.getElementById('et_sk').value;
-  t.notes=document.getElementById('et_nt').value.trim();
+  const ten=(DATA.tenants[bname]||[]).find(x=>x.id===tid);
+  if(!ten) return;
+  ten.unit=document.getElementById('et_u').value.trim().toUpperCase();
+  ten.fl=document.getElementById('et_fl').value.trim();
+  ten.name=document.getElementById('et_n').value.trim();
+  ten.phone=document.getElementById('et_ph').value.trim();
+  ten.rent=parseFloat(document.getElementById('et_r').value)||0;
+  ten.dep=parseFloat(document.getElementById('et_d').value)||0;
+  ten.bas=document.getElementById('et_bs').value;
+  ten.bit=document.getElementById('et_bt').value;
+  ten.gun=parseInt(document.getElementById('et_g').value)||1;
+  ten.sekil=document.getElementById('et_sk').value;
+  ten.notes=document.getElementById('et_nt').value.trim();
   setP(tid,mo,{
     paid:parseFloat(document.getElementById('et_p').value)||0,
     date:document.getElementById('et_pd').value||'',
     sekil:document.getElementById('et_ps').value,
     notes:document.getElementById('et_pn').value||'',
   });
-  addHist(`${BL[bname]} ${t.unit} – ${t.name} güncellendi`);
+  addHist(`${BL[bname]} ${ten.unit} – ${ten.name} güncellendi`);
   autoRecalc();
   const _sc=document.getElementById('content'),_sy=_sc?_sc.scrollTop:0;
   closeMod();render();updateBadges();
@@ -7188,18 +7317,18 @@ function updateTen(bname,tid,mo){
 }
 
 function removeTen(bname,tid){
-  const t=(DATA.tenants[bname]||[]).find(x=>x.id===tid);
-  if(!t) return;
-  t.active=false;t.rent=0;
-  addHist(`${BL[bname]} ${t.unit} – ${t.name} çıkarıldı`);
+  const ten=(DATA.tenants[bname]||[]).find(x=>x.id===tid);
+  if(!ten) return;
+  ten.active=false;ten.rent=0;
+  addHist(`${BL[bname]} ${ten.unit} – ${ten.name} çıkarıldı`);
   saveLocal();render();updateBadges();toast(t('tenantRemoved'),'red');
   if(DATA.cloud.enabled) cloudSync('push');
 }
 function restoreTen(bname,tid){
-  const t=(DATA.tenants[bname]||[]).find(x=>x.id===tid);
-  if(!t) return;
-  t.active=true;
-  addHist(`${BL[bname]} ${t.unit} – ${t.name} geri alındı`);
+  const ten=(DATA.tenants[bname]||[]).find(x=>x.id===tid);
+  if(!ten) return;
+  ten.active=true;
+  addHist(`${BL[bname]} ${ten.unit} – ${ten.name} geri alındı`);
   saveLocal();render();updateBadges();toast(t('tenantRestored'),'green');
   if(DATA.cloud.enabled) cloudSync('push');
 }
@@ -7648,7 +7777,7 @@ function tplUsers(){
       </td>
       <td style="white-space:nowrap"><span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:rgba(255,255,255,.07);color:${rm.color}">${rm.label}</span></td>
       <td style="font-size:11px;color:var(--i3);white-space:nowrap">${rm.desc}</td>
-      <td style="font-family:var(--mono);color:var(--i4);font-size:11px">${'●'.repeat(u.pin?u.pin.length:4)}</td>
+      <td style="font-family:var(--mono);color:var(--i4);font-size:11px">${(u.pin||u.pin_hash)?'● ● ● ●':'—'}</td>
       <td style="white-space:nowrap">
         <span style="display:inline-flex;align-items:center;gap:4px;font-size:11px">
           <span style="width:6px;height:6px;border-radius:50%;background:${u.active!==false?'var(--emerald)':'var(--rose)'}"></span>
@@ -7723,7 +7852,7 @@ function showAddUserForm(){
 
 function addUserForm(){showAddUserForm();}
 
-function saveNewUser(){
+async function saveNewUser(){
   const name=(document.getElementById('nu_n')?.value||'').trim();
   const avatar=(document.getElementById('nu_av')?.value||name[0]||'U').toUpperCase();
   const role=document.getElementById('nu_r')?.value||'viewer';
@@ -7732,7 +7861,9 @@ function saveNewUser(){
   if(!name){toast(t('nameRequired'),'red');return;}
   if(pin.length<4){toast('❌ PIN en az 4 haneli','red');return;}
   if(!/^\d+$/.test(pin)){toast('❌ PIN sadece rakam','red');return;}
-  DATA.users.push({id:'u_'+Date.now(),name,avatar,role,pin,color,active:true});
+  const pin_salt=_genSalt();
+  const pin_hash_v2=await _hashPinV2(pin,pin_salt);
+  DATA.users.push({id:'u_'+Date.now(),name,avatar,role,pin_hash_v2,pin_salt,color,active:true});
   addHist('Kullanıcı eklendi: '+name);
   saveLocal();
   document.getElementById('modal').innerHTML=tplUsers();
@@ -7745,10 +7876,10 @@ function editUserInline(i){
   const f=document.getElementById('user-inline-form');
   const roleDisabled=canChangeRole()?'':'disabled';
   f.innerHTML=`<div style="background:var(--glass-2);border:1px solid var(--bd-1);border-radius:var(--r2);padding:14px;margin-bottom:10px">
-    <div style="font-size:13px;font-weight:700;margin-bottom:10px">✏️ ${t('usersEditBtn').replace(/^✏️\s*/,'')} — ${u.name}</div>
+    <div style="font-size:13px;font-weight:700;margin-bottom:10px">✏️ ${t('usersEditBtn').replace(/^✏️\s*/,'')} — ${_esc(u.name)}</div>
     <div class="form-grid-2" style="margin-bottom:10px">
-      <div class="form-row"><label class="form-label">${t('usersNameLabel').replace(' *','')}</label><input class="form-input" id="eu_n" value="${u.name}"></div>
-      <div class="form-row"><label class="form-label">${t('usersAvatarLabel')}</label><input class="form-input" id="eu_av" value="${u.avatar||''}" maxlength="2"></div>
+      <div class="form-row"><label class="form-label">${t('usersNameLabel').replace(' *','')}</label><input class="form-input" id="eu_n" value="${_esc(u.name)}"></div>
+      <div class="form-row"><label class="form-label">${t('usersAvatarLabel')}</label><input class="form-input" id="eu_av" value="${_esc(u.avatar||'')}" maxlength="2"></div>
     </div>
     <div class="form-grid-2" style="margin-bottom:10px">
       <div class="form-row"><label class="form-label">${t('usersRoleLabel')}</label>
@@ -7801,7 +7932,7 @@ function showPINForm(i){
   const inp=document.getElementById('pin_new');
   if(inp) inp.focus();
 }
-function commitPIN(i){
+async function commitPIN(i){
   if(!canEditUser(i)){toast(t('usersNoPermission'),'red');return;}
   const u=DATA.users[i];
   const np=(document.getElementById('pin_new')||{}).value||'';
@@ -7809,7 +7940,11 @@ function commitPIN(i){
   if(!np){toast(t('pinEmpty'),'red');return;}
   if(np.length<4||!/^\d+$/.test(np)){toast(t('pinInvalid'),'red');return;}
   if(np!==nc){toast(t('pinMismatch'),'red');return;}
-  u.pin=np;
+  const _cs=_genSalt();
+  u.pin_hash_v2=await _hashPinV2(np,_cs);
+  u.pin_salt=_cs;
+  delete u.pin_hash;
+  delete u.pin;
   addHist('PIN sıfırlandı: '+u.name);
   saveLocal();
   toast(t('pinUpdated'),'green');
@@ -7851,24 +7986,24 @@ function editUser(i){
   const roles=['admin','manager','viewer'];
   const rLabels=['👑 Admin','🔑 Manager','👁️ Viewer'];
   const form=`<div style="background:var(--glass-2);border-radius:10px;padding:14px;margin-top:10px" id="edit-user-form-${i}">
-    <div style="font-weight:700;margin-bottom:10px;font-size:12px">✏️ Düzenle: ${u.name}</div>
+    <div style="font-weight:700;margin-bottom:10px;font-size:12px">${t('usersEditBtn')}: ${_esc(u.name)}</div>
     <div class="form-grid-2" style="margin-bottom:10px">
-      <div><label class="form-label">İsim</label><input class="fi ie" id="eu_n_${i}" value="${u.name}"></div>
-      <div><label class="form-label">Avatar Harf</label><input class="fi ie" id="eu_av_${i}" value="${u.avatar}" maxlength="2"></div>
+      <div><label class="form-label">${t('usersNameLabel').replace(' *','')}</label><input class="fi ie" id="eu_n_${i}" value="${_esc(u.name)}"></div>
+      <div><label class="form-label">${t('usersAvatarLabel')}</label><input class="fi ie" id="eu_av_${i}" value="${u.avatar}" maxlength="2"></div>
     </div>
     <div class="form-grid-2" style="margin-bottom:10px">
-      <div><label class="form-label">Rol</label>
+      <div><label class="form-label">${t('usersRoleLabel')}</label>
         <select class="form-select" id="eu_r_${i}">
           ${roles.map((r,ri)=>'<option value="'+r+'" '+(u.role===r?'selected':'')+'>'+(rLabels[ri])+'</option>').join('')}
         </select>
       </div>
-      <div><label class="form-label">Yeni PIN (boş=değişmez)</label><input class="fi ie" id="eu_p_${i}" type="password" placeholder="min 4 hane"></div>
+      <div><label class="form-label">${t('usersPinEditLabel')}</label><input class="fi ie" id="eu_p_${i}" type="password" placeholder="${t('usersPinMinHint')}"></div>
     </div>
     <div class="form-grid-2" style="margin-bottom:0">
-      <div><label class="form-label">Renk</label><input class="form-input" id="eu_c_${i}" type="color" value="${u.color}" style="height:36px;cursor:pointer"></div>
+      <div><label class="form-label">${t('usersColorLabel')}</label><input class="form-input" id="eu_c_${i}" type="color" value="${u.color}" style="height:36px;cursor:pointer"></div>
       <div style="display:flex;align-items:flex-end;gap:6px">
-        <button class="btn btn-primary btn-sm" onclick="saveEditUser(${i})">💾 Kaydet</button>
-        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('edit-user-form-${i}').remove()">İptal</button>
+        <button class="btn btn-primary btn-sm" onclick="saveEditUser(${i})">${t('save')}</button>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('edit-user-form-${i}').remove()">${t('cancel')}</button>
       </div>
     </div>
   </div>`;
@@ -7877,7 +8012,7 @@ function editUser(i){
   const rows=document.querySelectorAll('#md tbody tr');
   if(rows[i]) rows[i].insertAdjacentHTML('afterend', form);
 }
-function saveEditUser(i){
+async function saveEditUser(i){
   const u=DATA.users[i];
   const nn=document.getElementById('eu_n_'+i)?.value.trim();
   const nav=document.getElementById('eu_av_'+i)?.value.trim();
@@ -7887,7 +8022,7 @@ function saveEditUser(i){
   if(nn) u.name=nn;
   if(nav) u.avatar=nav.toUpperCase();
   if(nr) u.role=nr;
-  if(np&&np.length>=4) u.pin=np;
+  if(np&&np.length>=4){const _es=_genSalt();u.pin_hash_v2=await _hashPinV2(np,_es);u.pin_salt=_es;delete u.pin_hash;delete u.pin;}
   if(nc) u.color=nc;
   saveLocal();
   document.getElementById('modal').innerHTML=tplUsers();
@@ -8011,19 +8146,19 @@ function renderExp(){
 // ═══════════════════════════════════════════════
 // ALPER PAGE
 // ═══════════════════════════════════════════════
-function renderAlper(){
-  const months=Object.keys(DATA.alper);
-  const tNet=months.reduce((s,m)=>s+(DATA.alper[m].net||0),0);
-  const tCol=months.reduce((s,m)=>s+(DATA.alper[m].col||0),0);
-  const tExp=months.reduce((s,m)=>s+(DATA.alper[m].exp||0),0);
+function renderMgmt(){
+  const months=Object.keys(DATA.mgmt);
+  const tNet=months.reduce((s,m)=>s+(DATA.mgmt[m].net||0),0);
+  const tCol=months.reduce((s,m)=>s+(DATA.mgmt[m].col||0),0);
+  const tExp=months.reduce((s,m)=>s+(DATA.mgmt[m].exp||0),0);
 
   const rows=months.map(m=>{
-    const a=DATA.alper[m];
+    const a=DATA.mgmt[m];
     return `<tr><td class="fw-600">${m}</td>
       <td class="c-blue">${TL(a.col||0)}</td>
       <td class="c-orange">${TL(a.exp||0)}</td>
       <td class="${(a.net||0)>=0?'c-green':'c-red'} fw7">${TL(a.net||0)}</td>
-      <td>${canEdit()?`<button class="btn btn-xs bg-" onclick="editAlperMo('${m}')">✏️</button>`:''}
+      <td>${canEdit()?`<button class="btn btn-xs bg-" onclick="editMgmtMo('${m}')">✏️</button>`:''}
       </td></tr>`;
   }).join('');
 
@@ -8040,18 +8175,18 @@ function renderAlper(){
   }).join('');
 
   return monthBar()+`
-  <div class="alper-hero">
-    <div style="font-size:15px;font-weight:800;color:var(--accent2)">${t('alperHeroTitle')}</div>
-    <div style="font-size:11.5px;color:var(--text2);margin-top:5px;line-height:1.5">${t('alperHeroDesc')}</div>
-    <div class="alper-stats">
-      <div class="alper-stat"><div class="alper-sv ${tNet>=0?'c-green':'c-red'}">${TL(tNet)}</div><div class="alper-stat-lbl">${t('alperAccumulated')}</div></div>
-      <div class="alper-stat"><div class="alper-sv cb">${TL(tCol)}</div><div class="alper-stat-lbl">${t('alperCollection')}</div></div>
-      <div class="alper-stat"><div class="alper-sv co">${TL(tExp)}</div><div class="alper-stat-lbl">${t('kpiTotalExp')}</div></div>
-      <div class="alper-stat"><div class="alper-sv cp2">${months.length}</div><div class="alper-stat-lbl">${t('alperMonthCount')}</div></div>
+  <div class="mgmt-hero">
+    <div style="font-size:15px;font-weight:800;color:var(--accent2)">${t('mgmtHeroTitle')}</div>
+    <div style="font-size:11.5px;color:var(--text2);margin-top:5px;line-height:1.5">${t('mgmtHeroDesc')}</div>
+    <div class="mgmt-stats">
+      <div class="mgmt-stat"><div class="mgmt-sv ${tNet>=0?'c-green':'c-red'}">${TL(tNet)}</div><div class="mgmt-stat-lbl">${t('mgmtAccumulated')}</div></div>
+      <div class="mgmt-stat"><div class="mgmt-sv cb">${TL(tCol)}</div><div class="mgmt-stat-lbl">${t('mgmtCollection')}</div></div>
+      <div class="mgmt-stat"><div class="mgmt-sv co">${TL(tExp)}</div><div class="mgmt-stat-lbl">${t('kpiTotalExp')}</div></div>
+      <div class="mgmt-stat"><div class="mgmt-sv cp2">${months.length}</div><div class="mgmt-stat-lbl">${t('mgmtMonthCount')}</div></div>
     </div>
   </div>
 
-  <div class="sec-hdr">${t('alperMonthlyTable')} ${canEdit()?`<button class="btn btn-primary btn-sm" onclick="addAlperMo()">${t('alperAddMonth')}</button>`:''}</div>
+  <div class="sec-hdr">${t('mgmtMonthlyTable')} ${canEdit()?`<button class="btn btn-primary btn-sm" onclick="addMgmtMo()">${t('mgmtAddMonth')}</button>`:''}</div>
   <div class="table-card"><div class="table-scroller"><table>
     <thead><tr><th>${t('colMonth')}</th><th>${t('colCollection')}</th><th>${t('kpiGider')}</th><th>${t('colNetDebt')}</th><th></th></tr></thead>
     <tbody>${rows}
@@ -8067,7 +8202,7 @@ function renderAlper(){
   </table></div></div>`:''}
 
   ${Object.keys(DATA.tanNet).length>0?`
-  <div class="sec-hdr">${t('alperForeignNet')}</div>
+  <div class="sec-hdr">${t('mgmtForeignNet')}</div>
   <div class="table-card"><div class="table-scroller"><table>
     <thead><tr><th>${t('colMonth')}</th><th>${t('colCollection')}</th><th>${t('kpiGider')}</th><th>${t('colNetTL')}</th><th>${t('colRate')}</th><th>${t('colNetEur')}</th></tr></thead>
     <tbody>${Object.keys(DATA.tanNet).map(mo=>{
@@ -8078,8 +8213,8 @@ function renderAlper(){
   `;
 }
 
-function editAlperMo(mo){ openMod('alper-month', mo); }
-function addAlperMo(){ openMod('alper-month'); }
+function editMgmtMo(mo){ openMod('mgmt-month', mo); }
+function addMgmtMo(){ openMod('mgmt-month'); }
 
 // ═══════════════════════════════════════════════
 // CHARTS
@@ -8090,7 +8225,7 @@ function renderCharts(){
     <div class="kpi-card" style="--kpi-color:var(--blue-l)"><div class="kpi-icon">📊</div><div class="kpi-value">4</div><div class="kpi-label">${t('chartsCount')}</div></div>
   </div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-    <div class="chart-card"><div class="chart-title">${t('chartAlperMonthly')}</div><canvas id="ch-alper" height="200"></canvas></div>
+    <div class="chart-card"><div class="chart-title">${t('chartMgmtMonthly')}</div><canvas id="ch-mgmt" height="200"></canvas></div>
     <div class="chart-card"><div class="chart-title">${t('chartBldCollection')} — ${monthLabel(S.month)}</div><canvas id="ch-bina" height="200"></canvas></div>
     <div class="chart-card"><div class="chart-title">${t('chartForeignNet')}</div><canvas id="ch-tan" height="200"></canvas></div>
     <div class="chart-card"><div class="chart-title">${t('chartPayStatus')} — ${monthLabel(S.month)}</div><canvas id="ch-durum" height="200"></canvas></div>
@@ -8107,17 +8242,17 @@ function initCharts(){
   const co={responsive:true,maintainAspectRatio:true,plugins:{legend:{labels:{color:theme.text,font:{size:11}}}}};
 
   // Alper bar + line
-  const alperMos=Object.keys(DATA.alper);
-  const alperVals=alperMos.map(m=>DATA.alper[m].net||0);
-  const alperCol=alperMos.map(m=>DATA.alper[m].col||0);
-  const c1=document.getElementById('ch-alper');
-  if(c1) chartInstances.alper=new Chart(c1,{
+  const mgmtMos=Object.keys(DATA.mgmt);
+  const mgmtVals=mgmtMos.map(m=>DATA.mgmt[m].net||0);
+  const mgmtCol=mgmtMos.map(m=>DATA.mgmt[m].col||0);
+  const c1=document.getElementById('ch-mgmt');
+  if(c1) chartInstances.mgmt=new Chart(c1,{
     type:'bar',
     data:{
-      labels:alperMos.map(m=>m.replace(' ','<br>')),
+      labels:mgmtMos.map(m=>m.replace(' ','<br>')),
       datasets:[
-        {label:t('chartNetDebt'),data:alperVals,backgroundColor:alperVals.map(v=>v>=0?'rgba(30,214,120,.6)':'rgba(240,84,84,.6)'),borderRadius:4},
-        {label:t('kpiCollect'),data:alperCol,type:'line',borderColor:'rgba(74,138,244,.8)',backgroundColor:'rgba(74,138,244,.1)',pointRadius:3,tension:.3,fill:true,yAxisID:'y2'},
+        {label:t('chartNetDebt'),data:mgmtVals,backgroundColor:mgmtVals.map(v=>v>=0?'rgba(30,214,120,.6)':'rgba(240,84,84,.6)'),borderRadius:4},
+        {label:t('kpiCollect'),data:mgmtCol,type:'line',borderColor:'rgba(74,138,244,.8)',backgroundColor:'rgba(74,138,244,.1)',pointRadius:3,tension:.3,fill:true,yAxisID:'y2'},
       ]
     },
     options:{...co,scales:{
@@ -8369,8 +8504,8 @@ function makeEditable(el, onSave){
 // ═══════════════════════════════════════════════
 function autoRecalc(){
   // Recalc alper rows from actual data
-  Object.keys(DATA.alper).forEach(mo=>{
-    const a=DATA.alper[mo];
+  Object.keys(DATA.mgmt).forEach(mo=>{
+    const a=DATA.mgmt[mo];
     if(a.col!==undefined && a.exp!==undefined){
       a.net = (a.col||0) - (a.exp||0);
     }
@@ -9036,8 +9171,8 @@ function renderAnalyticsYearly(){
     <canvas id="ch-yearly" height="200"></canvas>
   </div>
   <div class="chart-card">
-    <div class="chart-title">${t('chartAlperNet')}</div>
-    <canvas id="ch-alper-yr" height="200"></canvas>
+    <div class="chart-title">${t('chartMgmtNet')}</div>
+    <canvas id="ch-mgmt-yr" height="200"></canvas>
   </div>`;
 }
 
@@ -9095,7 +9230,7 @@ function renderAnalyticsHeatmap(){
 }
 
 function initAnalyticsCharts(){
-  const m=S.month,theme={g:'rgba(255,255,255,.06)',t:'rgba(125,158,200,.6)'};
+  const m=S.month,_isLight=document.documentElement.getAttribute('data-theme')==='light',theme={g:_isLight?'rgba(30,50,100,.12)':'rgba(255,255,255,.06)',t:_isLight?'#1e3a6a':'rgba(125,158,200,.6)'};
   const co={responsive:true,maintainAspectRatio:true,
     plugins:{legend:{labels:{color:theme.t,font:{size:11}}}},
     scales:{x:{ticks:{color:theme.t},grid:{color:theme.g}},
@@ -9139,14 +9274,14 @@ function initAnalyticsCharts(){
       ]},options:{...co}});
   }
 
-  const alperYr=document.getElementById('ch-alper-yr');
-  if(alperYr){
-    const aKeys=Object.keys(DATA.alper);
-    if(alperYr._chart) alperYr._chart.destroy();
-    alperYr._chart=new Chart(alperYr,{type:'bar',
+  const mgmtYr=document.getElementById('ch-mgmt-yr');
+  if(mgmtYr){
+    const aKeys=Object.keys(DATA.mgmt);
+    if(mgmtYr._chart) mgmtYr._chart.destroy();
+    mgmtYr._chart=new Chart(mgmtYr,{type:'bar',
       data:{labels:aKeys,datasets:[
-        {label:t('kpiNet'),data:aKeys.map(k=>DATA.alper[k].net||0),backgroundColor:aKeys.map(k=>(DATA.alper[k].net||0)>=0?'rgba(16,185,129,.6)':'rgba(244,63,94,.6)'),borderRadius:3},
-        {label:t('kpiCollect'),type:'line',data:aKeys.map(k=>DATA.alper[k].col||0),borderColor:'rgba(59,130,246,.6)',backgroundColor:'transparent',tension:.3,pointRadius:3,yAxisID:'y2'}
+        {label:t('kpiNet'),data:aKeys.map(k=>DATA.mgmt[k].net||0),backgroundColor:aKeys.map(k=>(DATA.mgmt[k].net||0)>=0?'rgba(16,185,129,.6)':'rgba(244,63,94,.6)'),borderRadius:3},
+        {label:t('kpiCollect'),type:'line',data:aKeys.map(k=>DATA.mgmt[k].col||0),borderColor:'rgba(59,130,246,.6)',backgroundColor:'transparent',tension:.3,pointRadius:3,yAxisID:'y2'}
       ]},options:{...co,scales:{
         x:{ticks:{color:theme.t,maxRotation:45,font:{size:9}},grid:{color:theme.g}},
         y:{ticks:{color:theme.t,callback:v=>money(v)},grid:{color:theme.g}},
@@ -9404,11 +9539,11 @@ h1{font-size:22px;font-weight:700;margin-bottom:20px;color:#1e293b}
   </div>
   <h1>${window.t('receiptTitle')}</h1>
   <div class="info-grid">
-    <div class="info-item"><label>${window.t('colTenant')}</label><span>${t.name}</span></div>
-    <div class="info-item"><label>${window.t('colBuilding')} / ${window.t('colUnit')}</label><span>${BL[bname]} — ${t.unit}</span></div>
+    <div class="info-item"><label>${window.t('colTenant')}</label><span>${_esc(t.name)}</span></div>
+    <div class="info-item"><label>${window.t('colBuilding')} / ${window.t('colUnit')}</label><span>${_esc(BL[bname])} — ${_esc(t.unit)}</span></div>
     <div class="info-item"><label>${window.t('labelPeriod')}</label><span>${monthLabel(mo)}</span></div>
     <div class="info-item"><label>${window.t('panelPayDate')}</label><span>${formatDate(p.date||new Date().toISOString().slice(0,10))}</span></div>
-    <div class="info-item"><label>${window.t('labelPayMethod')}</label><span>${p.sekil||'—'}</span></div>
+    <div class="info-item"><label>${window.t('labelPayMethod')}</label><span>${_esc(p.sekil||'—')}</span></div>
     <div class="info-item"><label>${window.t('receiptMonthlyRent')}</label><span>${TL(t.rent)}</span></div>
   </div>
   <div class="amount-box">
@@ -9416,7 +9551,7 @@ h1{font-size:22px;font-weight:700;margin-bottom:20px;color:#1e293b}
     <div class="amount-val">${TL(p.paid)}</div>
   </div>
   ${p.notes?`<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:12px;margin-bottom:20px;font-size:13px">
-    <b>Not:</b> ${p.notes}</div>`:''}
+    <b>Not:</b> ${_esc(p.notes)}</div>`:''}
   <div class="divider"></div>
   <div class="stamp">✓</div>
   <div class="footer">
@@ -9451,9 +9586,9 @@ function exportExcel(){
       csv+=`${BL[b]},${e.no||''},${e.tur},${e.tutar},${e.tarih||''},${e.notlar||''}\n`;
     });
   });
-  csv+='\n\nALPER HESABI\nAy,Tahsilat,Gider,Net\n';
-  Object.keys(DATA.alper).forEach(mo=>{
-    const a=DATA.alper[mo];
+  csv+='\n\nMGMT HESABI\nAy,Tahsilat,Gider,Net\n';
+  Object.keys(DATA.mgmt).forEach(mo=>{
+    const a=DATA.mgmt[mo];
     csv+=`${mo},${a.col||0},${a.exp||0},${a.net||0}\n`;
   });
   const a=document.createElement('a');
@@ -9482,7 +9617,7 @@ function render(){
   c.className='page-enter';
   const pages={
     dash:renderDash,pay:renderPay,exp:renderExp,
-    alper:renderAlper,charts:renderCharts,wa:renderWA,
+    mgmt:renderMgmt,charts:renderCharts,wa:renderWA,
     rep:renderRep,hist:renderHist,viz:renderViz,
     analytics:renderAnalytics,
     bld:()=>renderBld(S.bld)
@@ -9505,7 +9640,7 @@ function addAnalyticsNav(){
   if(nb&&!document.getElementById('nb-analytics')){
     const a=document.createElement('button');
     a.className='nav';a.id='nb-analytics';
-    a.innerHTML='<span class="ni">◗</span>'+(t('navCharts')==='Charts'?'Analytics':'Analitik');
+    a.innerHTML='<span class="ni">◗</span>'+t('analyticsNav').replace('◗','').trim();
     a.onclick=()=>goto('analytics');
     nb.parentNode.insertBefore(a,nb.nextSibling);
   }
@@ -9591,6 +9726,14 @@ function tplSettings(){
     <select class="form-select" id="s_currency" ${!isA?'disabled':''}>
       <option value="TRY" ${(DATA.settings?.currency||'TRY')==='TRY'?'selected':''}>${t('currencyTRY')}</option>
       <option value="USD" ${DATA.settings?.currency==='USD'?'selected':''}>$ USD — US Dollar</option>
+    </select>
+  </div>
+
+  <div class="form-row">
+    <label class="form-label">${t('settingsLang')}</label>
+    <select class="form-select" id="s_lang" onchange="switchLang(this.value)">
+      <option value="tr" ${(DATA.settings?.lang||'tr')==='tr'?'selected':''}>Türkçe</option>
+      <option value="en" ${(DATA.settings?.lang||'tr')==='en'?'selected':''}>English</option>
     </select>
   </div>
 
@@ -9915,50 +10058,50 @@ function panelRemoveTenConfirm(bname, tid){
   }
 }
 
-function tplAlperMonth(mo){
-  const a=mo?(DATA.alper[mo]||{}):{};
+function tplMgmtMonth(mo){
+  const a=mo?(DATA.mgmt[mo]||{}):{};
   const monthOpts=ALL_MONTHS.map(m=>`<option value="${m}"${m===mo?' selected':''}>${monthLabel(m)}</option>`).join('');
-  return `<div class="modal-title">${mo?t('alperMonthEditTitle'):t('alperMonthNewTitle')} — ${t('alperHeroTitle').replace(/^🤝\s*/,'')}</div>
+  return `<div class="modal-title">${mo?t('mgmtMonthEditTitle'):t('mgmtMonthNewTitle')} — ${t('mgmtHeroTitle').replace(/^🤝\s*/,'')}</div>
   ${mo
     ?`<div style="font-size:13px;font-weight:600;color:var(--i1);margin-bottom:14px">${monthLabel(mo)}</div><input type="hidden" id="alp_mo" value="${mo}">`
     :`<div class="form-row"><label class="form-label">${t('colMonth')}</label><select class="form-select" id="alp_mo">${monthOpts}</select></div>`}
   <div class="form-grid-2">
     <div class="form-row"><label class="form-label">${t('kpiCollect')} (${currencySymbol()})</label>
-      <input class="form-input" id="alp_col" type="number" step="0.01" value="${a.col||0}" onkeydown="if(event.key==='Enter')saveAlperMonth()"></div>
+      <input class="form-input" id="alp_col" type="number" step="0.01" value="${a.col||0}" onkeydown="if(event.key==='Enter')saveMgmtMonth()"></div>
     <div class="form-row"><label class="form-label">${t('kpiGider')} (${currencySymbol()})</label>
-      <input class="form-input" id="alp_exp" type="number" step="0.01" value="${a.exp||0}" onkeydown="if(event.key==='Enter')saveAlperMonth()"></div>
+      <input class="form-input" id="alp_exp" type="number" step="0.01" value="${a.exp||0}" onkeydown="if(event.key==='Enter')saveMgmtMonth()"></div>
   </div>
   <div class="modal-footer">
     <button class="btn btn-ghost" onclick="closeMod()">${t('cancel')}</button>
-    ${mo?`<button class="btn btn-danger btn-sm" id="btn-del-alper-mo" onclick="delAlperMoConfirm('${mo}')">🗑</button>`:''}
-    <button class="btn btn-primary" onclick="saveAlperMonth()">${t('save')}</button>
+    ${mo?`<button class="btn btn-danger btn-sm" id="btn-del-mgmt-mo" onclick="delMgmtMoConfirm('${mo}')">🗑</button>`:''}
+    <button class="btn btn-primary" onclick="saveMgmtMonth()">${t('save')}</button>
   </div>`;
 }
-function delAlperMoConfirm(mo){
-  const btn=document.getElementById('btn-del-alper-mo');
+function delMgmtMoConfirm(mo){
+  const btn=document.getElementById('btn-del-mgmt-mo');
   if(!btn) return;
   if(btn.dataset.step==='1'){
-    delete DATA.alper[mo];
+    delete DATA.mgmt[mo];
     addHist(`Yönetim Hesabı ${mo} silindi`);
     saveLocal(); closeMod(); render();
-    toast('🗑 '+monthLabel(mo)+' '+t('alperDeleted'),'red');
+    toast('🗑 '+monthLabel(mo)+' '+t('mgmtDeleted'),'red');
   } else {
     btn.dataset.step='1'; btn.textContent=t('deleteConfirm'); btn.style.background='var(--rose)';
     setTimeout(()=>{if(btn.dataset.step==='1'){btn.dataset.step='';btn.textContent='🗑 '+t('deleteTitle');btn.style.background='';}},3000);
   }
 }
-function saveAlperMonth(){
+function saveMgmtMonth(){
   const mo=(document.getElementById('alp_mo')?.value||'').trim();
-  if(!mo){toast(t('alperMonthRequired'),'red');return;}
+  if(!mo){toast(t('mgmtMonthRequired'),'red');return;}
   const col=parseFloat(document.getElementById('alp_col')?.value)||0;
   const exp=parseFloat(document.getElementById('alp_exp')?.value)||0;
-  const isNew=!DATA.alper[mo];
-  DATA.alper[mo]={col,exp,net:col-exp};
+  const isNew=!DATA.mgmt[mo];
+  DATA.mgmt[mo]={col,exp,net:col-exp};
   addHist(`Yönetim Hesabı ${mo} ${isNew?'eklendi':'güncellendi'}`);
   saveLocal();
   closeMod();
   render();
-  toast(isNew?`${t('alperMonthAdded')} ${mo}`:`${t('alperMonthUpdated')} ${mo}`,'green');
+  toast(isNew?`${t('mgmtMonthAdded')} ${mo}`:`${t('mgmtMonthUpdated')} ${mo}`,'green');
 }
 
 function saveDashPrefs(){
@@ -9986,7 +10129,8 @@ function importJSON(inp){
       if(d.tenants) DATA.tenants=d.tenants;
       if(d.payments) DATA.payments=d.payments;
       if(d.expenses) DATA.expenses=d.expenses;
-      if(d.alper) DATA.alper=d.alper;
+      if(d.alper !== undefined && d.mgmt === undefined) d.mgmt = d.alper; // compat: renamed alper→mgmt in v6.1
+      if(d.mgmt) DATA.mgmt=d.mgmt;
       if(d.history) DATA.history=d.history;
       if(d.users) DATA.users=d.users;
       if(d.waLog) DATA.waLog=d.waLog;
@@ -10260,6 +10404,11 @@ setInterval(()=>{
   }
 },300000);
 
+// CH-1: Activity listeners — reset idle timer on any real user interaction
+['mousemove','keydown','click','touchstart','scroll','wheel'].forEach(function(ev){
+  document.addEventListener(ev,_resetIdleTimer,{passive:true});
+});
+
 // ── 6B-1: Focus-triggered pull sync ─────────────────────────
 // Silently pulls when the window regains focus, if conditions are met.
 // Calls supabasePull() directly (not cloudSync) — no toast, no addHist.
@@ -10344,13 +10493,7 @@ try{
     console.warn('[BOOT] DATA.users empty or missing — restoring defaults');
     DATA.users=JSON.parse(JSON.stringify(DEFAULT_USERS));
     if(!window._ktpCorruptWarn) window._ktpCorruptWarn='⚠️ Kullanıcı verisi eksik — varsayılan kullanıcılar geri yüklendi.';
-  } else {
-    // Ensure every user has a pin field (guard against storage from other formats)
-    DATA.users=DATA.users.map(function(u){
-      if(!u.pin) u.pin=u.pin_hash||'1234';
-      return u;
-    });
-  }
+  } // pin migration happens lazily on first successful login via checkPin()
   if(!Array.isArray(DATA.buildings)) DATA.buildings=[];
   if(!DATA.tenants||typeof DATA.tenants!=='object') DATA.tenants={};
   if(!DATA.payments||typeof DATA.payments!=='object') DATA.payments={};
@@ -10474,12 +10617,12 @@ function _exportEnvelope(){
     tenants:      DATA.tenants,
     payments:     DATA.payments,
     expenses:     DATA.expenses,
-    alper:        DATA.alper,
+    mgmt:         DATA.mgmt,
     tanNet:       DATA.tanNet,
     gayNet:       DATA.gayNet,
     history:      DATA.history,
     waLog:        DATA.waLog,
-    users:        DATA.users,
+    users:        DATA.users.map(function(u){const e=Object.assign({},u);delete e.pin;return e;}),
     settings:     DATA.settings,
     importHistory: Array.isArray(DATA.importHistory) ? DATA.importHistory : [],
     // importSnapshots intentionally excluded: transient rollback data, too large for export
@@ -10565,13 +10708,14 @@ function _importCommit(candidate, mode){
       if(candidate.tenants  !==undefined) DATA.tenants  = candidate.tenants;
       if(candidate.payments !==undefined) DATA.payments = candidate.payments;
       if(candidate.expenses !==undefined) DATA.expenses = candidate.expenses;
-      if(candidate.alper    !==undefined) DATA.alper    = candidate.alper;
+      if(candidate.alper !== undefined && candidate.mgmt === undefined) candidate.mgmt = candidate.alper; // compat: renamed alper→mgmt in v6.1
+      if(candidate.mgmt    !==undefined) DATA.mgmt     = candidate.mgmt;
       if(candidate.tanNet   !==undefined) DATA.tanNet   = candidate.tanNet;
       if(candidate.gayNet   !==undefined) DATA.gayNet   = candidate.gayNet;
       if(candidate.history  !==undefined) DATA.history  = candidate.history;
       if(candidate.waLog    !==undefined) DATA.waLog    = candidate.waLog;
       if(candidate.settings !==undefined) DATA.settings = candidate.settings;
-      if(candidate.users        !==undefined) DATA.users        = candidate.users; // only in overwrite
+      // users intentionally excluded from import — credentials managed separately via user management UI
       if(Array.isArray(candidate.importHistory)) DATA.importHistory = candidate.importHistory;
       // buildings: use envelope or migrate from v5 tenant keys
       if(candidate.buildings && Array.isArray(candidate.buildings) && candidate.buildings.length){
@@ -10651,8 +10795,9 @@ function _importCommit(candidate, mode){
         });
       }
 
-      // alper/tanNet/gayNet: month-key merge (incoming wins per month — recalced by autoRecalc anyway)
-      if(candidate.alper)  Object.assign(DATA.alper,  candidate.alper);
+      // mgmt/tanNet/gayNet: month-key merge (incoming wins per month — recalced by autoRecalc anyway)
+      if(candidate.alper !== undefined && candidate.mgmt === undefined) candidate.mgmt = candidate.alper; // compat: renamed alper→mgmt in v6.1
+      if(candidate.mgmt)  Object.assign(DATA.mgmt,  candidate.mgmt);
       if(candidate.tanNet) Object.assign(DATA.tanNet, candidate.tanNet);
       if(candidate.gayNet) Object.assign(DATA.gayNet, candidate.gayNet);
 
@@ -10860,7 +11005,8 @@ function importJSON(inp){
       if(d.tenants)  DATA.tenants  = d.tenants;
       if(d.payments) DATA.payments = d.payments;
       if(d.expenses) DATA.expenses = d.expenses;
-      if(d.alper)    DATA.alper    = d.alper;
+      if(d.alper !== undefined && d.mgmt === undefined) d.mgmt = d.alper; // compat: renamed alper→mgmt in v6.1
+      if(d.mgmt)     DATA.mgmt     = d.mgmt;
       if(d.history)  DATA.history  = d.history;
       if(d.users)    DATA.users    = d.users;
       if(d.waLog)    DATA.waLog    = d.waLog;
@@ -11068,7 +11214,7 @@ function render(){
   c.className='';void c.offsetWidth;c.className='page-enter';
   const pages={
     dash:renderDash,pay:renderPay,exp:renderExp,
-    alper:renderAlper,charts:renderCharts,wa:renderWA,
+    mgmt:renderMgmt,charts:renderCharts,wa:renderWA,
     rep:renderRep,hist:renderHist,viz:renderViz,
     analytics:renderAnalytics,bld:()=>renderBld(S.bld)
   };
@@ -11120,7 +11266,7 @@ try{(function(){
     S.filter = '';
     document.querySelectorAll('.nav').forEach(n=>n.classList.remove('active'));
     const idMap = {
-      dash:'nb-dash', pay:'nb-pay', exp:'nb-exp', alper:'nb-alper',
+      dash:'nb-dash', pay:'nb-pay', exp:'nb-exp', mgmt:'nb-mgmt',
       charts:'nb-charts', wa:'nb-wa', rep:'nb-rep', hist:'nb-hist', viz:'nb-viz',
       analytics:'nb-analytics', bld:bld ? 'nb-'+bldDomId(bld) : ''
     };
@@ -11129,9 +11275,9 @@ try{(function(){
     if(activeEl) activeEl.classList.add('active');
     const titles = {
       dash:'📊 Dashboard', pay:'💳 '+t('navPay'), exp:'💸 '+t('navExp'),
-      alper:'🤝 '+t('navAlper'), charts:'📈 '+t('navCharts'), wa:'💬 '+t('navWA'),
+      mgmt:'🤝 '+t('navMgmt'), charts:'📈 '+t('navCharts'), wa:'💬 '+t('navWA'),
       rep:'📄 '+t('navRep'), hist:'🕐 '+t('navHist'), viz:'🌐 '+t('navViz'),
-      analytics:'◗ '+t('navCharts'), bld:'🏢 '+(BL[bld]||bld||'')
+      analytics:t('analyticsNav'), bld:'🏢 '+(BL[bld]||bld||'')
     };
     const _topbarTitleEl = document.getElementById('topbar-title');
     if(_topbarTitleEl) _topbarTitleEl.textContent = titles[S.page] || S.page;
@@ -11151,7 +11297,7 @@ try{(function(){
     c.className='';
     if(_pc){ void c.offsetWidth; c.className='page-enter'; }
     const pages = {
-      dash:renderDash, pay:renderPay, exp:renderExp, alper:renderAlper,
+      dash:renderDash, pay:renderPay, exp:renderExp, mgmt:renderMgmt,
       charts:renderCharts, wa:renderWA, rep:renderRep, hist:renderHist,
       viz:renderViz, analytics: (typeof renderAnalytics==='function'?renderAnalytics:renderCharts),
       bld:()=>renderBld(S.bld)
@@ -11199,6 +11345,7 @@ try{(function(){
     if(isElectron && typeof restoreElectronState==='function'){
       restoreElectronState().then(function(){ try{ render(); }catch(e){} }).catch(function(){});
     }
+    _resetIdleTimer(); // CH-1: start 30-min idle countdown on login
   };
 
   // Start app safely. Show login if no user selected; auto-enter admin if login screen is not usable.
