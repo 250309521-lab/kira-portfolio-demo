@@ -9,3 +9,8 @@ test-results/
 renderer.html
 src/tests/integrity-results.json
 src/renderer.min.html
+
+# License issuer secrets / outputs
+keys/*.pem
+issued-licenses/
+*.ktplicense
