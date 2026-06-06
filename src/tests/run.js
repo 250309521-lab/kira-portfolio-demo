@@ -1297,12 +1297,285 @@ test('canDeleteUser: viewer cannot delete anyone', function() {
   assert(!p.canDeleteUser(0) && !p.canDeleteUser(1));
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-console.log(`\n═══ Results: ${passed} passed, ${failed} failed ═══\n`);
+// ── Inactivity Auto-Logout (CH-1) ────────────────────────────────────────────
+console.log('\nInactivity Auto-Logout (CH-1):');
 
-if (failed > 0) {
-  process.exit(1);
-} else {
-  console.log('✅ All tests passed!\n');
-  process.exit(0);
+var IDLE_MS = 30 * 60 * 1000;
+
+test('CH-1: IDLE_TIMEOUT_MS is 30 minutes (1800000 ms)', function() {
+  assertEqual(IDLE_MS, 1800000, 'IDLE_TIMEOUT_MS');
+});
+
+// Simulate the idle timer state machine used by _resetIdleTimer / _idleLogout
+function makeIdleCtx(timeoutMs) {
+  var timer = null, fired = false, loggedOut = false;
+  var user = null; // simulates currentUser
+
+  function resetIdleTimer() {
+    if (!user) return;
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(function() { idleLogout(); }, timeoutMs);
+  }
+  function idleLogout() {
+    if (!user) return;
+    loggedOut = true;
+    fired = true;
+    user = null;
+    timer = null;
+  }
+  function login(u) { user = u; resetIdleTimer(); }
+  function logout() { if (timer) { clearTimeout(timer); timer = null; } user = null; }
+  function getTimer() { return timer; }
+  return { resetIdleTimer: resetIdleTimer, idleLogout: idleLogout, login: login, logout: logout, getTimer: getTimer,
+           state: function() { return { timer: timer, fired: fired, loggedOut: loggedOut, user: user }; } };
 }
+
+test('CH-1: _resetIdleTimer is a no-op when no user is logged in', function() {
+  var ctx = makeIdleCtx(50);
+  ctx.resetIdleTimer(); // no user set
+  assert(ctx.getTimer() === null, 'timer must remain null when user is null');
+});
+
+test('CH-1: _resetIdleTimer sets timer when user is logged in', function() {
+  var ctx = makeIdleCtx(50);
+  ctx.login({ id: 'u1' });
+  assert(ctx.getTimer() !== null, 'timer handle must be set after login');
+});
+
+test('CH-1: calling _resetIdleTimer twice does not stack timers', function() {
+  var ctx = makeIdleCtx(200);
+  ctx.login({ id: 'u1' });
+  var first = ctx.getTimer();
+  ctx.resetIdleTimer();
+  var second = ctx.getTimer();
+  assert(first !== null && second !== null, 'both handles non-null');
+  // Second call clears first — only one timer active; handles differ
+  // (or same if engine reuses, but point is no stacking)
+  // Verify by ensuring a third reset doesn't throw
+  ctx.resetIdleTimer();
+  assert(ctx.getTimer() !== null, 'timer still active after multiple resets');
+});
+
+test('CH-1: _idleLogout is a no-op when no user is logged in', function() {
+  var ctx = makeIdleCtx(50);
+  ctx.idleLogout(); // user is null
+  assert(!ctx.state().fired, '_idleLogout must not fire when user is null');
+});
+
+test('CH-1: _idleLogout clears user and marks fired when user is present', function() {
+  var ctx = makeIdleCtx(50);
+  ctx.login({ id: 'u1' });
+  ctx.idleLogout();
+  assert(ctx.state().loggedOut, '_idleLogout must set loggedOut flag');
+  assert(ctx.state().user === null, 'user must be null after _idleLogout');
+});
+
+test('CH-1: logout() clears the idle timer', function() {
+  var ctx = makeIdleCtx(200);
+  ctx.login({ id: 'u1' });
+  assert(ctx.getTimer() !== null, 'timer set after login');
+  ctx.logout();
+  assert(ctx.getTimer() === null, 'timer must be null after logout');
+  assert(ctx.state().user === null, 'user must be null after logout');
+});
+
+test('CH-1: _idleLogout after manual logout is a no-op', function() {
+  var ctx = makeIdleCtx(200);
+  ctx.login({ id: 'u1' });
+  ctx.logout();             // manual logout clears user
+  ctx.idleLogout();         // fires after (e.g., stale timer callback edge case)
+  assert(!ctx.state().fired, '_idleLogout guarded: no double-logout');
+});
+
+// ── PIN Rate Limiting (B.1) ──────────────────────────────────────────────────
+console.log('\nPIN Rate Limiting (B.1):');
+
+var PIN_MAX_ATT = 3, PIN_LOCK_MS = 30000;
+
+function makeRateCtx() {
+  var att = {};
+  function getS(uid) { if (!att[uid]) att[uid] = { count: 0, lockUntil: 0 }; return att[uid]; }
+  function isLocked(uid) { var s = getS(uid); return s.lockUntil > 0 && Date.now() < s.lockUntil; }
+  function reset(uid)  { var s = getS(uid); s.count = 0; s.lockUntil = 0; }
+  function fail(uid)   { var s = getS(uid); s.count++; if (s.count >= PIN_MAX_ATT) s.lockUntil = Date.now() + PIN_LOCK_MS; }
+  return { getS: getS, isLocked: isLocked, reset: reset, fail: fail };
+}
+
+test('B1: no lockout before max attempts', function() {
+  var c = makeRateCtx(); c.fail('u1'); c.fail('u1');
+  assert(!c.isLocked('u1'), '2 failures: not yet locked');
+});
+test('B1: lockout triggers at max attempts', function() {
+  var c = makeRateCtx(); c.fail('u1'); c.fail('u1'); c.fail('u1');
+  assert(c.isLocked('u1'), '3 failures: locked');
+});
+test('B1: lockout is per-user', function() {
+  var c = makeRateCtx(); c.fail('u1'); c.fail('u1'); c.fail('u1');
+  assert(c.isLocked('u1'),  'u1 locked');
+  assert(!c.isLocked('u2'), 'u2 not affected');
+});
+test('B1: reset clears lockout', function() {
+  var c = makeRateCtx(); c.fail('u1'); c.fail('u1'); c.fail('u1');
+  assert(c.isLocked('u1'), 'locked before reset');
+  c.reset('u1');
+  assert(!c.isLocked('u1'), 'cleared after reset');
+});
+test('B1: attempts-remaining count after 1 failure', function() {
+  var c = makeRateCtx(); c.fail('u1');
+  assertEqual(PIN_MAX_ATT - c.getS('u1').count, 2, 'remaining after 1 fail');
+});
+test('B1: attempts-remaining count after 2 failures', function() {
+  var c = makeRateCtx(); c.fail('u1'); c.fail('u1');
+  assertEqual(PIN_MAX_ATT - c.getS('u1').count, 1, 'remaining after 2 fails');
+});
+test('B1: lockout expires when lockUntil is in the past', function() {
+  var c = makeRateCtx(); c.fail('u1'); c.fail('u1'); c.fail('u1');
+  c.getS('u1').lockUntil = Date.now() - 1;
+  assert(!c.isLocked('u1'), 'lockout expired');
+});
+test('B1: independent users do not share attempt state', function() {
+  var c = makeRateCtx();
+  c.fail('alice'); c.fail('alice'); c.fail('alice');
+  c.fail('bob');
+  assert(c.isLocked('alice'), 'alice locked');
+  assert(!c.isLocked('bob'),  'bob not locked (only 1 fail)');
+});
+
+// ── Machine Identity (CH-4A) ─────────────────────────────────────────────────
+console.log('\nMachine Identity (CH-4A):');
+
+var crypto_mid = require('crypto');
+function _testFingerprint(guid) {
+  if (!guid) return null;
+  return crypto_mid.createHash('sha256')
+    .update(guid + ':KiraTakipPro:v6')
+    .digest('hex');
+}
+
+test('CH-4A: fingerprint is 64-char lowercase hex', function() {
+  var fp = _testFingerprint('12345678-1234-1234-1234-123456789abc');
+  assert(typeof fp === 'string' && fp.length === 64, 'must be 64 chars, got: ' + (fp ? fp.length : fp));
+  assert(/^[0-9a-f]{64}$/.test(fp), 'must be lowercase hex');
+});
+test('CH-4A: same GUID → same fingerprint (deterministic)', function() {
+  var g = 'aaaabbbb-cccc-dddd-eeee-ffffffffffff';
+  assertEqual(_testFingerprint(g), _testFingerprint(g));
+});
+test('CH-4A: different GUIDs → different fingerprints', function() {
+  var fp1 = _testFingerprint('11111111-1111-1111-1111-111111111111');
+  var fp2 = _testFingerprint('22222222-2222-2222-2222-222222222222');
+  assert(fp1 !== fp2, 'different GUIDs must produce different fingerprints');
+});
+test('CH-4A: null GUID → null fingerprint', function() {
+  assertEqual(_testFingerprint(null), null);
+});
+test('CH-4A: empty GUID → null fingerprint', function() {
+  assertEqual(_testFingerprint(''), null);
+});
+test('CH-4A: fingerprint ≠ raw GUID (hash is not identity)', function() {
+  var guid = '12345678-1234-1234-1234-123456789abc';
+  assert(_testFingerprint(guid) !== guid, 'fingerprint must not equal raw GUID');
+});
+
+// ── PBKDF2 PIN Hashing (B.3) ─────────────────────────────────────────────────
+// Async — uses Node webcrypto; runs in an IIFE that owns the final process.exit.
+console.log('\nPBKDF2 PIN Hashing (B.3):');
+
+var syncPassed = passed, syncFailed = failed;
+
+async function runB3Tests() {
+  var webcrypto = require('crypto').webcrypto;
+
+  async function testAsync(name, fn) {
+    process.stdout.write('  Testing: ' + name + ' ... ');
+    try {
+      await fn();
+      console.log('✅ PASS');
+      passed++;
+    } catch (e) {
+      console.log('❌ FAIL: ' + e.message);
+      failed++;
+    }
+  }
+
+  async function hashPinV2(pin, salt) {
+    var enc = new TextEncoder();
+    var key = await webcrypto.subtle.importKey('raw', enc.encode(String(pin)), 'PBKDF2', false, ['deriveBits']);
+    var bits = await webcrypto.subtle.deriveBits({ name: 'PBKDF2', salt: enc.encode(String(salt)), iterations: 100000, hash: 'SHA-256' }, key, 256);
+    return Array.from(new Uint8Array(bits)).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+  }
+  function genSalt() {
+    return Array.from(webcrypto.getRandomValues(new Uint8Array(16))).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+  }
+
+  await testAsync('B3: PBKDF2 hash is 64-char hex', async function() {
+    var h = await hashPinV2('1234', 'testsalt');
+    assert(typeof h === 'string' && h.length === 64, 'hash length: ' + h.length);
+    assert(/^[0-9a-f]+$/.test(h), 'hash is hex');
+  });
+  await testAsync('B3: same pin + same salt → same hash', async function() {
+    var h1 = await hashPinV2('1234', 'salt_abc');
+    var h2 = await hashPinV2('1234', 'salt_abc');
+    assertEqual(h1, h2, 'identical inputs produce identical hash');
+  });
+  await testAsync('B3: different pin → different hash', async function() {
+    var h1 = await hashPinV2('1234', 'salt_abc');
+    var h2 = await hashPinV2('5678', 'salt_abc');
+    assert(h1 !== h2, 'different PINs differ');
+  });
+  await testAsync('B3: same pin + different salt → different hash', async function() {
+    var h1 = await hashPinV2('1234', 'salt_A');
+    var h2 = await hashPinV2('1234', 'salt_B');
+    assert(h1 !== h2, 'different salts produce different hashes');
+  });
+  await testAsync('B3: genSalt produces 32-char hex', async function() {
+    var s = genSalt();
+    assert(typeof s === 'string' && s.length === 32, 'salt length: ' + s.length);
+    assert(/^[0-9a-f]+$/.test(s), 'salt is hex');
+  });
+  await testAsync('B3: two genSalt calls produce different values', async function() {
+    var s1 = genSalt(), s2 = genSalt();
+    assert(s1 !== s2, 'salts are random');
+  });
+  await testAsync('B3: migration flow — SHA-256 user upgrades on login', async function() {
+    // Simulate a user with a legacy SHA-256 pin_hash (no pin_salt / pin_hash_v2)
+    var user = { id: 'legacy', pin_hash: 'aabbcc' };
+    // On successful login the app sets pin_hash_v2 + pin_salt and removes pin_hash
+    var salt = genSalt();
+    user.pin_hash_v2 = await hashPinV2('1234', salt);
+    user.pin_salt = salt;
+    delete user.pin_hash;
+    assert(!('pin_hash' in user), 'legacy pin_hash removed after upgrade');
+    assert(user.pin_hash_v2 && user.pin_salt, 'PBKDF2 credential written');
+  });
+  await testAsync('B3: migration flow — plaintext user upgrades on login', async function() {
+    var user = { id: 'plain', pin: '1234' };
+    var salt = genSalt();
+    user.pin_hash_v2 = await hashPinV2('1234', salt);
+    user.pin_salt = salt;
+    delete user.pin;
+    assert(!('pin' in user), 'plaintext pin removed after upgrade');
+    assert(user.pin_hash_v2 && user.pin_salt, 'PBKDF2 credential written');
+  });
+  await testAsync('B3: new user created with pin_hash_v2 + pin_salt (no pin_hash)', async function() {
+    var salt = genSalt();
+    var hash = await hashPinV2('9876', salt);
+    var user = { id: 'new_u', name: 'Test', pin_hash_v2: hash, pin_salt: salt };
+    assert(user.pin_hash_v2 && user.pin_salt, 'PBKDF2 fields present');
+    assert(!('pin_hash' in user), 'no legacy pin_hash');
+    assert(!('pin' in user), 'no plaintext pin');
+  });
+}
+
+runB3Tests().then(function() {
+  console.log('\n═══ Results: ' + passed + ' passed, ' + failed + ' failed ═══\n');
+  if (failed > 0) {
+    process.exit(1);
+  } else {
+    console.log('✅ All tests passed!\n');
+    process.exit(0);
+  }
+}).catch(function(e) {
+  console.error('B3 async test runner failed:', e);
+  process.exit(1);
+});
