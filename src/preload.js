@@ -48,5 +48,6 @@ contextBridge.exposeInMainWorld('electron', {
   platform:   process.platform,
 
   // ── License / Machine Identity ─────────────────────────────────────────────
-  getMachineId: () => ipcRenderer.invoke('license:getMachineId'),
+  getMachineId:  () => ipcRenderer.invoke('license:getMachineId'),
+  checkLicense:  () => ipcRenderer.invoke('license:check'),
 });
