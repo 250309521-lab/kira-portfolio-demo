@@ -3892,6 +3892,84 @@ tbody tr[onclick] { cursor: pointer; }
 /* ── I: Modal footer — wrap on narrow viewports ─────────────────── */
 .modal-footer { flex-wrap: wrap; }
 
+/* ── CH-4C.6: License boot gate ─────────────────────────────────── */
+#lic-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  background: rgba(6,13,26,.97);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  font-family: var(--sans);
+}
+#lic-gate-card {
+  background: var(--glass-1,rgba(255,255,255,.04));
+  border: 1px solid var(--bd-2,rgba(255,255,255,.1));
+  border-radius: var(--r4,18px);
+  padding: 36px 40px;
+  max-width: 520px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 24px 64px rgba(0,0,0,.5);
+}
+#lic-gate-icon  { font-size:48px; margin-bottom:16px; line-height:1; }
+#lic-gate-title { font-size:18px; font-weight:700; color:var(--i1,#e2e8f0); margin-bottom:8px; }
+#lic-gate-msg   { font-size:13.5px; color:var(--i3,#94a3b8); margin-bottom:6px; line-height:1.5; }
+#lic-gate-sub   { font-size:11.5px; color:var(--i4,#64748b); margin-bottom:24px; line-height:1.5; }
+#lic-gate-actions { display:flex; flex-direction:column; gap:10px; }
+.lic-gate-btn {
+  width:100%; padding:10px 20px;
+  border-radius:var(--r2,10px); border:1px solid transparent;
+  font-size:13px; font-weight:600; cursor:pointer;
+  transition:opacity .18s; font-family:var(--sans);
+}
+.lic-gate-btn:hover { opacity:.82; }
+.lic-gate-btn-primary  { background:rgba(99,102,241,.18); border-color:rgba(99,102,241,.4);  color:var(--violet-l,#a78bfa); }
+.lic-gate-btn-secondary{ background:var(--glass-1,rgba(255,255,255,.04)); border-color:var(--bd-2,rgba(255,255,255,.1)); color:var(--i3,#94a3b8); }
+.lic-gate-btn-logout   { background:rgba(244,63,94,.08); border-color:rgba(244,63,94,.25);   color:var(--rose-l,#fb7185); }
+#lic-gate-feedback:empty { display:none; }
+#lic-gate-feedback { transition: opacity .18s; }
+.lic-gate-btn-loading { opacity:.68 !important; cursor:wait !important; pointer-events:none !important; }
+
+/* ── CH-4C.6: Light theme — gate card polish ──────────────────── */
+[data-theme="light"] #lic-gate-card {
+  background: rgba(255,255,255,.97);
+  border-color: rgba(30,50,100,.22);
+  box-shadow: 0 24px 64px rgba(0,0,0,.38);
+}
+[data-theme="light"] #lic-gate-title { color:#080f1e; }
+[data-theme="light"] #lic-gate-msg   { color:#1e3a6a; }
+[data-theme="light"] #lic-gate-sub   { color:#5a7aa8; }
+[data-theme="light"] .lic-gate-btn-primary  { background:rgba(99,102,241,.15);  border-color:rgba(99,102,241,.55); color:#5b21b6; }
+[data-theme="light"] .lic-gate-btn-secondary{ background:rgba(30,50,100,.07);   border-color:rgba(30,50,100,.22);  color:#3a5a8a; }
+[data-theme="light"] .lic-gate-btn-logout   { background:rgba(244,63,94,.07);   border-color:rgba(244,63,94,.35);  color:#be123c; }
+
+/* ── CH-4C.6: Light theme — login lang pill ───────────────────── */
+[data-theme="light"] #login-lang-pill > div {
+  background: rgba(255,255,255,.75) !important;
+  border-color: rgba(30,50,100,.22) !important;
+}
+[data-theme="light"] #lang-tr-btn { color:#1e40af !important; }
+[data-theme="light"] #lang-en-btn { color:#3a5a8a !important; }
+[data-theme="light"] #login-lang-pill #theme-btn {
+  border-color: rgba(30,50,100,.22) !important;
+  color: #3a5a8a !important;
+}
+
+/* ── CH-4C.6: Light theme — topbar/overlay visual blend ───────── */
+/* titleBarOverlay color (#060d1a) is set in main.js; this gradient */
+/* eases the visual transition at the right edge in light theme.    */
+[data-theme="light"] #topbar {
+  background: linear-gradient(to right,
+    rgba(210,225,242,.98) calc(100% - 340px),
+    rgba(6,13,26,.97)     100%
+  ) !important;
+}
+
 </style>
 <script>
 /* ── KTP Safe-Boot & Recovery ── runs before ALL app JS ── */
@@ -4172,6 +4250,9 @@ tbody tr[onclick] { cursor: pointer; }
 <!-- TOAST -->
 <div id="toast"></div>
 
+<!-- LICENSE BOOT GATE -->
+<div id="lic-gate"></div>
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
 'use strict';
@@ -4256,8 +4337,9 @@ const DEFAULT_USERS=[
 let USERS=[];
 let currentUser=null;
 let loginSelectedUser=null;
-let licenseStatus  = null;
-let licenseChecked = false;
+let licenseStatus    = null;
+let licenseChecked   = false;
+let licenseGateActive = false;
 
 // B1: PIN rate-limiting state (in-memory; intentionally resets on app restart)
 const _pinAttempts={};      // { uid: { count, lockUntil } }
@@ -11265,21 +11347,220 @@ async function checkLicenseStatus() {
   if (!window.electron?.checkLicense) return;
   if (licenseChecked) return;
   licenseChecked = true;
+  _showLicenseGate('checking');
+  let result;
   try {
-    const result = await window.electron.checkLicense();
-    licenseStatus = result;
-    _renderLicenseStatus();
-    const lang = (DATA && DATA.settings && DATA.settings.lang) || 'tr';
-    if (!result.ok) {
-      const msg = _licenseMsg(result.reason, lang);
-      const isCritical = result.reason === 'wrong_machine' ||
-                         result.reason === 'invalid_signature' ||
-                         result.reason === 'expired';
-      toast(msg, isCritical ? 'red' : 'orange');
-    }
+    const _timeout = new Promise(function(_, rej) {
+      setTimeout(function() { rej(new Error('timeout')); }, 10000);
+    });
+    result = await Promise.race([window.electron.checkLicense(), _timeout]);
   } catch (e) {
     console.warn('[license] check error', e && e.message);
+    result = { ok: false, reason: 'verifier_error' };
   }
+  licenseStatus = result;
+  _renderLicenseStatus();
+  if (result.ok) {
+    _hideLicenseGate();
+  } else {
+    _showLicenseGate('active');
+  }
+}
+
+// ── CH-4C.6: License boot gate helpers ──────────────────────────────────────
+
+function _isCriticalLicenseReason(reason) {
+  return reason === 'invalid_app'       ||
+         reason === 'wrong_machine'     ||
+         reason === 'invalid_signature' ||
+         reason === 'expired';
+}
+
+function _renderLicenseGate(state) {
+  const el = document.getElementById('lic-gate');
+  if (!el) return;
+  const lang = (DATA && DATA.settings && DATA.settings.lang) || 'tr';
+
+  if (state === 'checking') {
+    el.innerHTML =
+      '<div id="lic-gate-card">' +
+        '<div id="lic-gate-icon">⏳</div>' +
+        '<div id="lic-gate-title">' + (lang === 'en' ? 'Checking license...' : 'Lisans kontrol ediliyor...') + '</div>' +
+        '<div id="lic-gate-sub">'   + (lang === 'en' ? 'Please wait.'        : 'Lütfen bekleyin.')            + '</div>' +
+      '</div>';
+    return;
+  }
+
+  if (!licenseStatus) return;
+  const isCritical = _isCriticalLicenseReason(licenseStatus.reason);
+  const canRetry   = !isCritical;
+  const msg        = _licenseMsg(licenseStatus.reason, lang);
+  const icon       = isCritical ? '❌' : '⚠️';
+  const titleTR    = isCritical ? 'Lisans Geçersiz'    : 'Lisans Gerekli';
+  const titleEN    = isCritical ? 'License Invalid'    : 'License Required';
+  const subTR      = isCritical
+    ? 'Bu sorunu çözmek için lütfen destek ekibiyle iletişime geçin.'
+    : 'Lisans dosyanızı bu makineye yüklemek için destek ekibiyle iletişime geçin.';
+  const subEN      = isCritical
+    ? 'Please contact support to resolve this issue.'
+    : 'Contact support to obtain a license file for this machine.';
+
+  const retryBtn = canRetry
+    ? '<button id="lic-gate-retry-btn" class="lic-gate-btn lic-gate-btn-primary" onclick="_retryLicenseCheck()">' +
+        (lang === 'en' ? '🔄 Retry' : '🔄 Tekrar Dene') +
+      '</button>'
+    : '';
+
+  el.innerHTML =
+    '<div id="lic-gate-card">' +
+      '<div id="lic-gate-icon">'  + icon + '</div>' +
+      '<div id="lic-gate-title">' + (lang === 'en' ? titleEN : titleTR) + '</div>' +
+      '<div id="lic-gate-msg">'   + msg  + '</div>' +
+      '<div id="lic-gate-sub">'   + (lang === 'en' ? subEN : subTR)    + '</div>' +
+      '<div id="lic-gate-actions">' +
+        retryBtn +
+        '<button class="lic-gate-btn lic-gate-btn-secondary" onclick="_copyLicenseSupportId()">' +
+          (lang === 'en' ? '📋 Copy Support ID' : '📋 Destek ID Kopyala') +
+        '</button>' +
+        '<button class="lic-gate-btn lic-gate-btn-logout" onclick="logout()">' +
+          (lang === 'en' ? '🚪 Log Out' : '🚪 Çıkış Yap') +
+        '</button>' +
+      '</div>' +
+      '<div id="lic-gate-feedback"></div>' +
+    '</div>';
+}
+
+function _showLicenseGate(state) {
+  licenseGateActive = true;
+  const el = document.getElementById('lic-gate');
+  if (!el) return;
+  _renderLicenseGate(state || 'checking');
+  el.style.display = 'flex';
+}
+
+function _hideLicenseGate() {
+  licenseGateActive = false;
+  const el = document.getElementById('lic-gate');
+  if (!el) return;
+  el.style.display = 'none';
+  el.innerHTML = '';
+}
+
+async function _retryLicenseCheck() {
+  const lang     = (DATA && DATA.settings && DATA.settings.lang) || 'tr';
+  const btn      = document.getElementById('lic-gate-retry-btn');
+  const origText = btn ? btn.textContent : (lang === 'en' ? '🔄 Retry' : '🔄 Tekrar Dene');
+  if (btn) { btn.disabled = true; btn.classList.add('lic-gate-btn-loading'); btn.textContent = lang === 'en' ? '⏳ Checking...' : '⏳ Kontrol ediliyor...'; }
+  _setLicenseGateFeedback(
+    lang === 'en' ? '⏳ Checking license again...' : '⏳ Lisans tekrar kontrol ediliyor...', 'info'
+  );
+  let result;
+  try {
+    const _timeout = new Promise(function(_, rej) {
+      setTimeout(function() { rej(new Error('timeout')); }, 10000);
+    });
+    result = await Promise.race([window.electron.checkLicense(), _timeout]);
+  } catch (e) {
+    console.warn('[license] retry check error', e && e.message);
+    result = { ok: false, reason: 'verifier_error' };
+  }
+  if (result.ok) {
+    licenseStatus  = result;
+    licenseChecked = true;
+    _renderLicenseStatus();
+    _hideLicenseGate();
+  } else {
+    if (btn) { btn.disabled = false; btn.classList.remove('lic-gate-btn-loading'); btn.textContent = origText; }
+    const msg = result.reason === 'verifier_error'
+      ? (lang === 'en' ? '⚠ Could not reach license verifier.' : '⚠ Lisans doğrulayıcısına ulaşılamadı.')
+      : (lang === 'en' ? '🔁 Checked again. No license is still installed.' : '🔁 Tekrar kontrol edildi. Lisans hâlâ yüklü değil.');
+    _setLicenseGateFeedback(msg, result.reason === 'verifier_error' ? 'error' : 'manual');
+  }
+}
+
+function _extractSupportId(raw) {
+  if (!raw) return null;
+  if (typeof raw === 'string') return raw.length > 0 ? raw : null;
+  if (typeof raw !== 'object') return null;
+  var cands = [
+    raw.fingerprint,
+    raw.machineFingerprint,
+    raw.machineId,
+    raw.id,
+    raw.value,
+    raw.hash,
+    raw.data && raw.data.fingerprint,
+    raw.data && raw.data.machineFingerprint,
+    raw.data && raw.data.machineId
+  ];
+  for (var i = 0; i < cands.length; i++) {
+    if (typeof cands[i] === 'string' && cands[i].length > 0) return cands[i];
+  }
+  return null;
+}
+
+async function _copyLicenseSupportId() {
+  const lang = (DATA && DATA.settings && DATA.settings.lang) || 'tr';
+  if (!window.electron || !window.electron.getMachineId) {
+    _setLicenseGateFeedback(lang === 'en' ? '⚠ Support ID unavailable' : '⚠ Destek ID kullanılamıyor', 'error');
+    return;
+  }
+  _setLicenseGateFeedback(lang === 'en' ? '⏳ Getting ID...' : '⏳ ID alınıyor...', 'info');
+  try {
+    const raw = await window.electron.getMachineId();
+    const supportId = _extractSupportId(raw);
+    if (!supportId) {
+      _setLicenseGateFeedback(lang === 'en' ? '⚠ Support ID unavailable' : '⚠ Destek ID kullanılamıyor', 'error');
+      return;
+    }
+    let copied = false;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(supportId);
+        copied = true;
+      } catch (clipErr) {
+        console.warn('[license] clipboard write failed', clipErr && clipErr.message);
+      }
+    }
+    if (copied) {
+      _setLicenseGateFeedback(
+        (lang === 'en' ? '✅ Copied: ' : '✅ Kopyalandı: ') + supportId,
+        'success'
+      );
+    } else {
+      _setLicenseGateFeedback(
+        (lang === 'en' ? '📋 Copy manually: ' : '📋 El ile kopyalayın: ') + supportId,
+        'manual'
+      );
+    }
+  } catch (e) {
+    console.warn('[license] getMachineId error', e && e.message);
+    _setLicenseGateFeedback(lang === 'en' ? '⚠ Could not get Support ID' : '⚠ Destek ID alınamadı', 'error');
+  }
+}
+
+function _setLicenseGateFeedback(msg, type) {
+  var fb = document.getElementById('lic-gate-feedback');
+  if (!fb) return;
+  var isLight = document.documentElement.getAttribute('data-theme') === 'light';
+  var S = {
+    success: { accent:'#10b981', bgD:'rgba(16,185,129,.1)',  bgL:'rgba(16,185,129,.07)', txtL:'#065f46' },
+    error:   { accent:'#f43f5e', bgD:'rgba(244,63,94,.1)',   bgL:'rgba(244,63,94,.07)',  txtL:'#be123c' },
+    info:    { accent:'#6366f1', bgD:'rgba(99,102,241,.13)', bgL:'rgba(99,102,241,.08)', txtL:'#3730a3' },
+    manual:  { accent:'#f59e0b', bgD:'rgba(245,158,11,.1)',  bgL:'rgba(245,158,11,.07)', txtL:'#92400e' }
+  };
+  var s   = S[type] || { accent:'#94a3b8', bgD:'rgba(148,163,184,.1)', bgL:'rgba(148,163,184,.07)', txtL:'#475569' };
+  var bg  = isLight ? s.bgL : s.bgD;
+  var clr = isLight ? s.txtL : s.accent;
+  fb.style.cssText =
+    'margin-top:14px;font-size:12px;font-weight:500;line-height:1.6;' +
+    'padding:10px 14px 10px 12px;border-radius:8px;word-break:break-all;text-align:left;' +
+    'border-left:3px solid ' + s.accent + ';' +
+    'border-top:1px solid rgba(128,128,128,.14);' +
+    'border-right:1px solid rgba(128,128,128,.14);' +
+    'border-bottom:1px solid rgba(128,128,128,.14);' +
+    'color:' + clr + ';background:' + bg + ';';
+  fb.textContent = msg;
 }
 
 function addAboutToSidebar(){
@@ -13050,6 +13331,18 @@ window.rollbackImport=function(histId,snapshotId){
 };
 
 })();}catch(e){console.error('[ImportWizard]',e);}
+
+/* ── CH-4C.6: Reset gate state on logout ────────────────────────────────────*/
+try{(function(){
+  var _origLogout46=logout;
+  window.logout=logout=function(){
+    licenseChecked   =false;
+    licenseStatus    =null;
+    licenseGateActive=false;
+    _hideLicenseGate();
+    _origLogout46();
+  };
+})();}catch(e){console.error('[CH-4C.6 logout wrap]',e);}
 
 </script>
 </body>
