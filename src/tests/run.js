@@ -1567,6 +1567,158 @@ async function runB3Tests() {
   });
 }
 
+// ── License Issuer (CH-4B) ────────────────────────────────────────────────────
+console.log('\nLicense Issuer (CH-4B):');
+
+var _fs   = require('fs');
+var _os   = require('os');
+var _path = require('path');
+var _issuer = require('../../scripts/license-issuer.js');
+var _issueLicense         = _issuer.issueLicense;
+var _validatePayloadInput = _issuer.validatePayloadInput;
+var _canonicalizePayload  = _issuer.canonicalizePayload;
+
+var _ch4bKp = crypto_mid.generateKeyPairSync('ec', {
+  namedCurve: 'P-256',
+  privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+  publicKeyEncoding:  { type: 'spki',  format: 'pem' },
+});
+var _ch4bPrivPem = _ch4bKp.privateKey;
+var _ch4bPubPem  = _ch4bKp.publicKey;
+
+var _ch4bTmpKey = _path.join(_os.tmpdir(), 'ktp_ch4b_test_' + Date.now() + '.pem');
+_fs.writeFileSync(_ch4bTmpKey, _ch4bPrivPem, { mode: 0o600 });
+
+var _VALID_FP = 'a3f7b2c1'.repeat(8); // 64-char lowercase hex
+var _BASE_ARGS = {
+  customerId:   'TEST-001',
+  customerName: 'Test Customer',
+  fingerprint:  _VALID_FP,
+  plan:         'standard',
+  dryRun:       true,
+  keyPath:      _ch4bTmpKey,
+};
+var _UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+var _EXPECTED_FIELDS = ['appId','appVersion','customerId','customerName','expiresAt',
+  'features','issuedAt','licenseId','machineFingerprint','perpetual',
+  'plan','product','schemaVersion','seats'].sort().join(',');
+
+test('CH-4B: valid dry-run returns parseable JSON with payload and signature', function() {
+  var r = _issueLicense(_BASE_ARGS);
+  assert(r.ok, 'issueLicense failed: ' + (r.errors || []).join('; '));
+  var parsed = JSON.parse(r.licenseJson);
+  assert(typeof parsed.payload === 'object' && parsed.payload !== null, 'payload missing');
+  assert(typeof parsed.signature === 'string' && parsed.signature.length > 0, 'signature missing');
+});
+
+test('CH-4B: signature verifies against temp public key', function() {
+  var r = _issueLicense(_BASE_ARGS);
+  assert(r.ok, 'issueLicense failed');
+  var parsed = JSON.parse(r.licenseJson);
+  var canonical = _canonicalizePayload(parsed.payload);
+  var sigBuf = Buffer.from(parsed.signature, 'base64url');
+  var ok = crypto_mid.verify('sha256', Buffer.from(canonical, 'utf8'), _ch4bPubPem, sigBuf);
+  assert(ok, 'signature must verify against temp public key');
+});
+
+test('CH-4B: mutated payload fails signature verification', function() {
+  var r = _issueLicense(_BASE_ARGS);
+  assert(r.ok, 'issueLicense failed');
+  var parsed = JSON.parse(r.licenseJson);
+  parsed.payload.seats = 999;
+  var canonical = _canonicalizePayload(parsed.payload);
+  var sigBuf = Buffer.from(parsed.signature, 'base64url');
+  var ok = crypto_mid.verify('sha256', Buffer.from(canonical, 'utf8'), _ch4bPubPem, sigBuf);
+  assert(!ok, 'mutated payload must NOT verify');
+});
+
+test('CH-4B: perpetual license has expiresAt===null and perpetual===true', function() {
+  var r = _issueLicense(_BASE_ARGS);
+  assert(r.ok, 'issueLicense failed');
+  assertEqual(r.payload.expiresAt, null);
+  assertEqual(r.payload.perpetual, true);
+});
+
+test('CH-4B: expiring license has T23:59:59.999Z suffix and perpetual===false', function() {
+  var args = Object.assign({}, _BASE_ARGS, { expires: '2027-12-31' });
+  var r = _issueLicense(args);
+  assert(r.ok, 'issueLicense failed: ' + (r.errors || []).join('; '));
+  assert(typeof r.payload.expiresAt === 'string', 'expiresAt must be a string');
+  assert(r.payload.expiresAt.endsWith('T23:59:59.999Z'), 'expiresAt must end with T23:59:59.999Z');
+  assertEqual(r.payload.perpetual, false);
+});
+
+test('CH-4B: past --expires date is rejected', function() {
+  var v = _validatePayloadInput({ customerId: 'T', customerName: 'N', fingerprint: _VALID_FP, plan: 'standard', expires: '2020-01-01' });
+  assert(!v.ok, 'past date must be rejected');
+  assert(v.errors.some(function(e) { return /future/i.test(e); }), 'error must mention "future"');
+});
+
+test('CH-4B: --fingerprint wrong length is rejected', function() {
+  var v = _validatePayloadInput({ customerId: 'T', customerName: 'N', fingerprint: 'abc123', plan: 'standard' });
+  assert(!v.ok, 'short fingerprint must be rejected');
+  assert(v.errors.some(function(e) { return /fingerprint/i.test(e); }), 'error must mention fingerprint');
+});
+
+test('CH-4B: --fingerprint non-hex chars are rejected', function() {
+  var badFp = 'g' + 'a'.repeat(63);
+  var v = _validatePayloadInput({ customerId: 'T', customerName: 'N', fingerprint: badFp, plan: 'standard' });
+  assert(!v.ok, 'non-hex fingerprint must be rejected');
+  assert(v.errors.some(function(e) { return /fingerprint/i.test(e); }), 'error must mention fingerprint');
+});
+
+test('CH-4B: unknown --plan is rejected', function() {
+  var v = _validatePayloadInput({ customerId: 'T', customerName: 'N', fingerprint: _VALID_FP, plan: 'enterprise' });
+  assert(!v.ok, 'unknown plan must be rejected');
+  assert(v.errors.some(function(e) { return /plan/i.test(e); }), 'error must mention plan');
+});
+
+test('CH-4B: missing required argument is rejected', function() {
+  var v = _validatePayloadInput({ customerName: 'N', fingerprint: _VALID_FP, plan: 'standard' });
+  assert(!v.ok, 'missing customerId must be rejected');
+  assert(v.errors.some(function(e) { return /customer-id/i.test(e); }), 'error must mention customer-id');
+});
+
+test('CH-4B: missing --key-path file returns a clean error', function() {
+  var args = Object.assign({}, _BASE_ARGS, { keyPath: _path.join(_os.tmpdir(), 'nonexistent_ktp_key_xyz_' + Date.now() + '.pem') });
+  var r = _issueLicense(args);
+  assert(!r.ok, 'missing key must return ok:false');
+  assert(Array.isArray(r.errors) && r.errors.length > 0, 'errors array must be non-empty');
+  assert(r.errors.some(function(e) { return typeof e === 'string' && e.length > 0; }), 'error must be a non-empty string');
+});
+
+test('CH-4B: --dry-run returns payload and licenseJson without writing a file', function() {
+  var r = _issueLicense(_BASE_ARGS); // dryRun: true
+  assert(r.ok, 'dry-run failed');
+  assertEqual(r.dryRun, true);
+  assert(typeof r.licenseJson === 'string', 'licenseJson must be a string');
+  assert(typeof r.filename === 'string', 'filename must be a string');
+  assert(r.outPath === undefined, 'outPath must be absent in dry-run result');
+});
+
+test('CH-4B: payload contains exactly the 14 expected fields', function() {
+  var r = _issueLicense(_BASE_ARGS);
+  assert(r.ok, 'issueLicense failed');
+  var actual = Object.keys(r.payload).sort().join(',');
+  assertEqual(actual, _EXPECTED_FIELDS, 'payload field set mismatch');
+});
+
+test('CH-4B: licenseId matches UUID v4 format', function() {
+  var r = _issueLicense(_BASE_ARGS);
+  assert(r.ok, 'issueLicense failed');
+  assert(_UUID_V4_RE.test(r.payload.licenseId), 'licenseId must be UUID v4, got: ' + r.payload.licenseId);
+});
+
+test('CH-4B: schemaVersion==="1" and issuedAt is valid ISO 8601 UTC', function() {
+  var r = _issueLicense(_BASE_ARGS);
+  assert(r.ok, 'issueLicense failed');
+  assertEqual(r.payload.schemaVersion, '1');
+  assert(typeof r.payload.issuedAt === 'string' && r.payload.issuedAt.endsWith('Z'), 'issuedAt must end with Z');
+  assert(!isNaN(new Date(r.payload.issuedAt).getTime()), 'issuedAt must parse as valid date');
+});
+
+try { _fs.unlinkSync(_ch4bTmpKey); } catch (e) { /* ignore */ }
+
 runB3Tests().then(function() {
   console.log('\n═══ Results: ' + passed + ' passed, ' + failed + ' failed ═══\n');
   if (failed > 0) {
