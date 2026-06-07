@@ -8,6 +8,7 @@ const SUPPORTED_SCHEMA_VERSION = '1';
 const EXPECTED_APP_ID          = 'com.kiratakippro.customer';
 // Mirrors scripts/license-issuer.js buildPayload line 159: product: 'KiraTakipPro'
 const EXPECTED_PRODUCT         = 'KiraTakipPro';
+const EXPECTED_KEY_ID          = 'ktp-prod-2026-06';
 const ALLOWED_PLANS            = ['standard', 'pro', 'trial'];
 const FINGERPRINT_RE           = /^[0-9a-f]{64}$/;
 
@@ -88,6 +89,12 @@ function verifyLicenseObject(licenseObject, currentFingerprint, options = {}) {
     if (payload.product !== EXPECTED_PRODUCT) {
       return { ok: false, reason: 'invalid_app', message: 'License product mismatch' };
     }
+    if (typeof payload.keyId !== 'string' || payload.keyId.length === 0) {
+      return { ok: false, reason: 'invalid_app', message: 'keyId must be a non-empty string' };
+    }
+    if (payload.keyId !== EXPECTED_KEY_ID) {
+      return { ok: false, reason: 'invalid_app', message: `License keyId is not recognised: ${payload.keyId}` };
+    }
 
     // ── 4. Required field types ───────────────────────────────────────────────
     if (typeof payload.machineFingerprint !== 'string' || !FINGERPRINT_RE.test(payload.machineFingerprint)) {
@@ -155,6 +162,7 @@ function verifyLicenseObject(licenseObject, currentFingerprint, options = {}) {
         schemaVersion:      payload.schemaVersion,
         appId:              payload.appId,
         product:            payload.product,
+        keyId:              payload.keyId,
         appVersion:         payload.appVersion     ?? null,
         plan:               payload.plan,
         customerName:       payload.customerName   ?? null,

@@ -11,6 +11,7 @@ const FINGERPRINT_RE   = /^[0-9a-f]{64}$/;
 const DATE_RE          = /^\d{4}-\d{2}-\d{2}$/;
 const CUSTOMER_ID_RE   = /^[A-Za-z0-9_.-]+$/;
 const SEATS_RE         = /^\d+$/;
+const KEY_ID           = 'ktp-prod-2026-06';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -161,6 +162,7 @@ function buildPayload(args, expiresAt, seats) {
     plan:               args.plan,
     customerName:       args.customerName,
     customerId:         args.customerId,
+    keyId:              KEY_ID,
     machineFingerprint: args.fingerprint,
     issuedAt:           new Date().toISOString(),
     expiresAt,

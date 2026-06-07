@@ -42,6 +42,7 @@ function _buildPayload(overrides) {
     schemaVersion:      '1',
     appId:              'com.kiratakippro.customer',
     product:            'KiraTakipPro',
+    keyId:              'ktp-prod-2026-06',
     appVersion:         '6.0.0',
     plan:               'standard',
     customerName:       'Test Customer',
@@ -253,6 +254,28 @@ function register(test, assert, assertEqual) {
     assertEqual(r.reason, 'invalid_app', 'reason must be invalid_app');
   });
 
+  // ── M2. keyId checks ──────────────────────────────────────────────────────────
+  // keyId is checked in step 3 (app binding), before fingerprint and signature.
+
+  test('CH-4C: valid license result includes keyId and returns ktp-prod-2026-06', function() {
+    var r = verifier.verifyLicenseObject(_makeLicense(), _FP, _OPTS);
+    assert(r.ok, 'expected ok:true, got reason: ' + r.reason);
+    assertEqual(r.license.keyId, 'ktp-prod-2026-06', 'keyId must be ktp-prod-2026-06');
+  });
+
+  test('CH-4C: missing keyId returns ok:false reason invalid_app', function() {
+    var p = _buildPayload(); delete p.keyId;
+    var r = verifier.verifyLicenseObject({ payload: p, signature: 'abc' }, _FP, _OPTS);
+    assert(!r.ok, 'missing keyId must fail');
+    assertEqual(r.reason, 'invalid_app', 'reason must be invalid_app');
+  });
+
+  test('CH-4C: wrong keyId returns ok:false reason invalid_app', function() {
+    var r = verifier.verifyLicenseObject({ payload: _buildPayload({ keyId: 'ktp-prod-9999-99' }), signature: 'abc' }, _FP, _OPTS);
+    assert(!r.ok, 'wrong keyId must fail');
+    assertEqual(r.reason, 'invalid_app', 'reason must be invalid_app');
+  });
+
   // ── N. Invalid plan ───────────────────────────────────────────────────────────
   // plan is checked in required fields (step 4), before fingerprint and signature.
 
@@ -376,7 +399,7 @@ function register(test, assert, assertEqual) {
   test('CH-4C: valid license result contains all required fields', function() {
     var r = verifier.verifyLicenseObject(_makeLicense(), _FP, _OPTS);
     assert(r.ok, 'must be ok:true');
-    var required = ['schemaVersion','appId','product','appVersion','plan','customerName',
+    var required = ['schemaVersion','appId','product','keyId','appVersion','plan','customerName',
                     'customerId','machineFingerprint','issuedAt','expiresAt','perpetual',
                     'features','seats','licenseId'];
     required.forEach(function(field) {

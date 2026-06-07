@@ -1600,7 +1600,7 @@ var _BASE_ARGS = {
 };
 var _UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 var _EXPECTED_FIELDS = ['appId','appVersion','customerId','customerName','expiresAt',
-  'features','issuedAt','licenseId','machineFingerprint','perpetual',
+  'features','issuedAt','keyId','licenseId','machineFingerprint','perpetual',
   'plan','product','schemaVersion','seats'].sort().join(',');
 
 test('CH-4B: valid dry-run returns parseable JSON with payload and signature', function() {
@@ -1696,7 +1696,7 @@ test('CH-4B: --dry-run returns payload and licenseJson without writing a file', 
   assert(r.outPath === undefined, 'outPath must be absent in dry-run result');
 });
 
-test('CH-4B: payload contains exactly the 14 expected fields', function() {
+test('CH-4B: payload contains exactly the 15 expected fields', function() {
   var r = _issueLicense(_BASE_ARGS);
   assert(r.ok, 'issueLicense failed');
   var actual = Object.keys(r.payload).sort().join(',');
