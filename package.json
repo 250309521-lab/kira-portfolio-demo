@@ -18,7 +18,8 @@
     "lint": "echo 'No linter configured'",
     "test": "node src/tests/run.js",
     "test:integrity": "node src/tests/integrity.js",
-    "test:all": "node src/tests/run.js && node src/tests/integrity.js"
+    "test:all": "node src/tests/run.js && node src/tests/integrity.js",
+    "license:issue": "node scripts/license-issuer.js"
   },
   "dependencies": {
     "electron-store": "^8.2.0",
