@@ -15,6 +15,7 @@ const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
 const { getMachineFingerprint } = require('./machine-id');
+const { verifyLicenseJson }     = require('./license-verifier');
 
 const IS_DEV = process.argv.includes('--dev') || !app.isPackaged;
 const APP_VER = app.getVersion();
@@ -25,7 +26,11 @@ const LEGACY_DB_PATH = path.join(USER_DATA, 'kiratakip.db');
 const BACKUP_DIR = path.join(USER_DATA, 'backups');
 const LOG_PATH = path.join(USER_DATA, 'app.log');
 
-[USER_DATA, BACKUP_DIR].forEach(dir => {
+const LICENSE_DIR            = path.join(USER_DATA, 'license');
+const LICENSE_PATH           = path.join(LICENSE_DIR, 'active.ktplicense');
+const MAX_LICENSE_FILE_BYTES = 64 * 1024;
+
+[USER_DATA, BACKUP_DIR, LICENSE_DIR].forEach(dir => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
@@ -144,6 +149,24 @@ function cleanOldBackups(trigger, keep) {
       .sort((a, b) => b.time - a.time);
     files.slice(keep).forEach(f => { try { fs.unlinkSync(path.join(BACKUP_DIR, f.name)); } catch {} });
   } catch {}
+}
+
+function _readActiveLicense() {
+  if (!fs.existsSync(LICENSE_PATH)) {
+    return { ok: false, reason: 'no_license' };
+  }
+
+  try {
+    const stat = fs.statSync(LICENSE_PATH);
+    if (stat.size > MAX_LICENSE_FILE_BYTES) {
+      return { ok: false, reason: 'read_error', message: 'License file exceeds size limit' };
+    }
+
+    const text = fs.readFileSync(LICENSE_PATH, 'utf8');
+    return { ok: true, text };
+  } catch {
+    return { ok: false, reason: 'read_error', message: 'Unable to read license file' };
+  }
 }
 
 function setupIPC() {
@@ -342,6 +365,52 @@ function setupIPC() {
       return { ok: false, error: 'Machine GUID unavailable' };
     }
     return { ok: true, fingerprint: fp };
+  });
+
+  ipcMain.handle('license:check', () => {
+    const read = _readActiveLicense();
+
+    if (!read.ok) {
+      log('INFO', 'license:check — no active license', { reason: read.reason });
+      return {
+        ok: false,
+        reason: read.reason,
+        ...(read.message ? { message: read.message } : {}),
+      };
+    }
+
+    const currentFingerprint = getMachineFingerprint();
+    const result = verifyLicenseJson(read.text, currentFingerprint);
+
+    if (result.ok) {
+      log('INFO', 'license:check — valid', {
+        licenseId: result.license.licenseId,
+        keyId:     result.license.keyId,
+        plan:      result.license.plan,
+        perpetual: result.license.perpetual,
+        expiresAt: result.license.expiresAt,
+      });
+
+      return {
+        ok:      true,
+        reason:  'valid',
+        license: {
+          licenseId:  result.license.licenseId,
+          keyId:      result.license.keyId,
+          plan:       result.license.plan,
+          customerId: result.license.customerId,
+          expiresAt:  result.license.expiresAt,
+          perpetual:  result.license.perpetual,
+        },
+      };
+    }
+
+    log('WARN', 'license:check — invalid', { reason: result.reason });
+
+    return {
+      ok:     false,
+      reason: result.reason,
+    };
   });
 }
 
