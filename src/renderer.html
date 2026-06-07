@@ -4090,6 +4090,10 @@ tbody tr[onclick] { cursor: pointer; }
         <div class="cloud-label-sub" id="cloud-sub">Yerel mod aktif</div>
       </div>
     </div>
+    <div id="lic-status"
+         style="display:none;font-size:10.5px;padding:5px 8px;border-radius:var(--r1);
+                margin:2px 0;line-height:1.45;border:1px solid transparent;
+                color:var(--i2);white-space:normal"></div>
     <button class="sb-save-btn" id="sb-save-btn" onclick="manualSave()">💾 Kaydet</button>
     <button class="sb-toggle-btn" id="sb-toggle" onclick="toggleSidebar()" title="Kenar çubuğunu daralt/genişlet">◀ Daralt</button>
   </div>
@@ -4252,6 +4256,8 @@ const DEFAULT_USERS=[
 let USERS=[];
 let currentUser=null;
 let loginSelectedUser=null;
+let licenseStatus  = null;
+let licenseChecked = false;
 
 // B1: PIN rate-limiting state (in-memory; intentionally resets on app restart)
 const _pinAttempts={};      // { uid: { count, lockUntil } }
@@ -11191,6 +11197,91 @@ function initApp(){
   if(window._ktpCorruptWarn){ setTimeout(()=>toast(window._ktpCorruptWarn,'red'),500); window._ktpCorruptWarn=null; }
 }
 
+// ── CH-4C.5: License status ──────────────────────────────────────────────────
+
+function _licenseMsg(reason, lang) {
+  const TR = {
+    valid:                   'Lisans: Aktif',
+    no_license:              '⚠ Lisans yüklü değil',
+    read_error:              '⚠ Lisans dosyası okunamadı',
+    invalid_json:            '⚠ Lisans dosyası geçersiz',
+    invalid_format:          '⚠ Lisans formatı hatalı',
+    unsupported_schema:      '⚠ Lisans sürümü desteklenmiyor',
+    invalid_app:             '❌ Bu lisans uygulamaya ait değil',
+    fingerprint_unavailable: '⚠ Makine kimliği alınamadı',
+    wrong_machine:           '❌ Bu lisans başka makineye ait',
+    invalid_signature:       '❌ Lisans imzası geçersiz',
+    expired:                 '❌ Lisans süresi doldu',
+    verifier_error:          '⚠ Lisans doğrulanamadı',
+  };
+  const EN = {
+    valid:                   'License: Active',
+    no_license:              '⚠ No license installed',
+    read_error:              '⚠ License file unreadable',
+    invalid_json:            '⚠ Invalid license file',
+    invalid_format:          '⚠ License format error',
+    unsupported_schema:      '⚠ License version not supported',
+    invalid_app:             '❌ License is not for this app',
+    fingerprint_unavailable: '⚠ Machine ID unavailable',
+    wrong_machine:           '❌ License bound to another machine',
+    invalid_signature:       '❌ License signature invalid',
+    expired:                 '❌ License has expired',
+    verifier_error:          '⚠ License verification failed',
+  };
+  const map = (lang === 'en') ? EN : TR;
+  return map[reason] || (lang === 'en' ? '⚠ License status unknown' : '⚠ Lisans durumu bilinmiyor');
+}
+
+function _renderLicenseStatus() {
+  const el = document.getElementById('lic-status');
+  if (!el || !licenseStatus) return;
+  const lang = (DATA && DATA.settings && DATA.settings.lang) || 'tr';
+  if (licenseStatus.ok) {
+    const lic = licenseStatus.license;
+    const dateStr = lic.perpetual
+      ? (lang === 'en' ? 'Perpetual' : 'Süresiz')
+      : (lang === 'en' ? 'Expires: ' + String(lic.expiresAt || '').slice(0, 10)
+                       : 'Bitiş: '   + String(lic.expiresAt || '').slice(0, 10));
+    el.innerHTML =
+      '<span style="color:var(--emerald-l)">✓</span> ' +
+      (lang === 'en' ? 'License: Active' : 'Lisans: Aktif') +
+      '<br><span style="font-size:9.5px;color:var(--i4)">' + dateStr + '</span>';
+    el.style.background  = 'var(--ok-bg)';
+    el.style.borderColor = 'var(--ok-bd)';
+    el.style.color       = 'var(--emerald-l)';
+  } else {
+    const isCritical = licenseStatus.reason === 'wrong_machine' ||
+                       licenseStatus.reason === 'invalid_signature' ||
+                       licenseStatus.reason === 'expired';
+    el.textContent       = _licenseMsg(licenseStatus.reason, lang);
+    el.style.background  = isCritical ? 'var(--err-bg)'  : 'var(--warn-bg)';
+    el.style.borderColor = isCritical ? 'var(--err-bd)'  : 'var(--warn-bd)';
+    el.style.color       = isCritical ? 'var(--rose-l)'  : 'var(--amber-l)';
+  }
+  el.style.display = '';
+}
+
+async function checkLicenseStatus() {
+  if (!window.electron?.checkLicense) return;
+  if (licenseChecked) return;
+  licenseChecked = true;
+  try {
+    const result = await window.electron.checkLicense();
+    licenseStatus = result;
+    _renderLicenseStatus();
+    const lang = (DATA && DATA.settings && DATA.settings.lang) || 'tr';
+    if (!result.ok) {
+      const msg = _licenseMsg(result.reason, lang);
+      const isCritical = result.reason === 'wrong_machine' ||
+                         result.reason === 'invalid_signature' ||
+                         result.reason === 'expired';
+      toast(msg, isCritical ? 'red' : 'orange');
+    }
+  } catch (e) {
+    console.warn('[license] check error', e && e.message);
+  }
+}
+
 function addAboutToSidebar(){
   const footer=document.querySelector('.sb-footer');
   if(!footer||document.getElementById('nb-about')) return;
@@ -11346,6 +11437,9 @@ try{(function(){
       restoreElectronState().then(function(){ try{ render(); }catch(e){} }).catch(function(){});
     }
     _resetIdleTimer(); // CH-1: start 30-min idle countdown on login
+    if (isElectron && typeof checkLicenseStatus === 'function') {
+      checkLicenseStatus().catch(() => {});
+    }
   };
 
   // Start app safely. Show login if no user selected; auto-enter admin if login screen is not usable.
