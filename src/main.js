@@ -412,6 +412,73 @@ function setupIPC() {
       reason: result.reason,
     };
   });
+
+  ipcMain.handle('license:import', async () => {
+    const { filePaths, canceled } = await dialog.showOpenDialog({
+      title: 'Lisans Dosyası Seç / Select License File',
+      filters: [{ name: 'KTP License', extensions: ['ktplicense'] }],
+      properties: ['openFile']
+    });
+    if (canceled || !filePaths || !filePaths.length) {
+      return { ok: false, reason: 'cancelled' };
+    }
+
+    const srcPath = filePaths[0];
+
+    let stat;
+    try { stat = fs.statSync(srcPath); } catch {
+      return { ok: false, reason: 'read_error' };
+    }
+    if (stat.size === 0) return { ok: false, reason: 'read_error' };
+    if (stat.size > MAX_LICENSE_FILE_BYTES) return { ok: false, reason: 'too_large' };
+
+    let text;
+    try { text = fs.readFileSync(srcPath, 'utf8'); } catch {
+      return { ok: false, reason: 'read_error' };
+    }
+
+    const currentFingerprint = getMachineFingerprint();
+    const result = verifyLicenseJson(text, currentFingerprint);
+    if (!result.ok) {
+      log('WARN', 'license:import — verification failed', { reason: result.reason });
+      return { ok: false, reason: result.reason };
+    }
+
+    const BAK_PATH = LICENSE_PATH + '.bak';
+    const TMP_PATH = LICENSE_PATH + '.tmp';
+    try {
+      if (fs.existsSync(LICENSE_PATH)) {
+        try { fs.copyFileSync(LICENSE_PATH, BAK_PATH); }
+        catch (bakErr) { log('WARN', 'license:import — backup failed', { error: bakErr.message }); }
+      }
+      fs.writeFileSync(TMP_PATH, text, 'utf8');
+      fs.renameSync(TMP_PATH, LICENSE_PATH);
+    } catch (err) {
+      log('ERROR', 'license:import — install failed', { error: err.message });
+      try { if (fs.existsSync(TMP_PATH)) fs.unlinkSync(TMP_PATH); } catch {}
+      return { ok: false, reason: 'write_error' };
+    }
+
+    log('INFO', 'license:import — installed', {
+      licenseId: result.license.licenseId,
+      keyId:     result.license.keyId,
+      plan:      result.license.plan,
+      perpetual: result.license.perpetual,
+    });
+
+    return {
+      ok:     true,
+      reason: 'imported',
+      license: {
+        licenseId:  result.license.licenseId,
+        keyId:      result.license.keyId,
+        plan:       result.license.plan,
+        customerId: result.license.customerId,
+        expiresAt:  result.license.expiresAt,
+        perpetual:  result.license.perpetual,
+      }
+    };
+  });
 }
 
 let mainWindow  = null;

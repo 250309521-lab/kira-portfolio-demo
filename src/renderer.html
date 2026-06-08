@@ -11418,6 +11418,9 @@ function _renderLicenseGate(state) {
       '<div id="lic-gate-msg">'   + msg  + '</div>' +
       '<div id="lic-gate-sub">'   + (lang === 'en' ? subEN : subTR)    + '</div>' +
       '<div id="lic-gate-actions">' +
+        '<button id="lic-gate-import-btn" class="lic-gate-btn lic-gate-btn-primary" onclick="_importLicenseFile()">' +
+          (lang === 'en' ? '📂 Import License File' : '📂 Lisans Dosyası Yükle') +
+        '</button>' +
         retryBtn +
         '<button class="lic-gate-btn lic-gate-btn-secondary" onclick="_copyLicenseSupportId()">' +
           (lang === 'en' ? '📋 Copy Support ID' : '📋 Destek ID Kopyala') +
@@ -11476,6 +11479,89 @@ async function _retryLicenseCheck() {
       : (lang === 'en' ? '🔁 Checked again. No license is still installed.' : '🔁 Tekrar kontrol edildi. Lisans hâlâ yüklü değil.');
     _setLicenseGateFeedback(msg, result.reason === 'verifier_error' ? 'error' : 'manual');
   }
+}
+
+function _importLicenseMsg(reason, lang) {
+  var M = {
+    tr: {
+      imported:               '✅ Lisans başarıyla yüklendi.',
+      cancelled:              'İşlem iptal edildi.',
+      read_error:             '⚠ Dosya okunamadı.',
+      too_large:              '⚠ Dosya çok büyük.',
+      invalid_json:           '⚠ Geçersiz lisans dosyası.',
+      invalid_format:         '⚠ Lisans dosyası formatı hatalı.',
+      unsupported_schema:     '⚠ Bu lisans sürümü desteklenmiyor.',
+      invalid_app:            '⚠ Bu lisans bu uygulama için değil.',
+      fingerprint_unavailable:'⚠ Makine kimliği alınamadı.',
+      wrong_machine:          '⚠ Bu lisans başka bir makine için düzenlenmiş.',
+      invalid_signature:      '⚠ Lisans imzası geçersiz.',
+      expired:                '⚠ Bu lisans süresi dolmuş.',
+      verifier_error:         '⚠ Lisans doğrulanamadı.',
+      write_error:            '⚠ Lisans dosyası kaydedilemedi.'
+    },
+    en: {
+      imported:               '✅ License installed successfully.',
+      cancelled:              'Import cancelled.',
+      read_error:             '⚠ Could not read the file.',
+      too_large:              '⚠ File is too large.',
+      invalid_json:           '⚠ Invalid license file.',
+      invalid_format:         '⚠ License file has an invalid format.',
+      unsupported_schema:     '⚠ Unsupported license version.',
+      invalid_app:            '⚠ This license is not for this application.',
+      fingerprint_unavailable:'⚠ Machine identity unavailable.',
+      wrong_machine:          '⚠ This license is bound to a different machine.',
+      invalid_signature:      '⚠ License signature is not valid.',
+      expired:                '⚠ This license has expired.',
+      verifier_error:         '⚠ License could not be verified.',
+      write_error:            '⚠ Could not save the license file.'
+    }
+  };
+  var table = M[lang] || M.tr;
+  return table[reason] || (lang === 'en' ? '⚠ License import failed.' : '⚠ Lisans yüklenemedi.');
+}
+
+async function _importLicenseFile() {
+  const lang = (DATA && DATA.settings && DATA.settings.lang) || 'tr';
+  if (!window.electron || !window.electron.importLicense) {
+    _setLicenseGateFeedback(
+      lang === 'en' ? '⚠ License import unavailable' : '⚠ Lisans yükleme kullanılamıyor', 'error'
+    );
+    return;
+  }
+  const btn = document.getElementById('lic-gate-import-btn');
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('lic-gate-btn-loading');
+    btn.textContent = lang === 'en' ? '⏳ Selecting file...' : '⏳ Dosya seçiliyor...';
+  }
+  _setLicenseGateFeedback(
+    lang === 'en' ? '⏳ Selecting license file...' : '⏳ Lisans dosyası seçiliyor...', 'info'
+  );
+  let result;
+  try {
+    result = await window.electron.importLicense();
+  } catch (e) {
+    console.warn('[license] importLicense error', e && e.message);
+    result = { ok: false, reason: 'verifier_error' };
+  }
+  if (btn) {
+    btn.disabled = false;
+    btn.classList.remove('lic-gate-btn-loading');
+    btn.textContent = lang === 'en' ? '📂 Import License File' : '📂 Lisans Dosyası Yükle';
+  }
+  if (result.reason === 'cancelled') {
+    _setLicenseGateFeedback(_importLicenseMsg('cancelled', lang), 'manual');
+    return;
+  }
+  if (result.ok) {
+    _setLicenseGateFeedback(
+      lang === 'en' ? '✅ License installed. Checking...' : '✅ Lisans yüklendi. Kontrol ediliyor...', 'success'
+    );
+    licenseChecked = false;
+    await checkLicenseStatus();
+    return;
+  }
+  _setLicenseGateFeedback(_importLicenseMsg(result.reason, lang), 'error');
 }
 
 function _extractSupportId(raw) {
