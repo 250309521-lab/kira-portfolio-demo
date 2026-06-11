@@ -566,6 +566,8 @@ function createSplashWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
+      webSecurity: true,
+      devTools: IS_DEV,
       preload: path.join(__dirname, 'splash-preload.js'),
     }
   });
@@ -598,6 +600,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       webSecurity: true,
       allowRunningInsecureContent: false,
+      devTools: IS_DEV,
     }
   });
 
