@@ -10027,7 +10027,7 @@ function tplSettings(){
     </div>
   </div>
 
-  <div class="div-line"></div>
+  ${!PRODUCTION_MODE ? `<div class="div-line"></div>
   <div style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.28);border-radius:9px;padding:13px 15px 11px">
     <div style="font-size:11px;font-weight:700;color:var(--amber-l);letter-spacing:0.6px;text-transform:uppercase;margin-bottom:9px">${t('settingsDevTools')}</div>
     <div style="font-size:11px;color:var(--i4);margin-bottom:10px;line-height:1.5">${t('settingsDevDesc')}</div>
@@ -10035,7 +10035,7 @@ function tplSettings(){
       <button class="btn btn-sm" style="background:rgba(245,158,11,0.18);border:1px solid rgba(245,158,11,0.4);color:var(--amber-l)" onclick="closeMod();setTimeout(seedDemoData,80)">${t('settingsDemoSeed')}</button>
       <button class="btn btn-sm" style="background:rgba(244,63,94,0.12);border:1px solid rgba(244,63,94,0.3);color:var(--rose-l)" onclick="closeMod();setTimeout(clearDemoData,80)">${t('settingsDemoClear')}</button>
     </div>
-  </div>
+  </div>` : ''}
 
   <div class="modal-footer">
     <button class="btn btn-ghost" onclick="closeMod()">${t('close')}</button>
