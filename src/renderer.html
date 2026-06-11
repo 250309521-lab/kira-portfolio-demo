@@ -6221,7 +6221,7 @@ function needsOnboarding(){
   if(!DATA.initialized) return true;
   // Recovery: initialized flag set but data is inconsistent
   const hasBuilding=(DATA.buildings||[]).some(b=>b.active);
-  const hasAdmin=(DATA.users||[]).some(u=>u.role==='admin'&&(u.pin||u.pin_hash));
+  const hasAdmin=(DATA.users||[]).some(u=>u.role==='admin'&&(u.pin||u.pin_hash||u.pin_hash_v2));
   return !hasBuilding||!hasAdmin;
 }
 
@@ -6460,7 +6460,8 @@ async function obCommit(){
   const bldShort=bldName.split(/\s+/).map(w=>w.replace(/[^a-zA-ZğüşöçıĞÜŞÖÇİ]/gi,'')[0]||'')
     .join('').toUpperCase().slice(0,3) || bldName.replace(/[^a-zA-Z]/g,'').toUpperCase().slice(0,3) || 'BLD';
 
-  const adminPinHash=await _hashPin(_obPin);
+  const adminSalt=_genSalt();
+  const adminPinHash=await _hashPinV2(_obPin,adminSalt);
 
   // Single mutation point — all DATA writes happen here
   DATA.initialized=true;
@@ -6468,7 +6469,7 @@ async function obCommit(){
   DATA.tenants[bldId]=[];
   DATA.payments[bldId]={};
   DATA.expenses[bldId]=[];
-  DATA.users=[{id:'admin',name:adminName,role:'admin',pin_hash:adminPinHash,color:'#4a8af4',avatar:adminAvatar}];
+  DATA.users=[{id:'admin',name:adminName,role:'admin',pin_hash_v2:adminPinHash,pin_salt:adminSalt,color:'#4a8af4',avatar:adminAvatar}];
   _obPin=''; _obName=''; // clear transients immediately
 
   syncBuildingConstants();
@@ -7988,7 +7989,7 @@ function tplUsers(){
       </td>
       <td style="white-space:nowrap"><span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:rgba(255,255,255,.07);color:${rm.color}">${rm.label}</span></td>
       <td style="font-size:11px;color:var(--i3);white-space:nowrap">${rm.desc}</td>
-      <td style="font-family:var(--mono);color:var(--i4);font-size:11px">${(u.pin||u.pin_hash)?'● ● ● ●':'—'}</td>
+      <td style="font-family:var(--mono);color:var(--i4);font-size:11px">${(u.pin||u.pin_hash||u.pin_hash_v2)?'● ● ● ●':'—'}</td>
       <td style="white-space:nowrap">
         <span style="display:inline-flex;align-items:center;gap:4px;font-size:11px">
           <span style="width:6px;height:6px;border-radius:50%;background:${u.active!==false?'var(--emerald)':'var(--rose)'}"></span>
