@@ -169,34 +169,70 @@ function _readActiveLicense() {
   }
 }
 
-function setupIPC() {
-  ipcMain.handle('app:info', () => ({
-    version: APP_VER,
-    dbPath: DB_PATH,
-    legacyDbPath: LEGACY_DB_PATH,
-    backupDir: BACKUP_DIR,
-    userData: USER_DATA,
-    logPath: LOG_PATH,
-    storageEngine: 'json',
-    isDev: IS_DEV,
-    platform: process.platform,
-    nodeVersion: process.versions.node,
-    electronVersion: process.versions.electron,
-  }));
+// ── License guard — defense-in-depth for sensitive IPC handlers ───────────────
+// Verifies the active license at most once per GUARD_TTL_MS.
+// Set _guardCacheTs = 0 to force an immediate re-check on the next call.
 
-  ipcMain.handle('settings:get', (_, key) => store?.settings?.[key] ?? null);
+let _guardCache   = null;
+let _guardCacheTs = 0;
+const GUARD_TTL_MS = 5000;
+
+function licenseGuard() {
+  if (_guardCache && (Date.now() - _guardCacheTs) < GUARD_TTL_MS) return _guardCache;
+  const read = _readActiveLicense();
+  if (!read.ok) {
+    _guardCache = { ok: false, reason: 'license_required' };
+    _guardCacheTs = Date.now();
+    return _guardCache;
+  }
+  const result = verifyLicenseJson(read.text, getMachineFingerprint());
+  _guardCache   = result.ok ? { ok: true } : { ok: false, reason: 'license_required' };
+  _guardCacheTs = Date.now();
+  return _guardCache;
+}
+
+function setupIPC() {
+  ipcMain.handle('app:info', () => {
+    if (!licenseGuard().ok) return { version: APP_VER, isDev: IS_DEV, platform: process.platform };
+    return {
+      version: APP_VER,
+      dbPath: DB_PATH,
+      legacyDbPath: LEGACY_DB_PATH,
+      backupDir: BACKUP_DIR,
+      userData: USER_DATA,
+      logPath: LOG_PATH,
+      storageEngine: 'json',
+      isDev: IS_DEV,
+      platform: process.platform,
+      nodeVersion: process.versions.node,
+      electronVersion: process.versions.electron,
+    };
+  });
+
+  ipcMain.handle('settings:get', (_, key) => {
+    if (!licenseGuard().ok) return null;
+    return store?.settings?.[key] ?? null;
+  });
 
   ipcMain.handle('settings:set', (_, key, value) => {
+    if (!licenseGuard().ok) return false;
     store.settings[key] = String(value);
     saveStore();
     return true;
   });
 
-  ipcMain.handle('settings:getAll', () => ({ ...(store?.settings || {}) }));
+  ipcMain.handle('settings:getAll', () => {
+    if (!licenseGuard().ok) return {};
+    return { ...(store?.settings || {}) };
+  });
 
-  ipcMain.handle('backup:create', (_, trigger = 'manual') => autoBackup(trigger));
+  ipcMain.handle('backup:create', (_, trigger = 'manual') => {
+    if (!licenseGuard().ok) return null;
+    return autoBackup(trigger);
+  });
 
   ipcMain.handle('backup:list', () => {
+    if (!licenseGuard().ok) return [];
     try {
       return fs.readdirSync(BACKUP_DIR)
         .filter(f => f.endsWith('.db') || f.endsWith('.json'))
@@ -210,6 +246,7 @@ function setupIPC() {
   });
 
   ipcMain.handle('backup:restore', async (_, backupPath) => {
+    if (!licenseGuard().ok) return { ok: false, reason: 'license_required' };
     if (!backupPath) return { ok: false, error: 'No backup path provided' };
     // Confine restores to the approved backup directory
     const resolved = path.resolve(String(backupPath));
@@ -237,6 +274,7 @@ function setupIPC() {
   });
 
   ipcMain.handle('data:exportJSON', async (_, dataStr) => {
+    if (!licenseGuard().ok) return { ok: false, reason: 'license_required' };
     const { filePath, canceled } = await dialog.showSaveDialog({
       title: 'JSON Yedek Kaydet',
       defaultPath: path.join(os.homedir(), `KiraTakip_Yedek_${new Date().toISOString().slice(0,10)}.json`),
@@ -257,6 +295,7 @@ function setupIPC() {
   });
 
   ipcMain.handle('data:importJSON', async () => {
+    if (!licenseGuard().ok) return { ok: false, reason: 'license_required' };
     const { filePaths, canceled } = await dialog.showOpenDialog({
       title: 'JSON Yedek Seç',
       filters: [{ name: 'JSON Backup', extensions: ['json'] }],
@@ -278,16 +317,19 @@ function setupIPC() {
   });
 
   ipcMain.handle('fs:openFolder', (_, folderPath) => {
+    if (!licenseGuard().ok) return false;
     shell.openPath(folderPath || USER_DATA);
     return true;
   });
 
   ipcMain.handle('fs:openBackupFolder', () => {
+    if (!licenseGuard().ok) return false;
     shell.openPath(BACKUP_DIR);
     return true;
   });
 
   ipcMain.handle('audit:add', (_, entry) => {
+    if (!licenseGuard().ok) return false;
     store.audit_log.unshift({
       id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
       ts: entry?.t || new Date().toISOString(),
@@ -300,19 +342,26 @@ function setupIPC() {
     return true;
   });
 
-  ipcMain.handle('audit:list', (_, limit = 200) => store.audit_log.slice(0, Number(limit) || 200));
+  ipcMain.handle('audit:list', (_, limit = 200) => {
+    if (!licenseGuard().ok) return [];
+    return store.audit_log.slice(0, Number(limit) || 200);
+  });
 
-  ipcMain.handle('users:getAll', () => store.users.map(u => ({
-    id: u.id,
-    name: u.name,
-    avatar: u.avatar,
-    role: u.role,
-    color: u.color,
-    active: u.active,
-    created_at: u.created_at
-  })));
+  ipcMain.handle('users:getAll', () => {
+    if (!licenseGuard().ok) return [];
+    return store.users.map(u => ({
+      id: u.id,
+      name: u.name,
+      avatar: u.avatar,
+      role: u.role,
+      color: u.color,
+      active: u.active,
+      created_at: u.created_at
+    }));
+  });
 
   ipcMain.handle('users:upsert', (_, user) => {
+    if (!licenseGuard().ok) return false;
     if (!user || !user.id) return false;
     const now = new Date().toISOString();
     const existing = store.users.find(u => u.id === user.id);
@@ -333,6 +382,7 @@ function setupIPC() {
   });
 
   ipcMain.handle('users:delete', (_, userId) => {
+    if (!licenseGuard().ok) return false;
     const user = store.users.find(u => u.id === userId);
     if (user) {
       user.active = 0;
@@ -343,6 +393,7 @@ function setupIPC() {
   });
 
   ipcMain.handle('app:status', () => {
+    if (!licenseGuard().ok) return { dbConnected: false, version: APP_VER };
     const backupFiles = fs.existsSync(BACKUP_DIR)
       ? fs.readdirSync(BACKUP_DIR).filter(f => f.endsWith('.db') || f.endsWith('.json')).length
       : 0;
@@ -356,7 +407,10 @@ function setupIPC() {
     };
   });
 
-  ipcMain.handle('clipboard:read', () => clipboard.readText());
+  ipcMain.handle('clipboard:read', () => {
+    if (!licenseGuard().ok) return null;
+    return clipboard.readText();
+  });
 
   ipcMain.handle('license:getMachineId', () => {
     const fp = getMachineFingerprint();
@@ -465,6 +519,8 @@ function setupIPC() {
       plan:      result.license.plan,
       perpetual: result.license.perpetual,
     });
+
+    _guardCacheTs = 0; // invalidate guard cache so guarded IPCs work immediately after import
 
     return {
       ok:     true,
