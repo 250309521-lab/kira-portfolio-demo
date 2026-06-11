@@ -479,6 +479,12 @@ function setupIPC() {
       }
     };
   });
+
+  ipcMain.on('titlebar:setColor', (_, opts) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.setTitleBarOverlay({ height: 52, ...opts });
+    }
+  });
 }
 
 let mainWindow  = null;
@@ -527,7 +533,7 @@ function createWindow() {
     backgroundColor: '#060d1a',
     frame: false,
     titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#060d1a', symbolColor: '#94a3b8', height: 52 },
+    titleBarOverlay: { color: 'rgba(0,0,0,0)', symbolColor: '#94a3b8', height: 52 },
     show: false,
     webPreferences: {
       nodeIntegration: false,

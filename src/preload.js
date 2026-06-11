@@ -51,4 +51,7 @@ contextBridge.exposeInMainWorld('electron', {
   getMachineId:   () => ipcRenderer.invoke('license:getMachineId'),
   checkLicense:   () => ipcRenderer.invoke('license:check'),
   importLicense:  () => ipcRenderer.invoke('license:import'),
+
+  // ── UI chrome ─────────────────────────────────────────────────────────────
+  setTitleBarColor: (opts) => ipcRenderer.send('titlebar:setColor', opts),
 });

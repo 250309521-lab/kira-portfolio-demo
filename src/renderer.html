@@ -3948,6 +3948,120 @@ tbody tr[onclick] { cursor: pointer; }
 [data-theme="light"] .lic-gate-btn-secondary{ background:rgba(30,50,100,.07);   border-color:rgba(30,50,100,.22);  color:#3a5a8a; }
 [data-theme="light"] .lic-gate-btn-logout   { background:rgba(244,63,94,.07);   border-color:rgba(244,63,94,.35);  color:#be123c; }
 
+/* ── CH-4C.7B/C: Unlock confirmation + reveal ─────────────────── */
+@keyframes ktpUnlockPulse {
+  0%   { box-shadow:0 0 0 0 rgba(16,185,129,.5),0 0 20px rgba(16,185,129,.08); }
+  55%  { box-shadow:0 0 0 12px rgba(16,185,129,0),0 0 26px rgba(16,185,129,.14); }
+  100% { box-shadow:0 0 0 12px rgba(16,185,129,0),0 0 18px rgba(16,185,129,.06); }
+}
+@keyframes ktpConfirmCardIn {
+  from { opacity:0; transform:translateY(12px) scale(.97); }
+  to   { opacity:1; transform:none; }
+}
+@keyframes ktpConfirmSheen {
+  from { transform:translateX(-100%); }
+  to   { transform:translateX(220%); }
+}
+@keyframes ktpRevealCardExit {
+  to { opacity:0; transform:scale(.91); }
+}
+@keyframes ktpRevealVeil {
+  0%   { clip-path:circle(120% at 50% 50%); opacity:1; }
+  100% { clip-path:circle(0% at 50% 50%);   opacity:0; }
+}
+.lic-unlock-mark {
+  width:56px; height:56px; border-radius:50%;
+  border:2px solid rgba(16,185,129,.7);
+  box-shadow:0 0 20px rgba(16,185,129,.1);
+  margin:0 auto 20px; position:relative;
+  animation:ktpUnlockPulse 520ms cubic-bezier(.22,1,.36,1) both;
+}
+.lic-unlock-mark span {
+  display:block; position:absolute; inset:0; border-radius:50%;
+  background:radial-gradient(circle,rgba(16,185,129,.09) 0%,transparent 65%);
+}
+.lic-unlock-mark::before {
+  content:'\2713'; position:absolute; left:50%; top:50%;
+  transform:translate(-50%,-52%);
+  font-size:21px; color:rgba(16,185,129,.88);
+  font-weight:400; line-height:1;
+  font-family:var(--sans,'system-ui',sans-serif);
+}
+.lic-unlock-title {
+  font-size:18px; font-weight:700; color:var(--i1,#e2e8f0);
+  margin-bottom:6px; letter-spacing:-.01em;
+}
+.lic-unlock-sub {
+  font-size:13px; color:var(--i3,#94a3b8); margin-bottom:28px; line-height:1.5;
+}
+.lic-unlock-sheen {
+  position:absolute; top:0; left:0; right:0; bottom:0;
+  border-radius:inherit; pointer-events:none;
+  background:linear-gradient(90deg,transparent 0%,rgba(255,255,255,.05) 48%,transparent 100%);
+  transform:translateX(-100%);
+  animation:ktpConfirmSheen 900ms 350ms cubic-bezier(.25,.46,.45,.94) both;
+}
+.lic-unlock-continue {
+  width:100%; padding:11px 20px;
+  border-radius:var(--r2,10px);
+  border:1px solid rgba(99,102,241,.48);
+  background:linear-gradient(135deg,rgba(99,102,241,.18) 0%,rgba(16,185,129,.11) 100%);
+  color:var(--violet-l,#a78bfa); font-size:13.5px; font-weight:600;
+  cursor:pointer; letter-spacing:.04em; font-family:var(--sans);
+  transition:background .2s, box-shadow .2s;
+}
+.lic-unlock-continue:hover {
+  background:linear-gradient(135deg,rgba(99,102,241,.28) 0%,rgba(16,185,129,.18) 100%);
+  box-shadow:0 0 16px rgba(99,102,241,.22);
+}
+[data-theme="light"] .lic-unlock-title { color:#080f1e; }
+[data-theme="light"] .lic-unlock-sub   { color:#3a5a8a; }
+[data-theme="light"] .lic-unlock-continue {
+  border-color:rgba(99,102,241,.52);
+  background:linear-gradient(135deg,rgba(99,102,241,.12) 0%,rgba(16,185,129,.08) 100%);
+  color:#5b21b6;
+}
+[data-theme="light"] .lic-unlock-continue:hover {
+  background:linear-gradient(135deg,rgba(99,102,241,.2) 0%,rgba(16,185,129,.14) 100%);
+  box-shadow:0 0 14px rgba(99,102,241,.18);
+}
+#lic-gate.lic-gate-confirmed #lic-gate-card {
+  animation:ktpConfirmCardIn 300ms cubic-bezier(.22,1,.36,1) both;
+  position:relative; overflow:hidden;
+}
+.lic-gate-revealing {
+  animation:ktpRevealVeil 380ms 60ms cubic-bezier(.22,1,.36,1) both;
+  pointer-events:none;
+  filter:drop-shadow(0 0 8px var(--unlock-accent,rgba(99,102,241,.36)));
+}
+.lic-gate-revealing #lic-gate-card {
+  animation:ktpRevealCardExit 170ms cubic-bezier(.32,0,.67,0) both;
+}
+
+/* ── CH-4C.7D: Auth background images ────────────────────────── */
+#login-screen,
+#ob-screen {
+  background:
+    linear-gradient(rgba(6,13,26,.62) 0%,rgba(6,13,26,.72) 100%),
+    url('assets/backgrounds/auth-bg-dark.png') center/cover no-repeat;
+}
+[data-theme="light"] #login-screen,
+[data-theme="light"] #ob-screen {
+  background:
+    linear-gradient(rgba(238,242,249,.62) 0%,rgba(238,242,249,.72) 100%),
+    url('assets/backgrounds/auth-bg-light.png') center/cover no-repeat;
+}
+#lic-gate {
+  background:
+    linear-gradient(rgba(6,13,26,.72) 0%,rgba(6,13,26,.82) 100%),
+    url('assets/backgrounds/auth-bg-dark.png') center/cover no-repeat;
+}
+[data-theme="light"] #lic-gate {
+  background:
+    linear-gradient(rgba(238,242,249,.68) 0%,rgba(238,242,249,.78) 100%),
+    url('assets/backgrounds/auth-bg-light.png') center/cover no-repeat;
+}
+
 /* ── CH-4C.6: Light theme — login lang pill ───────────────────── */
 [data-theme="light"] #login-lang-pill > div {
   background: rgba(255,255,255,.75) !important;
@@ -3961,13 +4075,17 @@ tbody tr[onclick] { cursor: pointer; }
 }
 
 /* ── CH-4C.6: Light theme — topbar/overlay visual blend ───────── */
-/* titleBarOverlay color (#060d1a) is set in main.js; this gradient */
-/* eases the visual transition at the right edge in light theme.    */
+/* titleBarOverlay color is set dynamically via setTitleBarColor(). */
+/* Light theme overlay = #d8e5f5; gradient right edge matches it.   */
+/* border-bottom/box-shadow removed: native overlay cannot replicate */
+/* them, causing a visible seam. Color contrast provides separation. */
 [data-theme="light"] #topbar {
   background: linear-gradient(to right,
     rgba(210,225,242,.98) calc(100% - 340px),
-    rgba(6,13,26,.97)     100%
+    rgba(216,229,245,.98)  100%
   ) !important;
+  border-bottom: none !important;
+  box-shadow: none !important;
 }
 
 </style>
@@ -5556,6 +5674,11 @@ function t(key){
 
 // ── Apply theme from DATA.settings.theme ───────────────────────────────
 function applyTheme(theme){
+  if(window.electron&&window.electron.setTitleBarColor){
+    window.electron.setTitleBarColor(theme==='light'
+      ?{color:'rgba(0,0,0,0)',symbolColor:'#1e3a6a'}
+      :{color:'rgba(0,0,0,0)',symbolColor:'#94a3b8'});
+  }
   document.documentElement.setAttribute('data-theme',theme||'dark');
 }
 
@@ -11361,7 +11484,7 @@ async function checkLicenseStatus() {
   licenseStatus = result;
   _renderLicenseStatus();
   if (result.ok) {
-    _hideLicenseGate();
+    _hideLicenseGateAnimated();
   } else {
     _showLicenseGate('active');
   }
@@ -11449,6 +11572,54 @@ function _hideLicenseGate() {
   el.innerHTML = '';
 }
 
+function _hideLicenseGateAnimated() {
+  const el = document.getElementById('lic-gate');
+  if (!el || el.style.display === 'none') { _hideLicenseGate(); return; }
+  if (el.classList.contains('lic-gate-confirmed') || el.classList.contains('lic-gate-revealing')) return;
+  const lang = (DATA && DATA.settings && DATA.settings.lang) || 'tr';
+  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+  el.style.setProperty('--unlock-accent', isLight
+    ? 'rgba(37,99,235,.30)' : 'rgba(99,102,241,.38)');
+  el.classList.add('lic-gate-confirmed');
+  const card = document.getElementById('lic-gate-card');
+  if (card) {
+    card.innerHTML =
+      '<div class="lic-unlock-sheen" aria-hidden="true"></div>' +
+      '<div class="lic-unlock-mark" aria-hidden="true"><span></span></div>' +
+      '<div class="lic-unlock-title">' +
+        (lang === 'en' ? 'License verified' : 'Lisans doğrulandı') +
+      '</div>' +
+      '<div class="lic-unlock-sub">' +
+        (lang === 'en' ? 'Secure access is now active.' : 'Güvenli erişim etkinleştirildi.') +
+      '</div>' +
+      '<button class="lic-unlock-continue" onclick="_continueAfterLicenseUnlock()">' +
+        (lang === 'en' ? 'Continue' : 'Devam Et') +
+      '</button>';
+  }
+}
+
+function _continueAfterLicenseUnlock() {
+  const el = document.getElementById('lic-gate');
+  if (!el || el.classList.contains('lic-gate-revealing')) return;
+  el.classList.remove('lic-gate-confirmed');
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    el.style.removeProperty('--unlock-accent');
+    _hideLicenseGate();
+    return;
+  }
+  el.classList.add('lic-gate-revealing');
+  var cleaned = false;
+  function _doRevealCleanup() {
+    if (cleaned) return;
+    cleaned = true;
+    el.classList.remove('lic-gate-revealing');
+    el.style.removeProperty('--unlock-accent');
+    _hideLicenseGate();
+  }
+  var t = setTimeout(_doRevealCleanup, 460);
+  setTimeout(function() { clearTimeout(t); _doRevealCleanup(); }, 820);
+}
+
 async function _retryLicenseCheck() {
   const lang     = (DATA && DATA.settings && DATA.settings.lang) || 'tr';
   const btn      = document.getElementById('lic-gate-retry-btn');
@@ -11471,7 +11642,7 @@ async function _retryLicenseCheck() {
     licenseStatus  = result;
     licenseChecked = true;
     _renderLicenseStatus();
-    _hideLicenseGate();
+    _hideLicenseGateAnimated();
   } else {
     if (btn) { btn.disabled = false; btn.classList.remove('lic-gate-btn-loading'); btn.textContent = origText; }
     const msg = result.reason === 'verifier_error'
