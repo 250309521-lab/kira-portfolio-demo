@@ -1,0 +1,13 @@
+# Supabase local runtime state — never commit
+.branches/
+.temp/
+**/pg_data/
+
+# Secrets — NEVER commit any of these
+.env
+.env.*
+!.env.example
+supabase-service-role.key
+service_role_key.txt
+*.key
+*secret*

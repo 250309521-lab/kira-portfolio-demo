@@ -1,0 +1,55 @@
+# Supabase local development configuration.
+# See: https://supabase.com/docs/reference/cli/config
+
+[api]
+enabled = true
+port = 55321
+schemas = ["public", "ktp"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 55322
+shadow_port = 55320
+major_version = 15
+
+[studio]
+enabled = true
+port = 55323
+
+[inbucket]
+enabled = true
+port = 55324
+
+[storage]
+enabled = true
+file_size_limit = "100MiB"
+
+# Private bucket: workspace snapshots (sync state)
+[storage.buckets."ktp-snapshots"]
+public = false
+file_size_limit = "100MiB"
+allowed_mime_types = ["application/octet-stream"]
+
+# Private bucket: cloud backups (.ktpbackup archives)
+[storage.buckets."ktp-backups"]
+public = false
+file_size_limit = "100MiB"
+allowed_mime_types = ["application/octet-stream"]
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = []
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+enable_confirmations = false
+
+[analytics]
+enabled = false
