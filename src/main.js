@@ -79,6 +79,69 @@ function atomicWriteJSON(filePath, data) {
   fs.renameSync(temp, filePath);
 }
 
+// ── Full backup archive helpers (LOCAL-BACKUP-1) ───────────────────────────────
+const BACKUP_FORMAT_VERSION = 1;
+const MAX_KTPBACKUP_BYTES = 100 * 1024 * 1024;
+
+function sha256(str) {
+  return crypto.createHash('sha256').update(str, 'utf8').digest('hex');
+}
+
+function buildFullBackup(rendererStateStr, importProfilesStr, trigger) {
+  const ipStr = typeof importProfilesStr === 'string' ? importProfilesStr : null;
+  const mainStoreData = {
+    schemaVersion: store.schemaVersion || 2,
+    settings: store.settings || {},
+    audit_log: Array.isArray(store.audit_log) ? store.audit_log : [],
+    backup_records: Array.isArray(store.backup_records) ? store.backup_records : [],
+  };
+  const mainStoreStr = JSON.stringify(mainStoreData);
+  let workspaceId = '';
+  try { workspaceId = (JSON.parse(rendererStateStr || '{}')).workspaceId || ''; } catch {}
+  const manifest = {
+    formatVersion: BACKUP_FORMAT_VERSION,
+    appVersion: APP_VER,
+    mainStoreSchemaVersion: store.schemaVersion || 2,
+    createdAt: new Date().toISOString(),
+    trigger: String(trigger || 'manual'),
+    workspaceId,
+    checksums: {
+      rendererState: sha256(rendererStateStr || ''),
+      mainStore: sha256(mainStoreStr),
+      importProfiles: ipStr !== null ? sha256(ipStr) : null,
+    },
+  };
+  return { manifest, rendererState: rendererStateStr || '{}', mainStore: mainStoreStr, importProfiles: ipStr };
+}
+
+function validateFullBackup(archive) {
+  if (!archive || typeof archive !== 'object') return { ok: false, errors: ['Not a valid backup object'] };
+  const errors = [];
+  if (!archive.manifest || typeof archive.manifest !== 'object') {
+    return { ok: false, errors: ['Missing or invalid manifest'] };
+  }
+  if (typeof archive.manifest.formatVersion !== 'number') {
+    errors.push('manifest.formatVersion missing');
+  } else if (archive.manifest.formatVersion > BACKUP_FORMAT_VERSION) {
+    return { ok: false, errors: ['This backup was created with a newer version of the app. Please update.'] };
+  }
+  if (!archive.manifest.checksums) errors.push('manifest.checksums missing');
+  if (typeof archive.rendererState !== 'string') errors.push('Missing rendererState section');
+  if (typeof archive.mainStore !== 'string') errors.push('Missing mainStore section');
+  if (errors.length > 0) return { ok: false, errors };
+  const { checksums } = archive.manifest;
+  if (sha256(archive.rendererState) !== checksums.rendererState)
+    errors.push('rendererState checksum mismatch — file may be corrupted or tampered');
+  if (sha256(archive.mainStore) !== checksums.mainStore)
+    errors.push('mainStore checksum mismatch — file may be corrupted or tampered');
+  if (archive.importProfiles !== null && archive.importProfiles !== undefined && checksums.importProfiles) {
+    if (sha256(archive.importProfiles) !== checksums.importProfiles)
+      errors.push('importProfiles checksum mismatch — file may be corrupted or tampered');
+  }
+  if (errors.length > 0) return { ok: false, errors };
+  return { ok: true, manifest: archive.manifest };
+}
+
 function saveStore() {
   if (!store) return;
   atomicWriteJSON(DB_PATH, store);
@@ -144,7 +207,7 @@ function autoBackup(trigger = 'auto') {
 function cleanOldBackups(trigger, keep) {
   try {
     const files = fs.readdirSync(BACKUP_DIR)
-      .filter(f => f.includes(`-${trigger}.json`) || f.includes(`-${trigger}.db`))
+      .filter(f => f.includes(`-${trigger}.json`) || f.includes(`-${trigger}.db`) || f.includes(`-${trigger}.ktpbackup`))
       .map(f => ({ name: f, time: fs.statSync(path.join(BACKUP_DIR, f)).mtime.getTime() }))
       .sort((a, b) => b.time - a.time);
     files.slice(keep).forEach(f => { try { fs.unlinkSync(path.join(BACKUP_DIR, f.name)); } catch {} });
@@ -235,11 +298,11 @@ function setupIPC() {
     if (!licenseGuard().ok) return [];
     try {
       return fs.readdirSync(BACKUP_DIR)
-        .filter(f => f.endsWith('.db') || f.endsWith('.json'))
+        .filter(f => f.endsWith('.db') || f.endsWith('.json') || f.endsWith('.ktpbackup'))
         .map(f => {
           const fp = path.join(BACKUP_DIR, f);
           const st = fs.statSync(fp);
-          return { filename: f, path: fp, size: st.size, mtime: st.mtime.toISOString() };
+          return { filename: f, path: fp, size: st.size, mtime: st.mtime.toISOString(), isFull: f.endsWith('.ktpbackup') };
         })
         .sort((a, b) => b.mtime.localeCompare(a.mtime));
     } catch { return []; }
@@ -395,7 +458,7 @@ function setupIPC() {
   ipcMain.handle('app:status', () => {
     if (!licenseGuard().ok) return { dbConnected: false, version: APP_VER };
     const backupFiles = fs.existsSync(BACKUP_DIR)
-      ? fs.readdirSync(BACKUP_DIR).filter(f => f.endsWith('.db') || f.endsWith('.json')).length
+      ? fs.readdirSync(BACKUP_DIR).filter(f => f.endsWith('.db') || f.endsWith('.json') || f.endsWith('.ktpbackup')).length
       : 0;
     return {
       dbConnected: store !== null,
@@ -534,6 +597,107 @@ function setupIPC() {
         perpetual:  result.license.perpetual,
       }
     };
+  });
+
+  ipcMain.handle('backup:createFull', async (_, payload) => {
+    if (!licenseGuard().ok) return { ok: false, reason: 'license_required' };
+    try {
+      if (!store) initDatabase();
+      saveStore();
+      const rendererStateStr = typeof payload?.rendererState === 'string' ? payload.rendererState : '{}';
+      const importProfilesStr = typeof payload?.importProfiles === 'string' ? payload.importProfiles : null;
+      const trigger = String(payload?.trigger || 'manual');
+      const archive = buildFullBackup(rendererStateStr, importProfilesStr, trigger);
+      let destPath;
+      if (trigger === 'manual') {
+        const { filePath, canceled } = await dialog.showSaveDialog({
+          title: 'Yedek Kaydet / Save Backup',
+          defaultPath: path.join(os.homedir(), `KiraTakip_Yedek_${new Date().toISOString().slice(0, 10)}.ktpbackup`),
+          filters: [{ name: 'KTP Backup', extensions: ['ktpbackup'] }],
+        });
+        if (canceled || !filePath) return { ok: false, canceled: true };
+        destPath = filePath;
+      } else {
+        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const safeTrigger = trigger.replace(/[^a-z0-9_-]/gi, '_').slice(0, 40);
+        destPath = path.join(BACKUP_DIR, `backup-${ts}-${safeTrigger}.ktpbackup`);
+      }
+      atomicWriteJSON(destPath, archive);
+      const stats = fs.statSync(destPath);
+      store.backup_records.unshift({
+        id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
+        filename: path.basename(destPath),
+        path: destPath,
+        size_bytes: stats.size,
+        created_at: new Date().toISOString(),
+        trigger,
+        format: 'ktpbackup',
+      });
+      saveStore();
+      log('INFO', 'Full backup created', { filename: path.basename(destPath), trigger });
+      return { ok: true, filename: path.basename(destPath), path: destPath, size: stats.size };
+    } catch (err) {
+      log('ERROR', 'Full backup failed', { error: err.message });
+      return { ok: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('backup:restoreFull', async (_, payload) => {
+    if (!licenseGuard().ok) return { ok: false, reason: 'license_required' };
+    try {
+      let filePath = payload?.filePath;
+      if (!filePath) {
+        const { filePaths, canceled } = await dialog.showOpenDialog({
+          title: 'Yedek Seç / Select Backup',
+          filters: [{ name: 'KTP Backup', extensions: ['ktpbackup'] }],
+          properties: ['openFile'],
+        });
+        if (canceled || !filePaths || !filePaths.length) return { ok: false, canceled: true };
+        filePath = filePaths[0];
+      }
+      const resolved = path.resolve(String(filePath));
+      if (!fs.existsSync(resolved)) return { ok: false, error: 'Backup file not found' };
+      const stat = fs.statSync(resolved);
+      if (stat.size === 0) return { ok: false, error: 'Backup file is empty' };
+      if (stat.size > MAX_KTPBACKUP_BYTES) return { ok: false, error: 'Backup file too large (max 100 MB)' };
+      let archive;
+      try { archive = JSON.parse(fs.readFileSync(resolved, 'utf8')); }
+      catch (e) { return { ok: false, error: 'Backup file corrupted — JSON parse failed: ' + e.message }; }
+      const validation = validateFullBackup(archive);
+      if (!validation.ok) return { ok: false, error: validation.errors.join('; ') };
+      // Create pre-restore safety backup of current state
+      if (payload?.preRestoreRendererState) {
+        try {
+          if (!store) initDatabase();
+          saveStore();
+          const preArchive = buildFullBackup(
+            payload.preRestoreRendererState,
+            payload.preRestoreImportProfiles || null,
+            'pre-restore'
+          );
+          const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+          const prePath = path.join(BACKUP_DIR, `backup-${ts}-pre-restore.ktpbackup`);
+          atomicWriteJSON(prePath, preArchive);
+          log('INFO', 'Pre-restore safety backup created', { path: prePath });
+        } catch (e) {
+          log('WARN', 'Pre-restore safety backup failed', { error: e.message });
+        }
+      }
+      // Restore main store (only safe fields; never touch license dir)
+      const mainStoreData = JSON.parse(archive.mainStore);
+      if (mainStoreData && typeof mainStoreData === 'object') {
+        if (mainStoreData.settings) store.settings = mainStoreData.settings;
+        if (Array.isArray(mainStoreData.audit_log)) store.audit_log = mainStoreData.audit_log;
+        if (Array.isArray(mainStoreData.backup_records)) store.backup_records = mainStoreData.backup_records;
+        if (mainStoreData.schemaVersion) store.schemaVersion = mainStoreData.schemaVersion;
+        saveStore();
+      }
+      log('INFO', 'Full backup restored', { from: resolved });
+      return { ok: true, rendererState: archive.rendererState, importProfiles: archive.importProfiles || null, manifest: archive.manifest };
+    } catch (err) {
+      log('ERROR', 'Full restore failed', { error: err.message });
+      return { ok: false, error: err.message };
+    }
   });
 
   ipcMain.on('titlebar:setColor', (_, opts) => {

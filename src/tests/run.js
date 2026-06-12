@@ -1722,6 +1722,9 @@ try { _fs.unlinkSync(_ch4bTmpKey); } catch (e) { /* ignore */ }
 // ── Stable IDs Migration (PRE-WORK-1) ────────────────────────────────────────
 require('./stable-ids.test.js').register(test, assert, assertEqual);
 
+// ── Local Backup (LOCAL-BACKUP-1) ─────────────────────────────────────────────
+require('./local-backup.test.js').register(test, assert, assertEqual);
+
 // ── License Verifier (CH-4C) ──────────────────────────────────────────────────
 require('./license-verifier.test.js').register(test, assert, assertEqual);
 

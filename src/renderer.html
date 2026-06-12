@@ -5179,6 +5179,13 @@ var STRINGS={
     // Backup/restore toasts
     backupCreated:'Yedek alındı',backupFailed:'Yedek alınamadı',
     restoreDone:'✅ Geri yüklendi — uygulamayı yeniden başlatın',
+    restoreFullDone:'✅ Geri yüklendi — yeniden başlatılıyor...',
+    restoreFullConfirm:'⚠️ Bu işlem mevcut tüm verilerinizin üzerine yazacak. Devam etmeden önce otomatik güvenlik yedeği oluşturulacak. Devam edilsin mi?',
+    restoreFullChecksumErr:'❌ Yedek dosyası bozuk veya değiştirilmiş (checksum hatası).',
+    restoreFullVersionErr:'❌ Bu yedek daha yeni bir sürümden. Lütfen uygulamayı güncelleyin.',
+    restoreFullLicenseNote:'Lisans dosyası yedeklere dahil edilmez.',
+    aboutRestoreNow:'↩ Yedeği Geri Yükle',
+    aboutFullBakLbl:'Tam Yedek',aboutLegacyBakLbl:'Eski (kısmi)',
     // Page render error
     pageLoadError:'Sayfa yüklenemedi',
     pageLoadErrorDesc:'Bu bölüm render edilirken hata oluştu. Uygulama durmadı; başka menüleri kullanabilirsiniz.',
@@ -5622,6 +5629,13 @@ var STRINGS={
     // Backup/restore toasts
     backupCreated:'Backup created',backupFailed:'Backup failed',
     restoreDone:'✅ Restored — please restart the app',
+    restoreFullDone:'✅ Restored — restarting...',
+    restoreFullConfirm:'⚠️ This will overwrite all current data. A safety backup will be created automatically before proceeding. Continue?',
+    restoreFullChecksumErr:'❌ Backup file is corrupted or tampered (checksum mismatch).',
+    restoreFullVersionErr:'❌ This backup was created with a newer app version. Please update.',
+    restoreFullLicenseNote:'License file is not included in backups.',
+    aboutRestoreNow:'↩ Restore Backup',
+    aboutFullBakLbl:'Full backup',aboutLegacyBakLbl:'Legacy (partial)',
     // Page render error
     pageLoadError:'Page failed to load',
     pageLoadErrorDesc:'This section encountered an error while rendering. The app is still running; use other menus.',
@@ -10380,6 +10394,7 @@ function importJSON(inp){
       if(d.history) DATA.history=d.history;
       if(d.users) DATA.users=d.users;
       if(d.waLog) DATA.waLog=d.waLog;
+      if(d.workspaceId && !DATA.workspaceId) DATA.workspaceId = d.workspaceId;
       autoRecalc(); ALL_MONTHS=buildAllMonths(); saveLocal(); render(); updateBadges();
       addHist('JSON yedek yüklendi: '+f.name);
       toast(t('jsonLoaded'),'green');
@@ -10868,6 +10883,7 @@ function _exportEnvelope(){
     _exportedAt:  new Date().toISOString(),
     _exportedFrom:'v6',
     initialized:  DATA.initialized,
+    workspaceId:  DATA.workspaceId,
     buildings:    DATA.buildings,
     tenants:      DATA.tenants,
     payments:     DATA.payments,
@@ -10972,6 +10988,7 @@ function _importCommit(candidate, mode){
       if(candidate.settings !==undefined) DATA.settings = candidate.settings;
       // users intentionally excluded from import — credentials managed separately via user management UI
       if(Array.isArray(candidate.importHistory)) DATA.importHistory = candidate.importHistory;
+      if(candidate.workspaceId && !DATA.workspaceId) DATA.workspaceId = candidate.workspaceId;
       // buildings: use envelope or migrate from v5 tenant keys
       if(candidate.buildings && Array.isArray(candidate.buildings) && candidate.buildings.length){
         DATA.buildings    = candidate.buildings;
@@ -11265,6 +11282,7 @@ function importJSON(inp){
       if(d.history)  DATA.history  = d.history;
       if(d.users)    DATA.users    = d.users;
       if(d.waLog)    DATA.waLog    = d.waLog;
+      if(d.workspaceId && !DATA.workspaceId) DATA.workspaceId = d.workspaceId;
       autoRecalc(); ALL_MONTHS=buildAllMonths(); saveLocal(); render(); updateBadges();
       addHist('JSON yedek yüklendi');
       toast(t('jsonLoaded'),'green');
@@ -11347,10 +11365,13 @@ async function renderAbout(){
       <button class="btn btn-secondary btn-sm" onclick="window.electron.openBackupFolder()">${t('aboutOpenBak')}</button>
       <button class="btn btn-secondary btn-sm" onclick="window.electron.openFolder()">${t('aboutOpenData')}</button>
       <button class="btn btn-primary btn-sm" onclick="doElectronBackup()">${t('aboutBackupNow')}</button>
+      <button class="btn btn-ghost btn-sm" onclick="doRestoreFullFrom(null)">${t('aboutRestoreNow')}</button>
       `:''}
       <button class="btn btn-ghost btn-sm" onclick="exportJSON()">${t('aboutExportJSON')}</button>
       <button class="btn btn-ghost btn-sm" onclick="exportCSV()">${t('aboutExportCSV')}</button>
     </div>
+    ${isElectron?`<div style="font-size:11px;color:var(--i5);margin-bottom:8px">${t('restoreFullLicenseNote')}</div>`:''}
+
 
     <div class="table-card" style="margin-bottom:14px">
       <div class="table-card-header"><div class="table-card-title">${t('aboutRecentBaks')}</div></div>
@@ -11360,7 +11381,7 @@ async function renderAbout(){
           <td class="mono" style="font-size:10.5px">${b.filename}</td>
           <td class="c-faint">${(b.size/1024).toFixed(1)} KB</td>
           <td class="c-faint">${b.mtime.slice(0,19).replace('T',' ')}</td>
-          <td>${isElectron&&(b.filename.endsWith('.db')||b.filename.endsWith('.json'))?`<button class="btn btn-secondary btn-xs" onclick="doRestoreFrom('${b.path.replace(/\\/g,'/')}')">&#x21A9; ${t('aboutBakLoadBtn')}</button>`:''}</td>
+          <td>${isElectron?b.filename.endsWith('.ktpbackup')?`<button class="btn btn-primary btn-xs" onclick="doRestoreFullFrom('${b.path.replace(/\\/g,'/')}')">&#x21A9; ${t('aboutBakLoadBtn')}</button>`:`<span style="font-size:10px;color:var(--i5)">${t('aboutLegacyBakLbl')}</span>`:''}</td>
         </tr>`).join('')}</tbody>
       </table></div>`:`<div style="padding:20px;text-align:center;color:var(--i5);font-size:12px">
         ${t('aboutNoBaks')} &nbsp;·&nbsp;
@@ -11406,13 +11427,28 @@ async function renderAbout(){
   </div>`;
 }
 
+// ── LOCAL-BACKUP-1: capture sanitized renderer state for full backup ───────────
+function _captureRendererState(){
+  const safe=JSON.parse(JSON.stringify(DATA));
+  if(safe.cloud){ delete safe.cloud.token; delete safe.cloud.key; delete safe.cloud.supabaseKey; }
+  delete safe.importSnapshots;
+  if(Array.isArray(safe.users)) safe.users=safe.users.map(function(u){const e=Object.assign({},u);delete e.pin;return e;});
+  const rendererStateStr=JSON.stringify(safe);
+  let importProfilesStr=null;
+  try{const ip=localStorage.getItem('ktp_import_profiles_v1');if(ip&&ip!=='null') importProfilesStr=ip;}catch(e){}
+  return {rendererStateStr,importProfilesStr};
+}
+
 async function doElectronBackup(){
   if(!isElectron) return;
-  const result=await window.electron.createBackup('manual');
-  if(result){
+  const {rendererStateStr,importProfilesStr}=_captureRendererState();
+  const result=await window.electron.createFullBackup({rendererState:rendererStateStr,importProfiles:importProfilesStr,trigger:'manual'});
+  if(result&&result.ok){
     const sz=result.size?` (${Math.round(result.size/1024)} KB)`:'';
     toast('💾 '+t('backupCreated')+': '+result.filename+sz,'green');
-  } else toast('❌ '+t('backupFailed'),'red');
+  } else if(result&&result.canceled){
+    // user cancelled dialog — silent
+  } else { toast('❌ '+t('backupFailed')+(result&&result.error?': '+result.error:''),'red'); }
 }
 
 function doRestoreFrom(filePath){
@@ -11423,6 +11459,31 @@ async function _doRestoreFrom(filePath){
   const res=await window.electron.restoreBackup(filePath);
   if(res.ok) toast(t('restoreDone'),'green');
   else toast('❌ '+res.error,'red');
+}
+
+async function doRestoreFullFrom(filePath){
+  if(!isElectron) return;
+  const {rendererStateStr,importProfilesStr}=_captureRendererState();
+  if(!confirm(t('restoreFullConfirm'))) return;
+  const result=await window.electron.restoreFullBackup({
+    filePath:filePath||null,
+    preRestoreRendererState:rendererStateStr,
+    preRestoreImportProfiles:importProfilesStr
+  });
+  if(!result||result.canceled) return;
+  if(!result.ok){
+    if(result.reason==='license_required') return;
+    toast('❌ '+(result.error||t('backupFailed')),'red');
+    return;
+  }
+  try{
+    localStorage.setItem(LSKEY, result.rendererState);
+    if(result.importProfiles!==null&&result.importProfiles!==undefined){
+      try{localStorage.setItem('ktp_import_profiles_v1',result.importProfiles);}catch(e){}
+    }
+    toast(t('restoreFullDone'),'green');
+    setTimeout(function(){window.location.reload();},800);
+  }catch(e){ toast('❌ Geri yükleme başarısız: '+e.message,'red'); }
 }
 
 async function restoreElectronState(){
@@ -13186,8 +13247,8 @@ window.wizImport=function(){
   if(!_W.valResult) return;
   var warnCount=(_W.valResult.warns||[]).length;
   var errCount=(_W.valResult.errs||[]).length;
-  if(typeof window.electron!=='undefined'&&window.electron&&window.electron.createBackup){
-    try{window.electron.createBackup('pre-import');}catch(e){}
+  if(typeof window.electron!=='undefined'&&window.electron&&window.electron.createFullBackup){
+    try{var _cs=_captureRendererState();window.electron.createFullBackup({rendererState:_cs.rendererStateStr,importProfiles:_cs.importProfilesStr,trigger:'pre-import'});}catch(e){}
   }
   var snapId=_createSnapshot(_W.mode);
   var res=_doImport(_W.rows,_W.mapping,_W.mode,_W.targetBld,_W.valResult.valid);

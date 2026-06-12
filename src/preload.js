@@ -52,6 +52,10 @@ contextBridge.exposeInMainWorld('electron', {
   checkLicense:   () => ipcRenderer.invoke('license:check'),
   importLicense:  () => ipcRenderer.invoke('license:import'),
 
+  // ── Local Backup (LOCAL-BACKUP-1) ─────────────────────────────────────────
+  createFullBackup:  (payload) => ipcRenderer.invoke('backup:createFull', payload),
+  restoreFullBackup: (payload) => ipcRenderer.invoke('backup:restoreFull', payload),
+
   // ── UI chrome ─────────────────────────────────────────────────────────────
   setTitleBarColor: (opts) => ipcRenderer.send('titlebar:setColor', opts),
 });
