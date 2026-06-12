@@ -1728,6 +1728,9 @@ require('./local-backup.test.js').register(test, assert, assertEqual);
 // ── License Verifier (CH-4C) ──────────────────────────────────────────────────
 require('./license-verifier.test.js').register(test, assert, assertEqual);
 
+// ── Cloud Session Store (CLOUD-FOUNDATION-1B.1) ───────────────────────────────
+require('./cloud-session-store.test.js').register(test, assert, assertEqual);
+
 runB3Tests().then(function() {
   console.log('\n═══ Results: ' + passed + ' passed, ' + failed + ' failed ═══\n');
   if (failed > 0) {
