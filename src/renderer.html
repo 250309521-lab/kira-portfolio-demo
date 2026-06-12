@@ -4520,6 +4520,7 @@ function initData(){
   }
   return {
     initialized: false,
+    workspaceId: '',
     buildings: [],
     tenants:   {},
     payments:  {},
@@ -4577,6 +4578,7 @@ function loadLocal(){
     if(p.waLog)    DATA.waLog    = p.waLog;
     if(p.users)    DATA.users    = p.users;
     if(p.initialized!==undefined) DATA.initialized = p.initialized;
+    if(p.workspaceId) DATA.workspaceId = p.workspaceId;
     // Phase 3: restore buildings or migrate from legacy tenant keys
     if(p.buildings){
       DATA.buildings = p.buildings;
@@ -4643,6 +4645,37 @@ function addHist(desc){
   saveLocal();
 }
 
+// ── STABLE IDs ───────────────────────────────────────────────────────────────
+function _newId(){
+  try{ return window.crypto.randomUUID(); }catch(e){
+    return 'id_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,9);
+  }
+}
+
+function _stampExpenseIds(expenses){
+  var stamped=0;
+  if(!expenses||typeof expenses!=='object') return 0;
+  Object.keys(expenses).forEach(function(bld){
+    var byMonth=expenses[bld];
+    if(!byMonth||typeof byMonth!=='object') return;
+    Object.keys(byMonth).forEach(function(mo){
+      try{
+        var arr=byMonth[mo];
+        if(!Array.isArray(arr)) return;
+        arr.forEach(function(item){
+          if(item&&typeof item==='object'&&!item.id){ item.id=_newId(); stamped++; }
+        });
+      }catch(e2){}
+    });
+  });
+  return stamped;
+}
+
+function _ensureWorkspaceId(){
+  if(!DATA.workspaceId){ DATA.workspaceId=_newId(); return true; }
+  return false;
+}
+
 // ═══════════════════════════════════════════════
 // CLOUD SYNC
 // ═══════════════════════════════════════════════
@@ -4698,7 +4731,7 @@ async function cloudSync(dir='push'){
       window._lastPullSnapshot = JSON.stringify(DATA);
       if(d.tenants)  DATA.tenants  = d.tenants;
       if(d.payments) DATA.payments = d.payments;
-      if(d.expenses) DATA.expenses = d.expenses;
+      if(d.expenses){ DATA.expenses = d.expenses; _stampExpenseIds(DATA.expenses); }
       if(d.alper !== undefined && d.mgmt === undefined) d.mgmt = d.alper; // compat: renamed alper→mgmt in v6.1
       if(d.mgmt)     DATA.mgmt     = d.mgmt;
       if(d.history)  DATA.history  = d.history;
@@ -7334,7 +7367,8 @@ function saveExp_(eb,emo,eidx){
   if(!b||!mo||!tur){toast(t('expTypeReq'),'red');return;}
   if(!DATA.expenses[b]) DATA.expenses[b]={};
   if(!DATA.expenses[b][mo]) DATA.expenses[b][mo]=[];
-  const entry={tur,no,tutar,tarih,notlar};
+  const _existId=(eidx!==undefined)?(DATA.expenses[b]?.[mo]?.[eidx]?.id||null):null;
+  const entry={id:_existId||_newId(),tur,no,tutar,tarih,notlar};
   if(eidx!==undefined) DATA.expenses[b][mo][eidx]=entry;
   else DATA.expenses[b][mo].push(entry);
   addHist(`${BL[b]} gider ${eidx!==undefined?'güncellendi':'eklendi'}: ${tur} ${TL(tutar)} (${mo})`);
@@ -7355,7 +7389,7 @@ function saveExpRepeat(){
   if(!b||!mo||!tur){toast(t('expTypeReq'),'red');return;}
   if(!DATA.expenses[b]) DATA.expenses[b]={};
   if(!DATA.expenses[b][mo]) DATA.expenses[b][mo]=[];
-  DATA.expenses[b][mo].push({tur,no,tutar,tarih,notlar});
+  DATA.expenses[b][mo].push({id:_newId(),tur,no,tutar,tarih,notlar});
   _lastExpTur=tur;
   addHist(`${BL[b]} gider eklendi: ${tur} ${TL(tutar)} (${mo})`);
   autoRecalc();saveLocal();updateBadges();
@@ -10340,7 +10374,7 @@ function importJSON(inp){
       const d=JSON.parse(e.target.result);
       if(d.tenants) DATA.tenants=d.tenants;
       if(d.payments) DATA.payments=d.payments;
-      if(d.expenses) DATA.expenses=d.expenses;
+      if(d.expenses){ DATA.expenses=d.expenses; _stampExpenseIds(DATA.expenses); }
       if(d.alper !== undefined && d.mgmt === undefined) d.mgmt = d.alper; // compat: renamed alper→mgmt in v6.1
       if(d.mgmt) DATA.mgmt=d.mgmt;
       if(d.history) DATA.history=d.history;
@@ -10726,6 +10760,15 @@ try{
   window._ktpCorruptWarn='⚠️ Veri bütünlük hatası — güvenli mod ile başlatıldı.';
 }
 
+// ── Stable IDs boot migration ─────────────────────────────────────────────────
+__boot('stableIdsMigration');
+try{
+  var _migChanged=_ensureWorkspaceId();
+  if(_stampExpenseIds(DATA.expenses)>0) _migChanged=true;
+  if(_migChanged) saveLocal();
+  __boot('stableIdsMigration.ok');
+}catch(e){ console.error('[BOOT] stableIdsMigration',e); __boot('stableIdsMigration.err',String(e)); }
+
 try{ applyTheme(DATA.settings&&DATA.settings.theme); }catch(e){}
 try{ applyI18nLogin(); }catch(e){}
 try{ document.documentElement.lang=(DATA.settings&&DATA.settings.lang)||'tr'; }catch(e){}
@@ -10919,7 +10962,7 @@ function _importCommit(candidate, mode){
       // Replace each field entirely from candidate
       if(candidate.tenants  !==undefined) DATA.tenants  = candidate.tenants;
       if(candidate.payments !==undefined) DATA.payments = candidate.payments;
-      if(candidate.expenses !==undefined) DATA.expenses = candidate.expenses;
+      if(candidate.expenses !==undefined){ DATA.expenses = candidate.expenses; _stampExpenseIds(DATA.expenses); }
       if(candidate.alper !== undefined && candidate.mgmt === undefined) candidate.mgmt = candidate.alper; // compat: renamed alper→mgmt in v6.1
       if(candidate.mgmt    !==undefined) DATA.mgmt     = candidate.mgmt;
       if(candidate.tanNet   !==undefined) DATA.tanNet   = candidate.tanNet;
@@ -10980,7 +11023,7 @@ function _importCommit(candidate, mode){
               const dup=DATA.expenses[bld][mo].some(x=>
                 x.tur===e.tur && x.tutar===e.tutar && x.tarih===e.tarih
               );
-              if(!dup) DATA.expenses[bld][mo].push(e);
+              if(!dup){ if(!e.id) e.id=_newId(); DATA.expenses[bld][mo].push(e); }
             });
           });
         });
@@ -11216,7 +11259,7 @@ function importJSON(inp){
       window._lastImportSnapshot=JSON.stringify(DATA);
       if(d.tenants)  DATA.tenants  = d.tenants;
       if(d.payments) DATA.payments = d.payments;
-      if(d.expenses) DATA.expenses = d.expenses;
+      if(d.expenses){ DATA.expenses = d.expenses; _stampExpenseIds(DATA.expenses); }
       if(d.alper !== undefined && d.mgmt === undefined) d.mgmt = d.alper; // compat: renamed alper→mgmt in v6.1
       if(d.mgmt)     DATA.mgmt     = d.mgmt;
       if(d.history)  DATA.history  = d.history;
@@ -12211,7 +12254,8 @@ try{(function(){
     _lastExpTur=tur;
     if(!DATA.expenses[formB]) DATA.expenses[formB]={};
     if(!DATA.expenses[formB][formMo]) DATA.expenses[formB][formMo]=[];
-    const entry={tur,no,tutar,tarih,notlar};
+    const _existId=(eidx!==undefined&&eidx!==null)?DATA.expenses[originalB]?.[originalMo]?.[eidx]?.id||null:null;
+    const entry={id:_existId||_newId(),tur,no,tutar,tarih,notlar};
     if(eidx!==undefined && eidx!==null && DATA.expenses[originalB]?.[originalMo]?.[eidx]){
       // If building/month was changed in the edit form, move the existing row instead of leaving a duplicate behind.
       if(originalB!==formB || originalMo!==formMo){
@@ -13016,7 +13060,7 @@ function _doImport(rows,mapping,mode,targetBld,validIdxs){
           return e.tutar===amount&&e.tur===cat&&e.tarih===date;
         });
         if(dup){updated++;return;}
-        DATA.expenses[bid][moStr].push({tur:cat,no:'',tutar:amount,tarih:date,notlar:notes});
+        DATA.expenses[bid][moStr].push({id:_newId(),tur:cat,no:'',tutar:amount,tarih:date,notlar:notes});
         imported++;
       });
     }
