@@ -1568,6 +1568,9 @@ async function runB3Tests() {
 
   // ── Cloud Auth (CLOUD-FOUNDATION-1B.2a) ───────────────────────────────────
   await _cloudAuthTest.registerAsync(testAsync, assert, assertEqual);
+
+  // ── Cloud IPC (CLOUD-FOUNDATION-1B.2b) ────────────────────────────────────
+  await _cloudIpcTest.registerAsync(testAsync, assert, assertEqual);
 }
 
 // ── License Issuer (CH-4B) ────────────────────────────────────────────────────
@@ -1737,6 +1740,10 @@ require('./cloud-session-store.test.js').register(test, assert, assertEqual);
 // ── Cloud Auth (CLOUD-FOUNDATION-1B.2a) ───────────────────────────────────────
 var _cloudAuthTest = require('./cloud-auth.test.js');
 _cloudAuthTest.register(test, assert, assertEqual);
+
+// ── Cloud IPC (CLOUD-FOUNDATION-1B.2b) ────────────────────────────────────────
+var _cloudIpcTest = require('./cloud-ipc.test.js');
+_cloudIpcTest.register(test, assert, assertEqual);
 
 runB3Tests().then(function() {
   console.log('\n═══ Results: ' + passed + ' passed, ' + failed + ' failed ═══\n');
