@@ -700,6 +700,9 @@ function setupIPC() {
     }
   });
 
+  // ── Cloud Auth (CLOUD-FOUNDATION-1B.2c) ──────────────────────────────────
+  require('./cloud/cloud-ipc').register(ipcMain, licenseGuard, log);
+
   ipcMain.on('titlebar:setColor', (_, opts) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.setTitleBarOverlay({ height: 52, ...opts });

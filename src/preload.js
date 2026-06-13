@@ -58,4 +58,11 @@ contextBridge.exposeInMainWorld('electron', {
 
   // ── UI chrome ─────────────────────────────────────────────────────────────
   setTitleBarColor: (opts) => ipcRenderer.send('titlebar:setColor', opts),
+
+  // ── Cloud Auth (CLOUD-FOUNDATION-1B.2c) ──────────────────────────────────
+  cloudGetStatus:      ()        => ipcRenderer.invoke('cloud:getStatus'),
+  cloudLogin:          (payload) => ipcRenderer.invoke('cloud:login', payload),
+  cloudSignup:         (payload) => ipcRenderer.invoke('cloud:signup', payload),
+  cloudLogout:         ()        => ipcRenderer.invoke('cloud:logout'),
+  cloudRestoreSession: ()        => ipcRenderer.invoke('cloud:restoreSession'),
 });
