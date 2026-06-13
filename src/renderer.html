@@ -10275,13 +10275,13 @@ function _supaHdrs() {
 
 async function _testSupabaseConnection({ save=false } = {}) {
   // retired in v6 — Supabase direct-fetch removed
-  _supaMsg(t(‘cloudNotConfigured’), ‘var(--i4)’);
-  return { ok: false, error: ‘retired’ };
+  _supaMsg(t('cloudNotConfigured'), 'var(--i4)');
+  return { ok: false, error: 'retired' };
 }
 
 async function supabaseConnect() {
   // retired in v6 — Supabase direct-fetch removed
-  toast(t(‘cloudAccountTitle’), ‘blue’);
+  toast(t('cloudAccountTitle'), 'blue');
 }
 
 async function checkSupabaseStatus() {
@@ -10502,34 +10502,34 @@ const isElectron = typeof window.electron !== 'undefined' && window.electron.isE
 
 // ── Enhanced saveLocal: also push to SQLite audit log ──────
 const _origSaveLocal = saveLocal;
-function saveLocal(){
+saveLocal = function(){
   _origSaveLocal();
   // Persist selected month in Electron settings
   if(isElectron && S && S.month){
     window.electron.setSetting('selected_month', S.month).catch(()=>{});
   }
-}
+};
 
 // ── Enhanced addHist: also write to SQLite audit log ───────
 const _origAddHist = addHist;
-function addHist(desc){
+addHist = function(desc){
   _origAddHist(desc);
   if(isElectron){
     const user = currentUser ? currentUser.name : 'System';
     window.electron.addAudit({t: new Date().toISOString(), user, desc}).catch(()=>{});
   }
-}
+};
 
 // ── Enhanced exportJSON: use native Save dialog in Electron ─
 const _origExportJSON = exportJSON;
-function exportJSON(){
+exportJSON = function(){
   if(!isElectron){ _origExportJSON(); return; }
   const dataStr = JSON.stringify(_exportEnvelope(), null, 2);
   window.electron.exportJSON(dataStr).then(result => {
     if(result.ok) toast('💾 JSON yedek kaydedildi: ' + result.path, 'green');
     else if(result.ok === false && !result.path) toast(t('exportCancelled'),'orange');
   }).catch(e => toast(t('exportError') + e.message,'red'));
-}
+};
 
 // ═══════════════════════════════════════════════════════════════════
 // IMPORT/EXPORT CORE  (Phase 5)
