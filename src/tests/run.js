@@ -1565,6 +1565,9 @@ async function runB3Tests() {
     assert(!('pin_hash' in user), 'no legacy pin_hash');
     assert(!('pin' in user), 'no plaintext pin');
   });
+
+  // ── Cloud Auth (CLOUD-FOUNDATION-1B.2a) ───────────────────────────────────
+  await _cloudAuthTest.registerAsync(testAsync, assert, assertEqual);
 }
 
 // ── License Issuer (CH-4B) ────────────────────────────────────────────────────
@@ -1730,6 +1733,10 @@ require('./license-verifier.test.js').register(test, assert, assertEqual);
 
 // ── Cloud Session Store (CLOUD-FOUNDATION-1B.1) ───────────────────────────────
 require('./cloud-session-store.test.js').register(test, assert, assertEqual);
+
+// ── Cloud Auth (CLOUD-FOUNDATION-1B.2a) ───────────────────────────────────────
+var _cloudAuthTest = require('./cloud-auth.test.js');
+_cloudAuthTest.register(test, assert, assertEqual);
 
 runB3Tests().then(function() {
   console.log('\n═══ Results: ' + passed + ' passed, ' + failed + ' failed ═══\n');
