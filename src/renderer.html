@@ -4459,6 +4459,16 @@ let licenseStatus    = null;
 let licenseChecked   = false;
 let licenseGateActive = false;
 
+// ── CLOUD ACCOUNT UI — runtime-only; never persisted to localStorage ─────────
+var CLOUD_UI = {
+  state:     'loading',
+  email:     null,
+  userId:    null,
+  expiresAt: null,
+  error:     null,
+  loading:   false,
+};
+
 // B1: PIN rate-limiting state (in-memory; intentionally resets on app restart)
 const _pinAttempts={};      // { uid: { count, lockUntil } }
 const PIN_MAX_ATTEMPTS=3;
@@ -4680,80 +4690,7 @@ function _ensureWorkspaceId(){
 // CLOUD SYNC
 // ═══════════════════════════════════════════════
 async function cloudSync(dir='push'){
-  const url = DATA.cloud.url;
-  const token = DATA.cloud.token || DATA.cloud.key; // support both auth methods
-  if(!url){ toast('⚠️ Bulut URL eksik','red'); return; }
-  S.syncing=true; updateCloudUI();
-
-  try{
-    // ── v2: token-based auth (new server) ──────────────────
-    const headers = {
-      'Content-Type':'application/json',
-      'Authorization': token ? 'Bearer '+token : ''
-    };
-
-    if(dir==='push'){
-      const payload = {
-        tenants:DATA.tenants, payments:DATA.payments,
-        expenses:DATA.expenses, mgmt:DATA.mgmt,
-        history:DATA.history, waLog:DATA.waLog,
-        users:DATA.users, settings:DATA.settings
-      };
-      const body = JSON.stringify({
-        payload,
-        clientVersion: DATA.cloud.serverVersion || 0
-      });
-      const r = await fetchWithRetry(url+'/sync', {
-        method:'POST', headers, body
-      });
-      if(r.status===409){
-        // Conflict — pull first, then user can retry
-        const conflictData = await r.json();
-        toast(t('cloudConflict'),'red');
-        addHist('Bulut çakışma: sunucu v'+conflictData.serverVersion+', istemci v'+conflictData.clientVersion);
-        S.syncing=false; updateCloudUI(); return;
-      }
-      if(!r.ok) throw new Error('HTTP '+r.status+' '+(await r.text().catch(()=>'')));
-      const res = await r.json();
-      DATA.cloud.serverVersion = res.version;
-      DATA.cloud.lastSync = new Date().toISOString();
-      DATA.cloud.enabled = true;
-      saveLocal();
-      toast('☁️ Push tamam (v'+res.version+')','blue');
-      addHist('Bulut push: v'+res.version+' ('+Math.round(res.bytes/1024)+'KB)');
-
-    } else { // pull
-      const r = await fetchWithRetry(url+'/sync', { headers });
-      if(!r.ok) throw new Error('HTTP '+r.status);
-      const remote = await r.json();
-      if(!remote.payload) { toast('☁️ Sunucuda veri yok','orange'); S.syncing=false; updateCloudUI(); return; }
-      const d = remote.payload;
-      window._lastPullSnapshot = JSON.stringify(DATA);
-      if(d.tenants)  DATA.tenants  = d.tenants;
-      if(d.payments) DATA.payments = d.payments;
-      if(d.expenses){ DATA.expenses = d.expenses; _stampExpenseIds(DATA.expenses); }
-      if(d.alper !== undefined && d.mgmt === undefined) d.mgmt = d.alper; // compat: renamed alper→mgmt in v6.1
-      if(d.mgmt)     DATA.mgmt     = d.mgmt;
-      if(d.history)  DATA.history  = d.history;
-      if(d.waLog)    DATA.waLog    = d.waLog;
-      // Don't overwrite local users from server — use server /users endpoint
-      DATA.cloud.serverVersion = remote.version;
-      DATA.cloud.lastSync = new Date().toISOString();
-      DATA.cloud.enabled = true;
-      autoRecalc(); ALL_MONTHS=buildAllMonths(); saveLocal(); render(); updateBadges();
-      toast(t('cloudPullOk'),'blue');
-      addHist('Bulut pull: v'+remote.version+' ('+(remote.updatedBy||'?')+')');
-    }
-
-  }catch(e){
-    const msg = e.message || 'Bilinmeyen hata';
-    toast(t('cloudError')+msg,'red');
-    addHist('Bulut hatası ('+dir+'): '+msg);
-    // Don't lose local data on server failure
-  }finally{
-    S.syncing=false;
-    updateCloudUI();
-  }
+  // retired in v6 — cloud sync handled via IPC-based Cloud Account panel
 }
 
 // ── Fetch with retry (1 retry on network error) ──────────────
@@ -4768,42 +4705,35 @@ async function fetchWithRetry(url, opts, retries=1){
 
 // ── Login to server ───────────────────────────────────────────
 async function cloudLogin(url, username, password){
-  try{
-    const r = await fetch(url+'/auth/login', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({username, password})
-    });
-    const data = await r.json();
-    if(!r.ok) return {ok:false, error: data.error||'Login failed'};
-    return {ok:true, token: data.token, user: data.user};
-  }catch(e){ return {ok:false, error: e.message}; }
+  // retired in v6 — use window.electron.cloudLogin IPC
+  return { ok: false };
 }
 
 // ── Check server health ───────────────────────────────────────
 async function checkServerHealth(url){
-  try{
-    const r = await fetch(url+'/health', {signal: AbortSignal.timeout(5000)});
-    if(!r.ok) return {ok:false, error:'HTTP '+r.status};
-    return {ok:true, ...(await r.json())};
-  }catch(e){ return {ok:false, error: e.message}; }
+  // retired in v6
+  return { ok: false };
 }
 
 
 function updateCloudUI(){
-  const dot=document.getElementById('cloud-dot');
-  const lbl=document.getElementById('cloud-title');
-  const sub=document.getElementById('cloud-sub');
+  var dot=document.getElementById('cloud-dot');
+  var lbl=document.getElementById('cloud-title');
+  var sub=document.getElementById('cloud-sub');
   if(!dot) return;
-  const lang=(DATA&&DATA.settings&&DATA.settings.lang)||'tr';
-  if(S.syncing){
-    dot.className='cloud-dot sync';lbl.textContent=t('cloudSyncing');if(sub) sub.textContent=t('cloudWait');
-  } else if(DATA.cloud.enabled&&DATA.cloud.url){
-    dot.className='cdot ok';lbl.textContent=t('syncConnected');
-    const d=DATA.cloud.lastSync?new Date(DATA.cloud.lastSync).toLocaleTimeString(lang==='en'?'en-US':'tr-TR',{hour:'2-digit',minute:'2-digit'}):'';
-    sub.textContent=d?t('syncLast')+' '+d:t('cloudActiveShort');
+  var st=CLOUD_UI.state;
+  if(st==='authenticated'){
+    dot.className='cloud-dot ok';
+    if(lbl) lbl.textContent=t('navCloud');
+    if(sub){ sub.textContent=''; if(CLOUD_UI.email) sub.textContent=CLOUD_UI.email; }
+  } else if(st==='configured_anonymous'||st==='login_pending'||st==='signup_pending'||st==='logout_pending'){
+    dot.className='cloud-dot sync';
+    if(lbl) lbl.textContent=t('navCloud');
+    if(sub) sub.textContent=t('cloudSignedOut');
   } else {
-    dot.className='cdot off';lbl.textContent=t('cloudNone');sub.textContent=t('cloudLocal');
+    dot.className='cloud-dot off';
+    if(lbl) lbl.textContent=t('cloudNone');
+    if(sub) sub.textContent=t('cloudLocal');
   }
 }
 
@@ -5018,6 +4948,25 @@ var STRINGS={
     cloudConnect:'🔌 Bağlan',cloudTestBtn:'⚡ Bağlantı Testi',
     cloudPasteBtn:'Yapıştır',cloudKeyHint:'(gizli değil, güvenli)',
     cloudSupabaseDesc:'Ücretsiz PostgreSQL bulut.',
+    // Cloud Account UI (CLOUD-FOUNDATION-1C)
+    cloudAccountTitle:'☁️ Bulut Hesabı',
+    cloudLoading:'Durum kontrol ediliyor...',
+    cloudNotConfigured:'Bulut bağlantısı bu kurulumda yapılandırılmamış.',
+    cloudSignedOut:'Oturum açılmamış',
+    cloudEmail:'E-posta',
+    cloudPassword:'Şifre',
+    cloudLoginBtn:'Giriş Yap',
+    cloudSignupBtn:'Hesap Oluştur',
+    cloudLogoutBtn:'Çıkış Yap',
+    cloudRefreshBtn:'Yenile',
+    cloudAuthenticatedAs:'Giriş yapıldı:',
+    cloudSessionExpires:'Oturum bitiş:',
+    cloudErrorLicense:'Bu özellik için geçerli bir lisans gereklidir.',
+    cloudErrorInvalid:'E-posta veya şifre hatalı.',
+    cloudErrorEmailNotConfirmed:'E-posta adresinizi doğrulamanız gerekiyor.',
+    cloudErrorOffline:'Bağlantı hatası. İnternet bağlantınızı kontrol edin.',
+    cloudErrorSessionExpired:'Oturum süresi doldu. Lütfen tekrar giriş yapın.',
+    cloudErrorGeneric:'Bir hata oluştu. Lütfen tekrar deneyin.',
     fieldNotFound:'Alan bulunamadı',pasted:'📋 Yapıştırıldı',pasteManual:'Ctrl+V ile yapıştırın',
     // Settings modals
     resetDataTitle:'🗑 Tüm Verileri Sıfırla',restoreTitle:'↩ Yedekten Geri Yükle',
@@ -5468,6 +5417,25 @@ var STRINGS={
     cloudConnect:'🔌 Connect',cloudTestBtn:'⚡ Test Connection',
     cloudPasteBtn:'Paste',cloudKeyHint:'(not secret, safe)',
     cloudSupabaseDesc:'Free PostgreSQL cloud.',
+    // Cloud Account UI (CLOUD-FOUNDATION-1C)
+    cloudAccountTitle:'☁️ Cloud Account',
+    cloudLoading:'Checking status...',
+    cloudNotConfigured:'Cloud is not configured for this installation.',
+    cloudSignedOut:'Not signed in',
+    cloudEmail:'Email',
+    cloudPassword:'Password',
+    cloudLoginBtn:'Sign In',
+    cloudSignupBtn:'Create Account',
+    cloudLogoutBtn:'Sign Out',
+    cloudRefreshBtn:'Refresh',
+    cloudAuthenticatedAs:'Signed in as:',
+    cloudSessionExpires:'Session expires:',
+    cloudErrorLicense:'A valid license is required for this feature.',
+    cloudErrorInvalid:'Invalid email or password.',
+    cloudErrorEmailNotConfirmed:'Please confirm your email address.',
+    cloudErrorOffline:'Connection error. Check your internet connection.',
+    cloudErrorSessionExpired:'Session expired. Please sign in again.',
+    cloudErrorGeneric:'An error occurred. Please try again.',
     fieldNotFound:'Field not found',pasted:'📋 Pasted',pasteManual:'Use Ctrl+V to paste',
     // Settings modals
     resetDataTitle:'🗑 Reset All Data',restoreTitle:'↩ Restore from Backup',
@@ -6414,11 +6382,8 @@ function obSkipImport(){
 
 // ── 6B-4: Cloud Bootstrap During Onboarding ─────────────────
 function obCloudBootstrap(){
-  if(DATA.cloud.supabaseUrl && DATA.cloud.supabaseKey){
-    _obCloudFetch();
-  } else {
-    _obShowCloudForm();
-  }
+  // retired in v6 — Supabase setup removed from onboarding
+  _obShowCloudForm();
 }
 
 function _obShowCloudForm(){
@@ -6444,54 +6409,15 @@ function _obShowCloudForm(){
 }
 
 async function _obCloudConnect(){
-  const url=(document.getElementById('ob-supa-url')?.value||'').trim().replace(/\/+$/,'');
-  const key=(document.getElementById('ob-supa-key')?.value||'').trim();
+  // retired in v6 — Supabase credential setup removed
   const err=document.getElementById('ob-err2');
-  if(!url||!key){ if(err) err.textContent=t('obErrUrlKey'); return; }
-  if(!/^https:\/\/.+\.supabase\.co$/.test(url)){ if(err) err.textContent=t('obErrUrlFmt'); return; }
-  // Store temporarily so _supaSelect can use them; cleared on connection error
-  DATA.cloud.supabaseUrl=url;
-  DATA.cloud.supabaseKey=key;
-  DATA.cloud.mode='supabase';
-  if(err) err.textContent=t('obConnecting');
-  await _obCloudFetch();
+  if(err) err.textContent=t('cloudNotConfigured');
 }
 
 async function _obCloudFetch(){
+  // retired in v6 — Supabase cloud import removed from onboarding
   const err=document.getElementById('ob-err2');
-  const wsId=DATA.cloud.workspaceId||'ktp_main';
-  try{
-    const rows=await _supaSelect('ktp_sync','id=eq.'+encodeURIComponent(wsId));
-    if(!rows||!rows.length){
-      if(err) err.textContent=t('obErrNoData');
-      return;
-    }
-    const d=JSON.parse(rows[0].data_json);
-    const validated=_importValidate(d);
-    if(!validated.ok){
-      if(err) err.textContent=t('obErrInvalid')+validated.errors.join(', ');
-      return;
-    }
-    const result=_importCommit(d,'overwrite');
-    if(!result.ok){
-      if(err) err.textContent=t('obErrLoad')+(result.error||t('unknownOp'));
-      return;
-    }
-    // Persist cloud metadata — sync disabled until user explicitly enables it
-    DATA.cloud.serverVersion=rows[0].version;
-    DATA.cloud.lastSync=rows[0].updated_at;
-    DATA.cloud.workspaceId=wsId;
-    DATA.cloud.enabled=false;
-    _obPin=''; _obName='';
-    saveLocal();
-    const obScr=document.getElementById('ob-screen');
-    if(obScr) obScr.style.display='none';
-    renderLogin();
-    toast(t('obSuccessLoaded'),'green');
-  }catch(e){
-    if(err) err.textContent=t('obErrConn')+e.message;
-    // Credentials remain set if connection reached Supabase — user can retry
-  }
+  if(err) err.textContent=t('cloudNotConfigured');
 }
 
 async function obCommit(){
@@ -7644,373 +7570,287 @@ function pasteIntoField(id){
   }
 }
 
-// ── CLOUD MODAL ──────────────────────────────
+// ── CLOUD ACCOUNT MODAL (CLOUD-FOUNDATION-1C) ────────────────────────────────
 function tplCloud(){
-  const mode      = DATA.cloud.mode || 'supabase';
-  const connected = DATA.cloud.enabled;
-  const lastSync  = DATA.cloud.lastSync
-    ? new Date(DATA.cloud.lastSync).toLocaleString((DATA.settings?.lang||'tr')==='en'?'en-US':'tr-TR') : '—';
-
-  return `<div class="modal-title">${t('cloudTitle')}</div>
-
-  <!-- Status -->
-  <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;
-    background:${connected?'rgba(16,185,129,.08)':'rgba(244,63,94,.06)'};
-    border:1px solid ${connected?'rgba(16,185,129,.2)':'rgba(244,63,94,.15)'};
-    border-radius:8px;margin-bottom:14px">
-    <div style="width:8px;height:8px;border-radius:50%;flex-shrink:0;
-      background:${connected?'#10b981':'#f43f5e'}"></div>
-    <div style="flex:1;min-width:0">
-      <div style="font-size:12px;font-weight:600;color:var(--i0)">
-        ${connected?t('cloudConnected'):t('cloudDisconnected')}
-      </div>
-      <div style="font-size:10.5px;color:var(--i4)">${t('syncLast')} ${lastSync}</div>
-    </div>
-    ${connected?'<button class="btn btn-ghost btn-xs" onclick="checkSupabaseStatus()">⚡ Test</button>':''}
-  </div>
-
-  <!-- Tabs -->
-  <div id="cloud-mode-tabs" style="display:flex;gap:3px;margin-bottom:12px;background:rgba(255,255,255,.04);
-    border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:3px;width:fit-content">
-    <button class="a-tab ${mode==='supabase'?'active':''}"
-      onclick="setCloudMode('supabase',this)">🟢 Supabase</button>
-    ${PRODUCTION_MODE?'':(`<button class="a-tab ${mode==='server'?'active':''}"
-      onclick="setCloudMode('server',this)">🖥 Sunucu</button>
-    <button class="a-tab ${mode==='json'?'active':''}"
-      onclick="setCloudMode('json',this)">📦 JSON API</button>`)}
-  </div>
-
-  <!-- Supabase Panel -->
-  <div id="cp-supabase" style="display:${mode==='supabase'?'block':'none'}">
-    <div style="background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.18);
-      border-radius:7px;padding:10px 12px;margin-bottom:12px;font-size:11.5px;
-      color:var(--i2);line-height:1.6">
-      <b style="color:var(--i0)">Supabase:</b> ${t('cloudSupabaseDesc')}
-      <a href="https://supabase.com" target="_blank" style="color:#60a5fa">supabase.com</a>
-      → New Project → Settings → API → Project URL + anon key
-    </div>
-    <div style="margin-bottom:11px">
-      <label style="display:block;font-size:10.5px;color:var(--i4);font-weight:600;
-        text-transform:uppercase;letter-spacing:.3px;margin-bottom:4px">
-        Project URL *
-      </label>
-      <div style="display:flex;gap:6px;align-items:center">
-        <input id="supa_url" class="form-input" style="flex:1"
-          value="${DATA.cloud.supabaseUrl||''}"
-          placeholder="https://xxxx.supabase.co" autocomplete="off">
-        <button type="button" class="btn btn-ghost btn-sm" onclick="pasteIntoField('supa_url')" title="${t('cloudPasteBtn')}">📋</button>
-      </div>
-    </div>
-    <div style="margin-bottom:12px">
-      <label style="display:block;font-size:10.5px;color:var(--i4);font-weight:600;
-        text-transform:uppercase;letter-spacing:.3px;margin-bottom:4px">
-        Anon / Publishable Key *
-      </label>
-      <div style="display:flex;gap:6px;align-items:center">
-        <input id="supa_key" class="form-input" style="flex:1" type="password"
-          value="${DATA.cloud.supabaseKey||''}"
-          placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." autocomplete="off">
-        <button type="button" class="btn btn-ghost btn-sm" onclick="pasteIntoField('supa_key')" title="${t('cloudPasteBtn')}">📋</button>
-      </div>
-      <div style="font-size:10px;color:var(--i5);margin-top:3px">
-        Settings → API → anon public ${t('cloudKeyHint')}
-      </div>
-    </div>
-    <div style="display:flex;gap:7px;margin-bottom:10px">
-      <button class="btn btn-primary btn-sm" onclick="supabaseConnect()">${t('cloudConnect')}</button>
-      <button class="btn btn-ghost btn-sm" onclick="checkSupabaseStatus()">${t('cloudTestBtn')}</button>
-    </div>
-    <div id="supa-msg" style="min-height:20px;font-size:12px;margin-bottom:4px"></div>
-  </div>
-
-  <!-- Server Panel -->
-  <div id="cp-server" style="display:${PRODUCTION_MODE?'none':mode==='server'?'block':'none'}">
-    <div style="margin-bottom:10px">
-      <label style="display:block;font-size:10.5px;color:var(--i4);font-weight:600;
-        text-transform:uppercase;letter-spacing:.3px;margin-bottom:4px">Sunucu URL</label>
-      <input id="c_url" class="form-input"
-        value="${DATA.cloud.serverUrl||DATA.cloud.url||''}" placeholder="http://sunucu:8787">
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
-      <div>
-        <label style="display:block;font-size:10.5px;color:var(--i4);font-weight:600;
-          text-transform:uppercase;letter-spacing:.3px;margin-bottom:4px">Kullanıcı</label>
-        <input id="c_user" class="form-input"
-          value="${DATA.cloud.username||''}" placeholder="kullanici">
-      </div>
-      <div>
-        <label style="display:block;font-size:10.5px;color:var(--i4);font-weight:600;
-          text-transform:uppercase;letter-spacing:.3px;margin-bottom:4px">Şifre</label>
-        <input id="c_pass" class="form-input" type="password" placeholder="••••••">
-      </div>
-    </div>
-    <div style="display:flex;gap:7px;margin-bottom:8px">
-      <button class="btn btn-primary btn-sm" onclick="cloudLoginAndSave()">🔐 Bağlan</button>
-      <button class="btn btn-ghost btn-sm" onclick="checkCloudStatus()">⚡ Test</button>
-    </div>
-    <div id="cloud-server-msg" style="font-size:12px;min-height:18px;color:var(--i4)"></div>
-  </div>
-
-  <!-- JSON Panel -->
-  <div id="cp-json" style="display:${PRODUCTION_MODE?'none':mode==='json'?'block':'none'}">
-    <div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);
-      border-radius:7px;padding:8px 12px;font-size:11.5px;color:var(--amber-l);margin-bottom:10px">
-      ⚠️ Eski mod — Supabase önerilir.
-    </div>
-    <div style="margin-bottom:10px">
-      <label style="display:block;font-size:10.5px;color:var(--i4);font-weight:600;
-        text-transform:uppercase;letter-spacing:.3px;margin-bottom:4px">API URL</label>
-      <input id="c_url_json" class="form-input"
-        value="${DATA.cloud.url||''}" placeholder="https://api.jsonbin.io/...">
-    </div>
-    <div style="margin-bottom:10px">
-      <label style="display:block;font-size:10.5px;color:var(--i4);font-weight:600;
-        text-transform:uppercase;letter-spacing:.3px;margin-bottom:4px">API Key</label>
-      <input id="c_key_json" class="form-input" type="password"
-        value="${DATA.cloud.key||''}" placeholder="$2a$10$...">
-    </div>
-    <button class="btn btn-secondary btn-sm" onclick="saveJsonCloud()">💾 Kaydet</button>
-  </div>
-
-  <hr style="border:none;border-top:1px solid rgba(255,255,255,.07);margin:12px 0">
-
-  ${connected?`
-  <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:8px">
-    <button class="btn btn-primary btn-sm" onclick="cloudSync('push');closeMod()">⬆ Push</button>
-    <button class="btn btn-secondary btn-sm"
-      onclick="cloudSync('pull').then(()=>closeMod())">⬇ Pull</button>
-  </div>
-  <div style="font-size:11px;color:var(--i4)">${t('cloudAutoSync')} ${lastSync}</div>
-  `:`<div style="font-size:12px;color:var(--i5)">${t('cloudConnectFirst')}</div>`}
-
-  <div style="display:flex;justify-content:flex-end;margin-top:14px;padding-top:12px;
-    border-top:1px solid rgba(255,255,255,.06)">
-    <button class="btn btn-ghost" onclick="closeMod()">${t('close')}</button>
-  </div>`;
+  CLOUD_UI.state = 'loading';
+  CLOUD_UI.email = null; CLOUD_UI.userId = null; CLOUD_UI.expiresAt = null; CLOUD_UI.error = null;
+  setTimeout(function(){ cloudRefreshStatus(); }, 50);
+  return '<div class="modal-title">'+t('cloudAccountTitle')+'</div>' +
+    '<div id="cloud-account-card" style="min-height:80px">' +
+      '<div style="padding:20px;text-align:center;color:var(--i4);font-size:13px">'+t('cloudLoading')+'</div>' +
+    '</div>' +
+    '<div class="modal-footer">' +
+      '<button class="btn btn-ghost" onclick="closeMod()">'+t('close')+'</button>' +
+    '</div>';
 }
 
 function setCloudMode(mode, el) {
-  DATA.cloud.mode = mode;
-  ['supabase','server','json'].forEach(m => {
-    const d = document.getElementById('cp-'+m);
-    if(d) d.style.display = m===mode ? 'block' : 'none';
-  });
-  document.querySelectorAll('#cloud-mode-tabs .a-tab').forEach(t => t.classList.remove('active'));
-  if(el) el.classList.add('active');
-  saveLocal();
+  // retired in v6 — use Cloud Account panel
 }
 
-
 function cloudTab(which, el){
-  document.querySelectorAll('#cloud-tabs .a-tab').forEach(t=>t.classList.remove('active'));
-  el.classList.add('active');
-  document.getElementById('cloud-tab-server').style.display = which==='server'?'':'none';
-  document.getElementById('cloud-tab-json').style.display = which==='json'?'':'none';
+  // retired in v6 — use Cloud Account panel
 }
 
 async function cloudLoginAndSave(){
-  const url  = (document.getElementById('c_url')?.value||'').trim().replace(/\/+$/,'');
-  const user = (document.getElementById('c_user')?.value||'').trim();
-  const pass = document.getElementById('c_pass')?.value||'';
-  const msg  = document.getElementById('cloud-server-msg');
-  if(!url||!user||!pass){ msg.textContent='❌ URL, kullanıcı adı ve şifre gerekli'; return; }
-  msg.textContent='🔄 Bağlanıyor...'; msg.style.color='var(--i3)';
-  const result = await cloudLogin(url, user, pass);
-  if(!result.ok){ msg.textContent='❌ '+result.error; msg.style.color='var(--rose-l)'; return; }
-  // Save auth
-  DATA.cloud.serverUrl = url;
-  DATA.cloud.url = url;
-  DATA.cloud.token = result.token;
-  DATA.cloud.key = result.token; // backwards compat
-  DATA.cloud.username = user;
-  DATA.cloud.enabled = true;
-  DATA.cloud.user = result.user;
-  saveLocal();
-  msg.textContent='✅ Bağlandı: '+result.user.name+' ('+result.user.role+')';
-  msg.style.color='var(--emerald-l)';
-  updateCloudUI();
-  toast('✅ Sunucuya bağlandı','green');
-  addHist('Bulut sunucu bağlantısı: '+url+' ('+result.user.name+')');
+  // retired in v6
+  toast(t('cloudAccountTitle'),'blue');
 }
 
 async function checkCloudStatus(){
-  const url = (DATA.cloud.serverUrl||DATA.cloud.url||'').replace(/\/+$/,'');
-  const msg = document.getElementById('cloud-server-msg');
-  if(!url){ if(msg) msg.textContent='❌ URL girilmedi'; return; }
-  if(msg){ msg.textContent='🔄 Test ediliyor...'; msg.style.color='var(--i3)'; }
-  const h = await checkServerHealth(url);
-  if(h.ok){
-    const txt = `✅ Sunucu aktif · v${h.version} · DB: ${h.db} · Uptime: ${h.uptime}s`;
-    if(msg){ msg.textContent=txt; msg.style.color='var(--emerald-l)'; }
-    toast('✅ Sunucu bağlantısı OK','green');
-  } else {
-    const txt = '❌ Sunucu yanıt vermiyor: '+h.error;
-    if(msg){ msg.textContent=txt; msg.style.color='var(--rose-l)'; }
-    toast('❌ Sunucu bağlantı hatası','red');
-  }
+  // retired in v6 — delegates to IPC-based refresh
+  cloudRefreshStatus();
 }
 
 function saveJsonCloud(){
-  DATA.cloud.url = (document.getElementById('c_url_json')?.value||'').trim();
-  DATA.cloud.key = (document.getElementById('c_key_json')?.value||'').trim();
-  DATA.cloud.token = DATA.cloud.key;
-  saveLocal(); updateCloudUI(); closeMod();
-  toast('💾 Bağlantı ayarları kaydedildi','green');
+  // retired in v6 — DATA.cloud.url/key/token write path removed
+  toast(t('cloudAccountTitle'),'blue');
 }
 
 async function openServerUserMgmt(){
-  if(!DATA.cloud.token){ toast('⚠️ Önce sunucuya bağlanın','red'); return; }
-  const url = (DATA.cloud.serverUrl||DATA.cloud.url||'').replace(/\/+$/,'');
-  closeMod();
-  // Fetch users from server
-  try{
-    const r = await fetch(url+'/users', {headers:{'Authorization':'Bearer '+DATA.cloud.token}});
-    if(!r.ok){ toast('❌ Sunucu kullanıcıları alınamadı: '+r.status,'red'); return; }
-    const data = await r.json();
-    renderServerUserMgmt(data.users, url);
-  }catch(e){ toast('❌ '+e.message,'red'); }
+  // retired in v6 — server user management removed
+  toast(t('cloudAccountTitle'),'blue');
+}
+
+// ── CLOUD ACCOUNT UI — renderer functions (CLOUD-FOUNDATION-1C) ──────────────
+
+function sanitizeCloudStatusForRenderer(raw) {
+  if (!raw || typeof raw !== 'object') return { ok: false, error: 'unknown_error' };
+  var ALLOWED = ['ok','configured','authenticated','email','userId','expiresAt','error'];
+  var out = {};
+  ALLOWED.forEach(function(k){ if (raw[k] !== undefined) out[k] = raw[k]; });
+  return out;
+}
+
+async function cloudInitStatus() {
+  if (!window.electron || !window.electron.cloudRestoreSession) return;
+  try { await window.electron.cloudRestoreSession(); } catch(e) {}
+  cloudRefreshStatus();
+}
+
+async function cloudRefreshStatus() {
+  if (!window.electron || !window.electron.cloudGetStatus) {
+    CLOUD_UI.state = 'error_ipc'; CLOUD_UI.error = 'no_preload';
+    CLOUD_UI.email = null; CLOUD_UI.userId = null; CLOUD_UI.expiresAt = null;
+    updateCloudUI(); renderCloudAccountCard(); return;
+  }
+  try {
+    var raw = await window.electron.cloudGetStatus();
+    var s = sanitizeCloudStatusForRenderer(raw);
+    if (!s.ok) {
+      CLOUD_UI.state = (s.error === 'license_required') ? 'error_license' : 'error_ipc';
+      CLOUD_UI.error = s.error || 'unknown_error';
+      CLOUD_UI.email = null; CLOUD_UI.userId = null; CLOUD_UI.expiresAt = null;
+    } else if (!s.configured) {
+      CLOUD_UI.state = 'not_configured';
+      CLOUD_UI.email = null; CLOUD_UI.userId = null; CLOUD_UI.expiresAt = null;
+    } else if (!s.authenticated) {
+      CLOUD_UI.state = 'configured_anonymous';
+      CLOUD_UI.email = null; CLOUD_UI.userId = null; CLOUD_UI.expiresAt = null;
+    } else {
+      CLOUD_UI.state = 'authenticated';
+      CLOUD_UI.email     = typeof s.email     === 'string' ? s.email     : null;
+      CLOUD_UI.userId    = typeof s.userId    === 'string' ? s.userId    : null;
+      CLOUD_UI.expiresAt = typeof s.expiresAt === 'number' ? s.expiresAt : null;
+    }
+  } catch(e) {
+    CLOUD_UI.state = 'error_ipc'; CLOUD_UI.error = 'unknown_error';
+    CLOUD_UI.email = null; CLOUD_UI.userId = null; CLOUD_UI.expiresAt = null;
+  }
+  updateCloudUI();
+  if (_openModalState && _openModalState.type === 'cloud') renderCloudAccountCard();
+}
+
+async function cloudLoginFromUI() {
+  var emailEl = document.getElementById('cloud-email-inp');
+  var passEl  = document.getElementById('cloud-pass-inp');
+  var errEl   = document.getElementById('cloud-auth-err');
+  if (!emailEl || !passEl) return;
+  var email = (emailEl.value || '').trim();
+  var pass  = passEl.value || '';
+  if (errEl) errEl.textContent = '';
+  if (!email || email.indexOf('@') === -1 || email.length > 254) {
+    if (errEl) errEl.textContent = t('cloudErrorInvalid'); return;
+  }
+  if (!pass || pass.length > 512) {
+    if (errEl) errEl.textContent = t('cloudErrorInvalid'); return;
+  }
+  CLOUD_UI.state = 'login_pending';
+  renderCloudAccountCard();
+  var result;
+  try {
+    result = await window.electron.cloudLogin({ email: email, password: pass });
+  } catch(e) {
+    result = { ok: false, error: 'unknown_error' };
+  }
+  passEl = document.getElementById('cloud-pass-inp');
+  if (passEl) passEl.value = '';
+  if (!result || !result.ok) {
+    var ec = (result && result.error) || 'unknown_error';
+    CLOUD_UI.state = (ec === 'invalid_credentials' || ec === 'invalid_input') ? 'auth_error_invalid' : 'auth_error_generic';
+    CLOUD_UI.error = ec;
+    renderCloudAccountCard();
+    var errEl2 = document.getElementById('cloud-auth-err');
+    if (errEl2) {
+      if (ec === 'license_required') errEl2.textContent = t('cloudErrorLicense');
+      else if (ec === 'email_not_confirmed') errEl2.textContent = t('cloudErrorEmailNotConfirmed');
+      else if (ec === 'network_error' || ec === 'offline') errEl2.textContent = t('cloudErrorOffline');
+      else if (ec === 'session_expired') errEl2.textContent = t('cloudErrorSessionExpired');
+      else if (ec === 'invalid_credentials' || ec === 'invalid_input') errEl2.textContent = t('cloudErrorInvalid');
+      else errEl2.textContent = t('cloudErrorGeneric');
+    }
+    return;
+  }
+  await cloudRefreshStatus();
+}
+
+async function cloudSignupFromUI() {
+  var emailEl = document.getElementById('cloud-email-inp');
+  var passEl  = document.getElementById('cloud-pass-inp');
+  var errEl   = document.getElementById('cloud-auth-err');
+  if (!emailEl || !passEl) return;
+  var email = (emailEl.value || '').trim();
+  var pass  = passEl.value || '';
+  if (errEl) errEl.textContent = '';
+  if (!email || email.indexOf('@') === -1 || email.length > 254) {
+    if (errEl) errEl.textContent = t('cloudErrorInvalid'); return;
+  }
+  if (!pass || pass.length > 512) {
+    if (errEl) errEl.textContent = t('cloudErrorInvalid'); return;
+  }
+  CLOUD_UI.state = 'signup_pending';
+  renderCloudAccountCard();
+  var result;
+  try {
+    result = await window.electron.cloudSignup({ email: email, password: pass });
+  } catch(e) {
+    result = { ok: false, error: 'unknown_error' };
+  }
+  passEl = document.getElementById('cloud-pass-inp');
+  if (passEl) passEl.value = '';
+  if (!result || !result.ok) {
+    var ec = (result && result.error) || 'unknown_error';
+    CLOUD_UI.state = (ec === 'invalid_credentials' || ec === 'invalid_input') ? 'auth_error_invalid' : 'auth_error_generic';
+    CLOUD_UI.error = ec;
+    renderCloudAccountCard();
+    var errEl2 = document.getElementById('cloud-auth-err');
+    if (errEl2) {
+      if (ec === 'license_required') errEl2.textContent = t('cloudErrorLicense');
+      else if (ec === 'email_not_confirmed') errEl2.textContent = t('cloudErrorEmailNotConfirmed');
+      else if (ec === 'network_error' || ec === 'offline') errEl2.textContent = t('cloudErrorOffline');
+      else if (ec === 'invalid_credentials' || ec === 'invalid_input') errEl2.textContent = t('cloudErrorInvalid');
+      else errEl2.textContent = t('cloudErrorGeneric');
+    }
+    return;
+  }
+  await cloudRefreshStatus();
+}
+
+async function cloudLogoutFromUI() {
+  CLOUD_UI.state = 'logout_pending';
+  renderCloudAccountCard();
+  try { await window.electron.cloudLogout(); } catch(e) {}
+  await cloudRefreshStatus();
+}
+
+function renderCloudAccountCard() {
+  var card = document.getElementById('cloud-account-card');
+  if (!card) return;
+  var st = CLOUD_UI.state;
+  var html = '';
+
+  if (st === 'loading') {
+    html = '<div style="padding:20px;text-align:center;color:var(--i4);font-size:13px">'+t('cloudLoading')+'</div>';
+
+  } else if (st === 'error_license') {
+    html = '<div style="padding:12px;background:rgba(244,63,94,.08);border:1px solid rgba(244,63,94,.2);border-radius:8px;font-size:12px;color:var(--rose-l);margin-bottom:10px">'+t('cloudErrorLicense')+'</div>';
+
+  } else if (st === 'error_ipc') {
+    html = '<div style="padding:12px;background:rgba(244,63,94,.08);border:1px solid rgba(244,63,94,.2);border-radius:8px;font-size:12px;color:var(--rose-l);margin-bottom:10px">'+t('cloudErrorGeneric')+'</div>' +
+      '<button class="btn btn-ghost btn-sm" onclick="cloudRefreshStatus()">'+t('cloudRefreshBtn')+'</button>';
+
+  } else if (st === 'not_configured') {
+    html = '<div style="padding:12px;background:rgba(99,102,241,.07);border:1px solid rgba(99,102,241,.18);border-radius:8px;font-size:12px;color:var(--i3);margin-bottom:10px">'+t('cloudNotConfigured')+'</div>' +
+      '<button class="btn btn-ghost btn-sm" onclick="cloudRefreshStatus()">'+t('cloudRefreshBtn')+'</button>';
+
+  } else if (st === 'authenticated') {
+    html = '<div style="padding:14px;background:rgba(16,185,129,.07);border:1px solid rgba(16,185,129,.2);border-radius:8px;margin-bottom:14px">' +
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
+        '<div style="width:8px;height:8px;border-radius:50%;background:#10b981;flex-shrink:0"></div>' +
+        '<span id="cloud-user-email-lbl" style="font-size:13px;font-weight:600;color:var(--i0)"></span>' +
+      '</div>' +
+      (CLOUD_UI.expiresAt ? '<div style="font-size:10.5px;color:var(--i4)" id="cloud-expiry-lbl"></div>' : '') +
+    '</div>' +
+    '<div style="display:flex;gap:7px;flex-wrap:wrap">' +
+      '<button class="btn btn-danger btn-sm" id="cloud-logout-btn" onclick="cloudLogoutFromUI()">'+t('cloudLogoutBtn')+'</button>' +
+      '<button class="btn btn-ghost btn-sm" id="cloud-refresh-btn" onclick="cloudRefreshStatus()">'+t('cloudRefreshBtn')+'</button>' +
+    '</div>';
+
+  } else if (st === 'logout_pending') {
+    html = '<div style="padding:14px;background:rgba(16,185,129,.07);border:1px solid rgba(16,185,129,.2);border-radius:8px;margin-bottom:14px">' +
+      '<div style="font-size:12px;color:var(--i4)">'+t('cloudLoading')+'</div></div>' +
+    '<div style="display:flex;gap:7px">' +
+      '<button class="btn btn-danger btn-sm" disabled>'+t('cloudLogoutBtn')+'</button>' +
+    '</div>';
+
+  } else {
+    // configured_anonymous / login_pending / signup_pending / auth_error_*
+    var pending = (st === 'login_pending' || st === 'signup_pending');
+    var disAttr = pending ? ' disabled' : '';
+    html = '<div class="form-row" style="margin-bottom:10px">' +
+        '<label class="form-label" style="margin-bottom:4px">'+t('cloudEmail')+'</label>' +
+        '<input id="cloud-email-inp" class="form-input" type="email" maxlength="254" autocomplete="email"'+disAttr+'>' +
+      '</div>' +
+      '<div class="form-row" style="margin-bottom:10px">' +
+        '<label class="form-label" style="margin-bottom:4px">'+t('cloudPassword')+'</label>' +
+        '<input id="cloud-pass-inp" class="form-input" type="password" maxlength="512" autocomplete="current-password"'+disAttr+'>' +
+      '</div>' +
+      '<div id="cloud-auth-err" style="min-height:16px;font-size:12px;color:var(--rose-l);margin-bottom:10px"></div>' +
+      '<div style="display:flex;gap:7px;flex-wrap:wrap">' +
+        '<button class="btn btn-primary btn-sm" id="cloud-login-btn" onclick="cloudLoginFromUI()"'+disAttr+'>'+t('cloudLoginBtn')+'</button>' +
+        '<button class="btn btn-ghost btn-sm" id="cloud-signup-btn" onclick="cloudSignupFromUI()"'+disAttr+'>'+t('cloudSignupBtn')+'</button>' +
+        '<button class="btn btn-ghost btn-sm" id="cloud-refresh-btn" onclick="cloudRefreshStatus()"'+disAttr+'>'+t('cloudRefreshBtn')+'</button>' +
+      '</div>';
+  }
+
+  card.innerHTML = html;
+
+  // Set dynamic user data via textContent — never interpolate IPC response into HTML
+  if (st === 'authenticated') {
+    var emailLbl = document.getElementById('cloud-user-email-lbl');
+    if (emailLbl) emailLbl.textContent = t('cloudAuthenticatedAs') + ' ' + (CLOUD_UI.email || '');
+    if (CLOUD_UI.expiresAt) {
+      var expiryLbl = document.getElementById('cloud-expiry-lbl');
+      if (expiryLbl) {
+        var lang = (DATA && DATA.settings && DATA.settings.lang) || 'tr';
+        var d = new Date(CLOUD_UI.expiresAt);
+        expiryLbl.textContent = t('cloudSessionExpires') + ' ' + d.toLocaleString(lang === 'en' ? 'en-US' : 'tr-TR');
+      }
+    }
+  }
 }
 
 function renderServerUserMgmt(users, url){
-  const content = document.getElementById('content');
-  const rows = (users||[]).map(u=>`<tr>
-    <td>
-      <div style="display:flex;align-items:center;gap:10px">
-        <div style="width:30px;height:30px;border-radius:50%;background:${u.color||'#3b82f6'};
-          display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:12px">${u.avatar||u.name[0]}</div>
-        <div>
-          <div style="font-weight:600">${u.name}</div>
-          <div style="font-size:11px;color:var(--i4)">${u.username}</div>
-        </div>
-      </div>
-    </td>
-    <td><span style="padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;
-      background:rgba(255,255,255,.07);color:${u.role==='admin'?'var(--blue-l)':u.role==='editor'?'var(--violet-l)':'var(--i3)'}">
-      ${u.role==='admin'?'👑 Admin':u.role==='editor'?'🔑 Editor':'👁 Viewer'}</span></td>
-    <td><span style="display:inline-flex;align-items:center;gap:5px;font-size:11px">
-      <span style="width:7px;height:7px;border-radius:50%;background:${u.active?'var(--emerald)':'var(--rose)'}"></span>
-      ${u.active?'Aktif':'Pasif'}</span></td>
-    <td style="font-size:11px;color:var(--i4)">${u.created_at?u.created_at.slice(0,10):'—'}</td>
-    <td>
-      <div style="display:flex;gap:5px">
-        <button class="btn btn-ghost btn-xs" onclick="serverResetPIN('${url}','${u.id}','${u.username}')">🔑 Şifre</button>
-        <button class="btn btn-ghost btn-xs" onclick="serverToggleUser('${url}','${u.id}',${u.active})">${u.active?'⏸':'▶'}</button>
-      </div>
-    </td>
-  </tr>`).join('');
-
-  content.innerHTML = `
-  <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
-    <h3 style="font-size:15px;font-weight:700;flex:1">👥 Sunucu Kullanıcıları</h3>
-    <button class="btn btn-ghost btn-sm" onclick="goto('dash')">← Geri</button>
-    <button class="btn btn-primary btn-sm" onclick="serverAddUserForm('${url}')">+ Kullanıcı Ekle</button>
-  </div>
-  <div id="server-user-form"></div>
-  <div class="table-card">
-    <div class="table-scroller"><table>
-      <thead><tr><th>Kullanıcı</th><th>Rol</th><th>Durum</th><th>Oluşturma</th><th>İşlem</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table></div>
-  </div>`;
+  // retired in v6 — server user management removed
 }
 
 function serverResetPIN(url, userId, username){
-  const f=document.getElementById('server-user-form');
-  if(!f) return;
-  f.innerHTML=`<div style="background:var(--glass-2);border:1px solid var(--bd-1);border-radius:var(--r2);padding:14px;margin-bottom:12px">
-    <div style="font-weight:700;margin-bottom:10px;font-size:12px">🔑 Şifre Sıfırla — ${username}</div>
-    <div class="form-grid-2" style="margin-bottom:10px">
-      <div class="form-row"><label class="form-label">Yeni Şifre (min 6)</label>
-        <input class="form-input" id="svr_np" type="password" placeholder="••••••"
-          onkeydown="if(event.key==='Enter')commitServerPIN('${url}','${userId}')"></div>
-      <div class="form-row"><label class="form-label">Tekrar</label>
-        <input class="form-input" id="svr_nc" type="password" placeholder="••••••"
-          onkeydown="if(event.key==='Enter')commitServerPIN('${url}','${userId}')"></div>
-    </div>
-    <div style="display:flex;gap:8px">
-      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('server-user-form').innerHTML=''">İptal</button>
-      <button class="btn btn-primary btn-sm" onclick="commitServerPIN('${url}','${userId}')">✅ Güncelle</button>
-    </div>
-  </div>`;
-  const inp=document.getElementById('svr_np');
-  if(inp) inp.focus();
+  // retired in v6 — server user management removed
 }
 async function commitServerPIN(url, userId){
-  const np=(document.getElementById('svr_np')?.value||'').trim();
-  const nc=(document.getElementById('svr_nc')?.value||'').trim();
-  if(!np){ toast('❌ Şifre boş olamaz','red'); return; }
-  if(np.length<6){ toast('❌ Min 6 karakter','red'); return; }
-  if(np!==nc){ toast('❌ Şifreler eşleşmiyor','red'); return; }
-  try{
-    const r=await fetch(url+'/users/'+userId+'/reset-password',{
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+DATA.cloud.token},
-      body:JSON.stringify({newPassword:np})
-    });
-    const d=await r.json();
-    if(d.ok){ toast('✅ Şifre güncellendi','green'); document.getElementById('server-user-form').innerHTML=''; }
-    else toast('❌ '+d.error,'red');
-  }catch(e){ toast('❌ '+e.message,'red'); }
+  // retired in v6 — server user management removed
 }
 
 async function serverToggleUser(url, userId, currentActive){
-  try{
-    const r = await fetch(url+'/users/'+userId,{
-      method:'PUT',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+DATA.cloud.token},
-      body:JSON.stringify({active:!currentActive})
-    });
-    const d = await r.json();
-    if(d.ok){ toast(currentActive?'⏸ Pasif yapıldı':'✅ Aktif yapıldı','green'); openServerUserMgmt(); }
-    else toast('❌ '+d.error,'red');
-  }catch(e){ toast('❌ '+e.message,'red'); }
+  // retired in v6 — server user management removed
 }
 
 function serverAddUserForm(url){
-  const f = document.getElementById('server-user-form');
-  f.innerHTML=`<div style="background:var(--glass-2);border:1px solid var(--bd-1);
-    border-radius:var(--r2);padding:14px;margin-bottom:12px">
-    <div style="font-weight:700;margin-bottom:10px">➕ Yeni Sunucu Kullanıcısı</div>
-    <div class="form-grid-2" style="margin-bottom:10px">
-      <div class="form-row"><label class="form-label">Kullanıcı Adı *</label>
-        <input class="form-input" id="su_un" placeholder="kullanici"></div>
-      <div class="form-row"><label class="form-label">Ad Soyad *</label>
-        <input class="form-input" id="su_n" placeholder="Ad Soyad"></div>
-    </div>
-    <div class="form-grid-2" style="margin-bottom:10px">
-      <div class="form-row"><label class="form-label">Şifre * (min 6)</label>
-        <input class="form-input" id="su_p" type="password" placeholder="••••••"></div>
-      <div class="form-row"><label class="form-label">Rol</label>
-        <select class="form-select" id="su_r">
-          <option value="editor">🔑 Editor</option>
-          <option value="viewer">👁 Viewer</option>
-          <option value="admin">👑 Admin</option>
-        </select></div>
-    </div>
-    <div style="display:flex;gap:8px">
-      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('server-user-form').innerHTML=''">İptal</button>
-      <button class="btn btn-primary btn-sm" onclick="serverSaveNewUser('${url}')">✅ Ekle</button>
-    </div>
-  </div>`;
+  // retired in v6 — server user management removed
 }
 
 async function serverSaveNewUser(url){
-  const username = document.getElementById('su_un')?.value.trim();
-  const name     = document.getElementById('su_n')?.value.trim();
-  const password = document.getElementById('su_p')?.value;
-  const role     = document.getElementById('su_r')?.value;
-  if(!username||!name||!password){ toast('❌ Tüm alanlar zorunlu','red'); return; }
-  if(password.length<6){ toast('❌ Şifre min 6 karakter','red'); return; }
-  try{
-    const r = await fetch(url+'/users',{
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+DATA.cloud.token},
-      body:JSON.stringify({username,name,password,role})
-    });
-    const d = await r.json();
-    if(d.ok){ toast(t('userAdded'),'green'); openServerUserMgmt(); }
-    else toast('❌ '+d.error,'red');
-  }catch(e){ toast('❌ '+e.message,'red'); }
+  // retired in v6 — server user management removed
 }
 
 
@@ -10412,19 +10252,8 @@ function importJSON(inp){
 // ════════════════════════════════════════════════════════════════
 
 function _readSupabaseInputs() {
-  // Always read the live modal fields first.  Earlier builds only checked
-  // DATA.cloud, so the Test button showed "URL/Key girilmemiş" even when the
-  // user had typed both values but had not saved them yet.
-  const urlField = document.getElementById('supa_url');
-  const keyField = document.getElementById('supa_key');
-  const liveUrl = (urlField && typeof urlField.value === 'string') ? urlField.value : '';
-  const liveKey = (keyField && typeof keyField.value === 'string') ? keyField.value : '';
-  const url = (liveUrl || DATA.cloud.supabaseUrl || DATA.cloud.url || '')
-    .trim()
-    .replace(/\/+$/, '');
-  const key = (liveKey || DATA.cloud.supabaseKey || DATA.cloud.key || '')
-    .trim();
-  return { url, key };
+  // retired in v6 — Supabase direct-fetch removed
+  return { url: '', key: '' };
 }
 
 function _supaMsg(text, color) {
@@ -10440,230 +10269,61 @@ function _validSupabaseUrl(url) {
 }
 
 function _supaHdrs() {
-  const key = _readSupabaseInputs().key || DATA.cloud.supabaseKey || '';
-  return {
-    'Content-Type':  'application/json',
-    'apikey':        key,
-    'Authorization': 'Bearer ' + key,
-    'Prefer':        'resolution=merge-duplicates,return=minimal',
-  };
+  // retired in v6 — Supabase direct-fetch removed
+  return {};
 }
 
 async function _testSupabaseConnection({ save=false } = {}) {
-  const { url, key } = _readSupabaseInputs();
-  if (!url || !key) {
-    _supaMsg('❌ Project URL ve API key zorunludur', 'var(--rose-l)');
-    toast(t('supaUrlKeyMissing'),'red');
-    return { ok:false, error:'missing' };
-  }
-  if (!_validSupabaseUrl(url)) {
-    _supaMsg(t('supaUrlInvalid'), 'var(--rose-l)');
-    toast(t('supaUrlKeyMissing'),'red');
-    return { ok:false, error:'bad_url' };
-  }
-
-  _supaMsg(t('supaTestingConn'), 'var(--i4)');
-  try {
-    // Use the real REST table used by the app.  If the table is missing we can
-    // distinguish schema setup from credential/network problems.
-    const r = await fetch(url + '/rest/v1/ktp_sync?select=id&limit=1', {
-      headers: { apikey: key, Authorization: 'Bearer ' + key },
-      signal: AbortSignal.timeout(10000)
-    });
-    if (r.status === 401 || r.status === 403) {
-      _supaMsg(t('supaKeyInvalid'), 'var(--rose-l)');
-      toast('❌ Supabase API key kabul edilmedi', 'red');
-      return { ok:false, error:'auth' };
-    }
-    if (r.status === 404) {
-      if (save) {
-        DATA.cloud.supabaseUrl = url;
-        DATA.cloud.supabaseKey = key;
-        DATA.cloud.url = url;
-        DATA.cloud.mode = 'supabase';
-        DATA.cloud.enabled = false;
-        saveLocal();
-      }
-      _supaMsg('⚠️ Supabase bağlantısı OK; ktp_sync tablosu yok. Supabase SQL Editor’da supabase/schema.sql dosyasını çalıştırın.', 'var(--amber-l)');
-      toast('⚠️ Supabase schema eksik', 'orange');
-      return { ok:false, error:'schema' };
-    }
-    if (!r.ok) {
-      const body = await r.text().catch(()=>'');
-      _supaMsg('⚠️ Supabase HTTP ' + r.status + ': ' + body.slice(0,120), 'var(--amber-l)');
-      toast('⚠️ Supabase HTTP ' + r.status, 'orange');
-      return { ok:false, error:'http_'+r.status };
-    }
-
-    if (save) {
-      DATA.cloud.supabaseUrl = url;
-      DATA.cloud.supabaseKey = key;
-      DATA.cloud.url         = url;
-      DATA.cloud.mode        = 'supabase';
-      DATA.cloud.enabled     = true;
-      DATA.cloud.lastSync    = DATA.cloud.lastSync || new Date().toISOString();
-      saveLocal();
-      updateCloudUI();
-    }
-    _supaMsg(t('supaOk'), 'var(--emerald-l)');
-    toast(t('supaOkShort'),'green');
-    return { ok:true, url, key };
-  } catch(e) {
-    _supaMsg(t('supaConnErr') + e.message, 'var(--rose-l)');
-    toast(t('supaNoResponse'),'red');
-    return { ok:false, error:e.message };
-  }
+  // retired in v6 — Supabase direct-fetch removed
+  _supaMsg(t(‘cloudNotConfigured’), ‘var(--i4)’);
+  return { ok: false, error: ‘retired’ };
 }
 
 async function supabaseConnect() {
-  const res = await _testSupabaseConnection({ save:true });
-  if (res.ok) {
-    addHist('Supabase bağlantısı: ' + res.url);
-    // Re-render the cloud modal so status/push/pull buttons update immediately.
-    const box = document.getElementById('modal-box');
-    if (box) box.innerHTML = tplCloud();
-  }
+  // retired in v6 — Supabase direct-fetch removed
+  toast(t(‘cloudAccountTitle’), ‘blue’);
 }
 
 async function checkSupabaseStatus() {
-  await _testSupabaseConnection({ save:false });
+  // retired in v6 — Supabase direct-fetch removed
 }
 
 async function _supaUpsert(table, rows) {
-  const url = DATA.cloud.supabaseUrl;
-  const key = DATA.cloud.supabaseKey;
-  if(!url || !key || !rows.length) return;
-  const r = await fetch(url + '/rest/v1/' + table, {
-    method:  'POST',
-    headers: _supaHdrs(),
-    body:    JSON.stringify(rows),
-    signal:  AbortSignal.timeout(15000)
-  });
-  if(!r.ok) {
-    const err = await r.text().catch(() => '');
-    throw new Error(table + ' upsert failed ' + r.status + ': ' + err.slice(0,120));
-  }
+  // retired in v6 — Supabase direct-fetch removed
 }
 
 async function _supaSelect(table, query) {
-  const url = DATA.cloud.supabaseUrl;
-  const key = DATA.cloud.supabaseKey;
-  if(!url || !key) return [];
-  const r = await fetch(url + '/rest/v1/' + table + '?' + (query||''), {
-    headers: { ..._supaHdrs(), Prefer: 'return=representation' },
-    signal:  AbortSignal.timeout(12000)
-  });
-  if(!r.ok) throw new Error(table + ' select failed ' + r.status);
-  return await r.json();
+  // retired in v6 — Supabase direct-fetch removed
+  return [];
 }
 
-// ── 6A-3: Workspace ID — generated once, identifies this customer's Supabase row ─
+// ── 6A-3: Workspace ID ─
 function _ensureWorkspaceId(){
-  if(!DATA.cloud.workspaceId){
-    // Existing configured installs get 'ktp_main' so their row key is unchanged.
-    // Fresh installs (no cloud URL yet) get a stable UUID for proper isolation.
-    DATA.cloud.workspaceId = (DATA.cloud.supabaseUrl || DATA.cloud.url)
-      ? 'ktp_main'
-      : ((typeof crypto !== 'undefined' && crypto.randomUUID)
-          ? crypto.randomUUID()
-          : 'ktp-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,9));
-    saveLocal();
-  }
-  return DATA.cloud.workspaceId;
+  // retired in v6 — no Supabase credential reads
+  return DATA.cloud.workspaceId || 'ktp_main';
 }
 
-// ── 6A-1 + 6A-3: Push now sends _exportEnvelope() and uses workspace_id row key ─
+// ── 6A-1: Push ─
 async function supabasePush() {
-  const url = DATA.cloud.supabaseUrl;
-  const key = DATA.cloud.supabaseKey;
-  if(!url || !key) { toast(t('supaNotConnected'),'red'); return false; }
-  const wsId = _ensureWorkspaceId();
-  const current = await _supaSelect('ktp_sync', 'id=eq.'+encodeURIComponent(wsId)+'&select=version');
-  if(current && current.length && current[0].version > (DATA.cloud.serverVersion || 0)){
-    toast(t('supaServerNewer'),'red');
-    return false;
-  }
-  const record = {
-    id:          wsId,
-    data_json:   JSON.stringify(_exportEnvelope()),
-    version:     (DATA.cloud.serverVersion || 0) + 1,
-    updated_at:  new Date().toISOString(),
-    app_version: String(KTP_VERSION),
-  };
-  await _supaUpsert('ktp_sync', [record]);
-  DATA.cloud.serverVersion = record.version;
-  DATA.cloud.lastSync      = record.updated_at;
-  DATA.cloud.enabled       = true;
-  DATA.cloud.pendingPush   = false;
-  saveLocal();
-  return true;
+  // retired in v6 — Supabase direct-fetch removed
+  return false;
 }
 
-// ── 6A-2 + 6A-3: Pull now routes through _importCommit (merge, with rollback) ─
+// ── 6A-2: Pull ─
 async function supabasePull() {
-  const wsId = _ensureWorkspaceId();
-  const rows = await _supaSelect('ktp_sync', 'id=eq.'+encodeURIComponent(wsId));
-  if(!rows || !rows.length) return false;
-  const d = JSON.parse(rows[0].data_json);
-  const result = _importCommit(d, 'merge');
-  if(!result.ok){
-    toast(t('supaPullFailed')+(result.error||t('unknownOp')),'red');
-    return false;
-  }
-  // Update cloud metadata after successful merge (not part of data payload)
-  DATA.cloud.serverVersion = rows[0].version;
-  DATA.cloud.lastSync      = rows[0].updated_at;
-  DATA.cloud.enabled       = true;
-  DATA.cloud.lastPullAt    = Date.now();
-  saveLocal();
-  render(); updateBadges();
-  return true;
+  // retired in v6 — Supabase direct-fetch removed
+  return false;
 }
 
-// Override cloudSync to route through Supabase when in supabase mode
-(function patchCloudSync(){
-  const _orig = cloudSync;
-  cloudSync = async function(dir='push'){
-    const mode = DATA.cloud.mode || 'supabase';
-    if(mode === 'supabase' && DATA.cloud.supabaseUrl){
-      S.syncing=true; updateCloudUI();
-      try{
-        if(dir==='push'){
-          const _pushOk = await supabasePush();
-          if(_pushOk){
-            toast('☁️ Supabase push tamam (v'+DATA.cloud.serverVersion+')','blue');
-            addHist('Supabase push v'+DATA.cloud.serverVersion);
-          }
-        } else {
-          const ok = await supabasePull();
-          if(ok) { toast('☁️ Supabase pull tamam','blue'); addHist('Supabase pull'); }
-          else   { toast(t('supaNoPush'),'blue'); }
-        }
-      }catch(e){
-        toast('❌ Supabase: '+e.message,'red');
-        addHist('Supabase hata ('+dir+'): '+e.message);
-        if(dir==='push'){ DATA.cloud.pendingPush=true; saveLocal(); }
-      }finally{
-        S.syncing=false; updateCloudUI();
-      }
-      return;
-    }
-    return _orig(dir);
-  };
-})();
+// patchCloudSync retired in v6 — cloudSync is already a no-op
+(function patchCloudSync(){})();
 
 
 // ═══════════════════════════════════════════════
 // AUTO TIMERS (30s autosave, 5min cloud sync)
 // ═══════════════════════════════════════════════
 setInterval(()=>{if(DATA.settings?.autoSave){autoRecalc();saveLocal();}},30000);
-setInterval(()=>{
-  const _supOk=DATA.cloud?.mode==='supabase'&&DATA.cloud?.supabaseUrl&&DATA.cloud?.supabaseKey;
-  const _srvOk=DATA.cloud?.url&&DATA.cloud?.token;
-  if(DATA.cloud?.enabled&&(_supOk||_srvOk)){
-    cloudSync('push').then(()=>{/* auto-sync logged inside cloudSync */}).catch(()=>{});
-  }
-},300000);
+// auto-sync timer retired in v6 — cloud sync handled via IPC-based Cloud Account panel
 
 // CH-1: Activity listeners — reset idle timer on any real user interaction
 ['mousemove','keydown','click','touchstart','scroll','wheel'].forEach(function(ev){
@@ -11501,7 +11161,7 @@ async function restoreElectronState(){
 const _origInitApp2=initApp;
 function initApp(){
   _origInitApp2();
-  restoreElectronState().then(()=>render());
+  restoreElectronState().then(function(){ render(); cloudInitStatus(); });
   addAboutToSidebar();
   try{refreshUIText();}catch(e){}
   if(window._ktpCorruptWarn){ setTimeout(()=>toast(window._ktpCorruptWarn,'red'),500); window._ktpCorruptWarn=null; }
