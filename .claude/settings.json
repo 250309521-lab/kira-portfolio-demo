@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git rm *)",
+      "Bash(powershell -Command \"Get-Content 'd:\\\\New folder \\(9\\)\\\\KiraTakipPro_v6_customer\\\\docs\\\\emergency-license-procedure.md'\")",
+      "Bash(powershell -Command \"Get-Date -Format 'yyyy-MM-dd HH:mm:ss'\")",
+      "Bash(git add *)",
+      "Bash(powershell -Command \"Select-String -Path docs/key-rotation-procedure.md,docs/licensing-support.md,docs/ch4c-prep-recovery-plan.md -Pattern 'keys/private.pem|keys/public.pem|gitignored|do not run now|owner approval|offline encrypted|private key' | Select-Object Filename,LineNumber,Line\")",
+      "Bash(node src/tests/license-verifier.test.js)",
+      "Bash(node -c src/license-verifier.js)",
+      "Bash(powershell -Command \"Get-ChildItem -Path . -Recurse -Filter *.ktplicense -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName\")",
+      "Bash(git commit *)",
+      "Bash(powershell -Command \"Get-Content src/main.js | Select-Object -Skip 355 -First 25\")"
+    ]
+  }
+}

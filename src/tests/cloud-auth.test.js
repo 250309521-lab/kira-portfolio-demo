@@ -216,6 +216,29 @@ async function registerAsync(testAsync, assert, assertEqual) {
     assert(auth.isAuthenticated() === true,  'must be authenticated after restoreSession');
   });
 
+  await testAsync('cloud-auth: restoreSession offline preserves stored refresh token (regression: 1E.6B)', async function() {
+    auth._resetForTests();
+    var mockStore = makeMockStore('keep-this-token');
+    auth._setStore(mockStore);
+    auth._setFetch(makeThrowFetch()); // network failure
+    var r = await auth.restoreSession();
+    assert(r.ok === false,             'must return ok:false on network failure');
+    assertEqual(r.error, 'offline',    'error code must be offline');
+    assertEqual(mockStore._getToken(), 'keep-this-token', 'stored refresh token must be preserved on network failure');
+    assert(auth.isAuthenticated() === false, 'must not be authenticated after offline failure');
+  });
+
+  await testAsync('cloud-auth: restoreSession server rejection deletes stored refresh token', async function() {
+    auth._resetForTests();
+    var mockStore = makeMockStore('expired-token');
+    auth._setStore(mockStore);
+    auth._setFetch(makeErrorFetch(401, { error: 'invalid_grant' }));
+    var r = await auth.restoreSession();
+    assert(r.ok === false,                  'must return ok:false on server rejection');
+    assertEqual(r.error, 'session_expired', 'error code must be session_expired');
+    assertEqual(mockStore._getToken(), null, 'stored refresh token must be deleted when server rejects it');
+  });
+
   // ── refreshSession ─────────────────────────────────────────────────────────
 
   await testAsync('cloud-auth: refreshSession rotates refresh token in store', async function() {

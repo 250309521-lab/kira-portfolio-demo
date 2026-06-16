@@ -140,7 +140,9 @@ async function _doRefresh(refreshToken) {
     });
     body = await res.json();
   } catch (_) {
-    _clearSession();
+    // Network failure — clear in-memory access token but keep stored refresh token for next attempt.
+    _accessToken          = null;
+    _accessTokenExpiresAt = 0;
     return { ok: false, error: 'offline' };
   }
   if (!res.ok) { _clearSession(); return { ok: false, error: 'session_expired' }; }

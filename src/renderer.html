@@ -4088,6 +4088,61 @@ tbody tr[onclick] { cursor: pointer; }
   box-shadow: none !important;
 }
 
+/* ── CLOUD WORKSPACE UI (CLOUD-FOUNDATION-1E.6A) ─────────────────────────── */
+.ws-section-hdr{display:flex;align-items:center;gap:7px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--i4);margin-bottom:12px;padding-top:14px;border-top:1px solid var(--bd-1)}
+.ws-count-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:16px;padding:0 5px;font-size:9.5px;font-weight:700;border-radius:10px;background:rgba(99,102,241,.15);color:#818cf8;letter-spacing:0}
+.ws-active-card{padding:12px 14px;background:rgba(16,185,129,.07);border:1px solid rgba(16,185,129,.22);border-radius:8px;margin-bottom:10px}
+.ws-active-row{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.ws-status-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.ws-status-dot.ok{background:var(--emerald);box-shadow:0 0 5px var(--emerald)}
+.ws-active-name-lbl{font-size:13px;font-weight:600;color:var(--i0);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ws-role-badge{display:inline-block;font-size:10px;font-weight:600;padding:2px 7px;border-radius:10px;background:rgba(99,102,241,.12);color:#818cf8;flex-shrink:0}
+.ws-role-badge[data-role="owner"]{background:rgba(245,158,11,.12);color:#f59e0b}
+.ws-role-badge[data-role="member"]{background:rgba(16,185,129,.1);color:#34d399}
+.ws-sync-note{font-size:10.5px;color:var(--i4);margin-top:5px}
+.ws-restored-note{font-size:10.5px;color:var(--amber);margin-top:2px;margin-bottom:2px}
+.ws-empty-state{display:flex;flex-direction:column;align-items:center;text-align:center;padding:18px 16px;background:rgba(99,102,241,.05);border:1px dashed rgba(99,102,241,.2);border-radius:10px;margin-bottom:10px;gap:6px}
+.ws-empty-icon{font-size:24px;line-height:1;opacity:.65}
+.ws-empty-text{font-size:12.5px;font-weight:600;color:var(--i2)}
+.ws-empty-sub{font-size:11px;color:var(--i4)}
+.ws-error-card{padding:12px 14px;background:rgba(244,63,94,.07);border:1px solid rgba(244,63,94,.18);border-radius:8px;margin-bottom:10px}
+.ws-err-text{font-size:12px;color:var(--rose-l);margin-bottom:8px}
+.ws-loading{display:flex;align-items:center;gap:8px;padding:12px 0;font-size:12.5px;color:var(--i4)}
+.ws-list{display:flex;flex-direction:column;gap:5px;margin-bottom:10px}
+.ws-row{display:flex;align-items:center;gap:8px;padding:9px 11px;background:var(--glass-1);border:1px solid var(--bd-1);border-radius:7px;transition:border-color .12s,background .12s}
+.ws-row:hover{border-color:rgba(59,130,246,.25);background:rgba(59,130,246,.03)}
+.ws-row-active{border-color:rgba(16,185,129,.28)!important;background:rgba(16,185,129,.04)!important}
+.ws-row-name{font-size:12.5px;font-weight:600;color:var(--i1)}
+.ws-row-role{font-size:10.5px;color:var(--i4);margin-top:1px}
+.ws-active-chip{display:inline-flex;align-items:center;font-size:10px;font-weight:600;padding:2px 7px;border-radius:10px;background:rgba(16,185,129,.14);color:#34d399;flex-shrink:0}
+.ws-spinner{display:inline-block;width:12px;height:12px;border:2px solid rgba(99,102,241,.25);border-top-color:#818cf8;border-radius:50%;animation:wspin .7s linear infinite;flex-shrink:0}
+@keyframes wspin{to{transform:rotate(360deg)}}
+.ws-create-form{padding:12px 14px;background:var(--glass-1);border:1px solid var(--bd-1);border-radius:8px;margin-bottom:8px}
+.ws-create-err-msg{min-height:16px;font-size:11.5px;color:var(--rose-l);margin-top:6px;margin-bottom:6px}
+.ws-footer-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+[data-theme="light"] .ws-section-hdr{color:#3a5a8a!important;border-top-color:rgba(30,50,100,.12)!important}
+[data-theme="light"] .ws-count-badge{background:rgba(99,102,241,.1)!important;color:#4f46e5!important}
+[data-theme="light"] .ws-active-card{background:rgba(16,185,129,.07)!important;border-color:rgba(16,185,129,.22)!important}
+[data-theme="light"] .ws-active-name-lbl{color:#080f1e!important}
+[data-theme="light"] .ws-role-badge{background:rgba(99,102,241,.09)!important;color:#4338ca!important}
+[data-theme="light"] .ws-role-badge[data-role="owner"]{background:rgba(245,158,11,.1)!important;color:#d97706!important}
+[data-theme="light"] .ws-role-badge[data-role="member"]{background:rgba(16,185,129,.09)!important;color:#047857!important}
+[data-theme="light"] .ws-empty-state{background:rgba(99,102,241,.04)!important;border-color:rgba(99,102,241,.18)!important}
+[data-theme="light"] .ws-empty-text{color:#1e3a5f!important}
+[data-theme="light"] .ws-empty-sub{color:#5a7aa8!important}
+[data-theme="light"] .ws-error-card{background:rgba(244,63,94,.06)!important;border-color:rgba(244,63,94,.15)!important}
+[data-theme="light"] .ws-err-text{color:#be123c!important}
+[data-theme="light"] .ws-loading{color:#5a7aa8!important}
+[data-theme="light"] .ws-row{background:rgba(255,255,255,.85)!important;border-color:rgba(30,50,100,.12)!important}
+[data-theme="light"] .ws-row:hover{border-color:rgba(37,99,235,.28)!important;background:rgba(37,99,235,.03)!important}
+[data-theme="light"] .ws-row-active{border-color:rgba(16,185,129,.25)!important;background:rgba(16,185,129,.05)!important}
+[data-theme="light"] .ws-row-name{color:#0f1f3c!important}
+[data-theme="light"] .ws-row-role{color:#5a7aa8!important}
+[data-theme="light"] .ws-active-chip{background:rgba(16,185,129,.11)!important;color:#047857!important}
+[data-theme="light"] .ws-sync-note{color:#5a7aa8!important}
+[data-theme="light"] .ws-restored-note{color:#b45309!important}
+[data-theme="light"] .ws-create-form{background:rgba(255,255,255,.8)!important;border-color:rgba(30,50,100,.12)!important}
+
 </style>
 <script>
 /* ── KTP Safe-Boot & Recovery ── runs before ALL app JS ── */
@@ -4726,10 +4781,10 @@ function updateCloudUI(){
     dot.className='cloud-dot ok';
     if(lbl) lbl.textContent=t('navCloud');
     if(sub){ sub.textContent=''; if(CLOUD_UI.email) sub.textContent=CLOUD_UI.email; }
-  } else if(st==='configured_anonymous'||st==='login_pending'||st==='signup_pending'||st==='logout_pending'){
+  } else if(st==='configured_anonymous'||st==='login_pending'||st==='signup_pending'||st==='logout_pending'||st==='reconnecting'||st==='offline_cached'){
     dot.className='cloud-dot sync';
     if(lbl) lbl.textContent=t('navCloud');
-    if(sub) sub.textContent=t('cloudSignedOut');
+    if(sub) sub.textContent=(st==='reconnecting')?t('cloudReconnecting'):(st==='offline_cached')?t('cloudOfflineCached'):t('cloudSignedOut');
   } else {
     dot.className='cloud-dot off';
     if(lbl) lbl.textContent=t('cloudNone');
@@ -4967,6 +5022,36 @@ var STRINGS={
     cloudErrorOffline:'Bağlantı hatası. İnternet bağlantınızı kontrol edin.',
     cloudErrorSessionExpired:'Oturum süresi doldu. Lütfen tekrar giriş yapın.',
     cloudErrorGeneric:'Bir hata oluştu. Lütfen tekrar deneyin.',
+    cloudReconnecting:'Bağlantı yenileniyor...',
+    cloudOfflineCached:'Çevrimdışı',
+    cloudReconnectBtn:'Yeniden Bağlan',
+    // Cloud Workspace UI (CLOUD-FOUNDATION-1E.6)
+    wsSection:'Çalışma Alanı',
+    wsLoading:'Çalışma alanları yükleniyor...',
+    wsEmpty:'Henüz çalışma alanı yok.',
+    wsCreate:'Çalışma Alanı Oluştur',wsCreateBtn:'Oluştur',
+    wsCreateName:'Çalışma alanı adı',
+    wsActivate:'Seç',wsActive:'Aktif',
+    wsRole_owner:'Sahip',wsRole_admin:'Admin',wsRole_member:'Üye',
+    wsRefresh:'Yenile',wsSwitch:'Değiştir',
+    wsSyncNote:'Eşzamlama ve yedekleme henüz aktif değil.',
+    wsRestored:'Önceki oturumdan geri yüklendi',
+    wsNotFound:'Çalışma alanı artık erişilebilir değil.',
+    wsErrorNetwork:'Ağ bağlantısı hatası.',
+    wsErrorAuth:'Oturum süresi doldu. Lütfen tekrar giriş yapın.',
+    wsErrorGeneric:'Bir hata oluştu.',
+    wsNameRequired:'Çalışma alanı adı gereklidir.',
+    wsNameTooLong:'Çalışma alanı adı çok uzun (max 255).',
+    wsCreateSuccess:'✅ Çalışma alanı oluşturuldu.',
+    wsCreateConflict:'Bu ada sahip bir çalışma alanı zaten mevcut.',
+    wsCreateError:'Çalışma alanı oluşturulamadı.',
+    wsLicenseRequired:'Lisans gereklidir.',
+    wsNotConfigured:'Bulut bağlantısı yapılandırılmamış.',
+    wsPermissionDenied:'Erişim izniniz yok.',
+    wsEmptySub:'İlk çalışma alanınızı oluşturun.',
+    wsActivated:'✅ Çalışma alanı aktifleştirildi.',
+    wsCreateAnother:'Yeni Çalışma Alanı',
+    wsOfflineNote:'Çevrimdışı — bağlantı yenilendiğinde güncellenir.',
     fieldNotFound:'Alan bulunamadı',pasted:'📋 Yapıştırıldı',pasteManual:'Ctrl+V ile yapıştırın',
     // Settings modals
     resetDataTitle:'🗑 Tüm Verileri Sıfırla',restoreTitle:'↩ Yedekten Geri Yükle',
@@ -5436,6 +5521,36 @@ var STRINGS={
     cloudErrorOffline:'Connection error. Check your internet connection.',
     cloudErrorSessionExpired:'Session expired. Please sign in again.',
     cloudErrorGeneric:'An error occurred. Please try again.',
+    cloudReconnecting:'Reconnecting...',
+    cloudOfflineCached:'Offline',
+    cloudReconnectBtn:'Reconnect',
+    // Cloud Workspace UI (CLOUD-FOUNDATION-1E.6)
+    wsSection:'Workspace',
+    wsLoading:'Loading workspaces...',
+    wsEmpty:'No workspaces yet.',
+    wsCreate:'Create Workspace',wsCreateBtn:'Create',
+    wsCreateName:'Workspace name',
+    wsActivate:'Select',wsActive:'Active',
+    wsRole_owner:'Owner',wsRole_admin:'Admin',wsRole_member:'Member',
+    wsRefresh:'Refresh',wsSwitch:'Switch',
+    wsSyncNote:'Sync and backup are not active yet.',
+    wsRestored:'Restored from previous session',
+    wsNotFound:'Workspace is no longer accessible.',
+    wsErrorNetwork:'Network connection error.',
+    wsErrorAuth:'Session expired. Please sign in again.',
+    wsErrorGeneric:'An error occurred.',
+    wsNameRequired:'Workspace name is required.',
+    wsNameTooLong:'Workspace name too long (max 255).',
+    wsCreateSuccess:'✅ Workspace created.',
+    wsCreateConflict:'A workspace with this name already exists.',
+    wsCreateError:'Failed to create workspace.',
+    wsLicenseRequired:'License required.',
+    wsNotConfigured:'Cloud connection is not configured.',
+    wsPermissionDenied:'Permission denied.',
+    wsEmptySub:'Create your first workspace.',
+    wsActivated:'✅ Workspace activated.',
+    wsCreateAnother:'New Workspace',
+    wsOfflineNote:'Offline — will update when reconnected.',
     fieldNotFound:'Field not found',pasted:'📋 Pasted',pasteManual:'Use Ctrl+V to paste',
     // Settings modals
     resetDataTitle:'🗑 Reset All Data',restoreTitle:'↩ Restore from Backup',
@@ -7572,13 +7687,28 @@ function pasteIntoField(id){
 
 // ── CLOUD ACCOUNT MODAL (CLOUD-FOUNDATION-1C) ────────────────────────────────
 function tplCloud(){
-  CLOUD_UI.state = 'loading';
-  CLOUD_UI.email = null; CLOUD_UI.userId = null; CLOUD_UI.expiresAt = null; CLOUD_UI.error = null;
-  setTimeout(function(){ cloudRefreshStatus(); }, 50);
+  // Preserve meaningful state so the modal never flashes sign-in over a restored session.
+  // 'authenticated' / 'reconnecting' / 'offline_cached' are kept; unknown states reset to loading.
+  var _meaningful = CLOUD_UI.state === 'authenticated' ||
+                    CLOUD_UI.state === 'reconnecting'   ||
+                    CLOUD_UI.state === 'offline_cached';
+  if (!_meaningful) {
+    CLOUD_UI.state = 'loading';
+    CLOUD_UI.email = null; CLOUD_UI.userId = null; CLOUD_UI.expiresAt = null; CLOUD_UI.error = null;
+  }
+  setTimeout(function(){
+    if (_cloudInitPending) {
+      // cloudInitStatus() is still running — render current state, don't race it with a second fetch.
+      if (_openModalState && _openModalState.type === 'cloud') renderCloudAccountCard();
+    } else {
+      cloudRefreshStatus();
+    }
+  }, 10);
   return '<div class="modal-title">'+t('cloudAccountTitle')+'</div>' +
     '<div id="cloud-account-card" style="min-height:80px">' +
       '<div style="padding:20px;text-align:center;color:var(--i4);font-size:13px">'+t('cloudLoading')+'</div>' +
     '</div>' +
+    '<div id="cloud-workspace-card" style="display:none"></div>' +
     '<div class="modal-footer">' +
       '<button class="btn btn-ghost" onclick="closeMod()">'+t('close')+'</button>' +
     '</div>';
@@ -7624,8 +7754,29 @@ function sanitizeCloudStatusForRenderer(raw) {
 
 async function cloudInitStatus() {
   if (!window.electron || !window.electron.cloudRestoreSession) return;
-  try { await window.electron.cloudRestoreSession(); } catch(e) {}
-  cloudRefreshStatus();
+  if (_cloudInitPending) return; // prevent concurrent runs
+  _cloudInitPending = true;
+  // Reset workspace restore so wsRestore() re-runs after each reconnect attempt.
+  _wsRestored = false;
+  CLOUD_UI.state = 'reconnecting';
+  updateCloudUI();
+  if (_openModalState && _openModalState.type === 'cloud') { renderCloudAccountCard(); renderWorkspaceCard(); }
+  var _restoreResult;
+  try { _restoreResult = await window.electron.cloudRestoreSession(); } catch(e) { _restoreResult = { ok: false, error: 'unknown_error' }; }
+  if (_restoreResult && !_restoreResult.ok && _restoreResult.error === 'offline') {
+    // Stored token exists but network unavailable — show offline state without forcing login.
+    CLOUD_UI.state = 'offline_cached';
+    updateCloudUI();
+    if (_openModalState && _openModalState.type === 'cloud') renderCloudAccountCard();
+    if (!_wsRestored) { _wsRestored = true; _wsRestoreOffline(); }
+    if (_openModalState && _openModalState.type === 'cloud') renderWorkspaceCard();
+    _cloudInitPending = false;
+    return;
+  }
+  // Await so CLOUD_UI is fully settled before the pending flag clears.
+  // This ensures tplCloud() sees 'authenticated' (not 'reconnecting') on first open.
+  try { await cloudRefreshStatus(); } catch(e) {}
+  _cloudInitPending = false;
 }
 
 async function cloudRefreshStatus() {
@@ -7659,6 +7810,13 @@ async function cloudRefreshStatus() {
   }
   updateCloudUI();
   if (_openModalState && _openModalState.type === 'cloud') renderCloudAccountCard();
+  // ── Startup workspace restore (CLOUD-FOUNDATION-1E.6) ─────────────────────
+  if (CLOUD_UI.state === 'authenticated' && !_wsRestored) {
+    _wsRestored = true;
+    wsRestore().then(function() {
+      if (_openModalState && _openModalState.type === 'cloud') renderWorkspaceCard();
+    }).catch(function() {});
+  }
 }
 
 async function cloudLoginFromUI() {
@@ -7762,6 +7920,17 @@ function renderCloudAccountCard() {
   if (st === 'loading') {
     html = '<div style="padding:20px;text-align:center;color:var(--i4);font-size:13px">'+t('cloudLoading')+'</div>';
 
+  } else if (st === 'reconnecting') {
+    html = '<div style="padding:14px;background:rgba(99,102,241,.07);border:1px solid rgba(99,102,241,.18);border-radius:8px;margin-bottom:10px">' +
+      '<div id="cloud-reconnecting-lbl" style="font-size:13px;color:var(--i3)"></div></div>';
+
+  } else if (st === 'offline_cached') {
+    html = '<div style="padding:12px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.22);border-radius:8px;font-size:12px;color:var(--i3);margin-bottom:10px">' +
+      '<div id="cloud-offline-lbl"></div></div>' +
+      '<div style="display:flex;gap:7px;margin-bottom:8px">' +
+        '<button class="btn btn-ghost btn-sm" id="cloud-reconnect-btn" onclick="cloudInitStatus()"></button>' +
+      '</div>';
+
   } else if (st === 'error_license') {
     html = '<div style="padding:12px;background:rgba(244,63,94,.08);border:1px solid rgba(244,63,94,.2);border-radius:8px;font-size:12px;color:var(--rose-l);margin-bottom:10px">'+t('cloudErrorLicense')+'</div>';
 
@@ -7815,7 +7984,17 @@ function renderCloudAccountCard() {
 
   card.innerHTML = html;
 
-  // Set dynamic user data via textContent — never interpolate IPC response into HTML
+  // Set dynamic text via textContent — never interpolate IPC response into HTML
+  if (st === 'reconnecting') {
+    var _rclbl = document.getElementById('cloud-reconnecting-lbl');
+    if (_rclbl) _rclbl.textContent = t('cloudReconnecting');
+  }
+  if (st === 'offline_cached') {
+    var _offlbl = document.getElementById('cloud-offline-lbl');
+    if (_offlbl) _offlbl.textContent = t('cloudOfflineCached');
+    var _rcbtn = document.getElementById('cloud-reconnect-btn');
+    if (_rcbtn) _rcbtn.textContent = t('cloudReconnectBtn');
+  }
   if (st === 'authenticated') {
     var emailLbl = document.getElementById('cloud-user-email-lbl');
     if (emailLbl) emailLbl.textContent = t('cloudAuthenticatedAs') + ' ' + (CLOUD_UI.email || '');
@@ -7828,10 +8007,350 @@ function renderCloudAccountCard() {
       }
     }
   }
+  // ── Workspace section (CLOUD-FOUNDATION-1E.6) ─────────────────────────────
+  renderWorkspaceCard();
+  if (st === 'authenticated' && WS_UI.view === 'idle') wsLoadWorkspaces();
 }
 
 function renderServerUserMgmt(users, url){
   // retired in v6 — server user management removed
+}
+
+// ── CLOUD WORKSPACE UI (CLOUD-FOUNDATION-1E.6) ───────────────────────────────
+// Renderer-side workspace state. All server values written via textContent only.
+
+var WS_UI = {
+  view:        'idle',  // 'idle' | 'loading' | 'list' | 'create' | 'error'
+  workspaces:  [],      // [{workspaceId, workspaceName, memberRole}]
+  activeId:    null,
+  activeName:  null,
+  activeRole:  null,
+  restored:    false,
+  loading:     false,
+  error:       null,
+  createError: null,
+  showSwitch:  false,
+};
+var _wsRestored = false;
+var _cloudInitPending = false; // true while cloudInitStatus() is awaiting restore/refresh
+
+function _wsRoleLabel(role) {
+  if (role === 'owner')  return t('wsRole_owner');
+  if (role === 'admin')  return t('wsRole_admin');
+  if (role === 'member') return t('wsRole_member');
+  return role ? String(role) : '';
+}
+
+function _wsErrorMsg(errCode) {
+  if (errCode === 'not_authenticated')   return t('wsErrorAuth');
+  if (errCode === 'network_error')       return t('wsErrorNetwork');
+  if (errCode === 'workspace_not_found') return t('wsNotFound');
+  if (errCode === 'license_required')    return t('wsLicenseRequired');
+  if (errCode === 'not_configured')      return t('wsNotConfigured');
+  if (errCode === 'permission_denied')   return t('wsPermissionDenied');
+  return t('wsErrorGeneric');
+}
+
+function _wsBridge() {
+  if (typeof window !== 'undefined' && window.cloudWorkspace) return window.cloudWorkspace;
+  return null;
+}
+
+function _wsStorage() {
+  try { return localStorage; } catch (_) { return null; }
+}
+
+function _wsReadSavedId() {
+  try {
+    var _s = _wsStorage();
+    return _s ? (_s.getItem('ktp_active_workspace_id') || null) : null;
+  } catch (_) { return null; }
+}
+
+function _wsSaveId(id) {
+  try {
+    var _s = _wsStorage();
+    if (!_s) return;
+    if (id) _s.setItem('ktp_active_workspace_id', id);
+    else    _s.removeItem('ktp_active_workspace_id');
+  } catch (_) {}
+}
+
+async function wsLoadWorkspaces() {
+  var bridge = _wsBridge();
+  if (!bridge) { WS_UI.view = 'error'; WS_UI.error = 'not_authenticated'; renderWorkspaceCard(); return; }
+  WS_UI.view = 'loading'; WS_UI.error = null;
+  renderWorkspaceCard();
+  var _r;
+  try { _r = await bridge.listWorkspaces(); } catch (_) {
+    WS_UI.view = 'error'; WS_UI.error = 'unknown_error'; renderWorkspaceCard(); return;
+  }
+  if (!_r || !_r.ok) {
+    WS_UI.view = 'error'; WS_UI.error = _r ? (_r.error || 'unknown_error') : 'unknown_error';
+    renderWorkspaceCard(); return;
+  }
+  WS_UI.workspaces = Array.isArray(_r.workspaces) ? _r.workspaces : [];
+  if (WS_UI.activeId) {
+    var _f = WS_UI.workspaces.find(function(w) { return w.workspaceId === WS_UI.activeId; });
+    if (!_f) { WS_UI.activeId = null; WS_UI.activeName = null; WS_UI.activeRole = null; _wsSaveId(null); }
+  }
+  WS_UI.view = 'list';
+  renderWorkspaceCard();
+}
+
+async function wsActivateWorkspace(workspaceId) {
+  var bridge = _wsBridge();
+  if (!bridge) return;
+  WS_UI.loading = true; renderWorkspaceCard();
+  var _r;
+  try { _r = await bridge.activateWorkspace({ workspaceId: workspaceId }); } catch (_) {
+    WS_UI.loading = false; toast(t('wsErrorGeneric'), 'red'); renderWorkspaceCard(); return;
+  }
+  WS_UI.loading = false;
+  if (!_r || !_r.ok) { toast(_wsErrorMsg(_r ? _r.error : 'unknown_error'), 'red'); renderWorkspaceCard(); return; }
+  WS_UI.activeId   = _r.workspaceId;
+  WS_UI.activeName = _r.workspaceName;
+  WS_UI.activeRole = _r.memberRole;
+  WS_UI.showSwitch = false;
+  _wsSaveId(_r.workspaceId);
+  toast(t('wsActivated'), 'green');
+  renderWorkspaceCard();
+}
+
+async function wsActivateByIndex(idx) {
+  var ws = WS_UI.workspaces[idx];
+  if (!ws) return;
+  await wsActivateWorkspace(ws.workspaceId);
+}
+
+function wsShowCreate() {
+  WS_UI.view = 'create'; WS_UI.createError = null; renderWorkspaceCard();
+  setTimeout(function() { var el = document.getElementById('ws-name-inp'); if (el) el.focus(); }, 60);
+}
+
+function wsShowList() { WS_UI.view = 'list'; WS_UI.createError = null; renderWorkspaceCard(); }
+
+function wsToggleSwitch() { WS_UI.showSwitch = !WS_UI.showSwitch; renderWorkspaceCard(); }
+
+async function wsSubmitCreate() {
+  var nameEl = document.getElementById('ws-name-inp');
+  var errEl  = document.getElementById('ws-create-err');
+  var name   = nameEl ? nameEl.value.trim() : '';
+  WS_UI.createError = null;
+  if (!name) { WS_UI.createError = 'name_required'; if (errEl) errEl.textContent = t('wsNameRequired'); return; }
+  if (name.length > 255) { WS_UI.createError = 'name_too_long'; if (errEl) errEl.textContent = t('wsNameTooLong'); return; }
+  var localWorkspaceId = (typeof DATA !== 'undefined' && DATA && DATA.workspaceId) ? DATA.workspaceId : '';
+  if (!localWorkspaceId) { if (errEl) errEl.textContent = t('wsErrorGeneric'); return; }
+  var bridge = _wsBridge();
+  if (!bridge) { if (errEl) errEl.textContent = t('wsErrorAuth'); return; }
+  var btn = document.getElementById('ws-create-btn');
+  if (btn) btn.disabled = true;
+  if (errEl) errEl.textContent = '';
+  var _r;
+  try { _r = await bridge.createWorkspace({ name: name, localWorkspaceId: localWorkspaceId }); } catch (_) {
+    WS_UI.createError = 'unknown_error';
+    if (errEl) errEl.textContent = t('wsCreateError');
+    if (btn) btn.disabled = false; return;
+  }
+  if (btn) btn.disabled = false;
+  if (!_r || !_r.ok) {
+    var _ec = (_r && _r.error) || 'unknown_error';
+    WS_UI.createError = _ec;
+    if (errEl) errEl.textContent = (_ec === 'workspace_conflict') ? t('wsCreateConflict') :
+      (_ec === 'license_required') ? t('wsLicenseRequired') :
+      (_ec === 'permission_denied') ? t('wsPermissionDenied') : t('wsCreateError');
+    return;
+  }
+  toast(t('wsCreateSuccess'), 'green');
+  await wsLoadWorkspaces();
+}
+
+async function wsRestore() {
+  var savedId = _wsReadSavedId();
+  if (!savedId) return { ok: true, restored: false };
+  var bridge = _wsBridge();
+  if (!bridge) return { ok: false, error: 'not_authenticated' };
+  var _lr;
+  try { _lr = await bridge.listWorkspaces(); } catch (_) {
+    WS_UI.activeId = savedId;
+    return { ok: false, error: 'unknown_error' };
+  }
+  if (!_lr || !_lr.ok) {
+    WS_UI.activeId = savedId;
+    return { ok: false, error: _lr ? (_lr.error || 'unknown_error') : 'unknown_error' };
+  }
+  var _wss = Array.isArray(_lr.workspaces) ? _lr.workspaces : [];
+  WS_UI.workspaces = _wss;
+  var _found = _wss.find(function(w) { return w.workspaceId === savedId; });
+  if (!_found) {
+    WS_UI.activeId = null; WS_UI.activeName = null; WS_UI.activeRole = null;
+    _wsSaveId(null); WS_UI.view = 'list';
+    return { ok: true, restored: false, reason: 'workspace_not_found' };
+  }
+  WS_UI.activeId   = _found.workspaceId;
+  WS_UI.activeName = _found.workspaceName || null;
+  WS_UI.activeRole = _found.memberRole    || null;
+  WS_UI.restored   = true;
+  WS_UI.view       = 'list';
+  return { ok: true, restored: true, workspaceId: _found.workspaceId, workspaceName: _found.workspaceName };
+}
+
+// ── _wsRestoreOffline: restore saved workspace from localStorage without network ──
+// Called on offline startup — shows previously active workspace with no API calls.
+function _wsRestoreOffline() {
+  var savedId = _wsReadSavedId();
+  if (!savedId) return;
+  WS_UI.activeId   = savedId;
+  WS_UI.activeName = null;
+  WS_UI.activeRole = null;
+  WS_UI.restored   = true;
+  WS_UI.view       = 'list';
+}
+
+function renderWorkspaceCard() {
+  var card = document.getElementById('cloud-workspace-card');
+  if (!card) return;
+  if (CLOUD_UI.state !== 'authenticated' && CLOUD_UI.state !== 'offline_cached') { card.style.display = 'none'; return; }
+  card.style.display = '';
+  var view = WS_UI.view;
+  var _wsCnt = WS_UI.workspaces.length;
+
+  // Header: section label + workspace count badge
+  var html = '<div class="ws-section-hdr"><span id="ws-hdr"></span>' +
+    (_wsCnt > 0 ? '<span class="ws-count-badge" id="ws-cnt"></span>' : '') +
+    '</div>';
+
+  if (view === 'loading') {
+    html += '<div class="ws-loading"><span class="ws-spinner"></span><span id="ws-loading-txt"></span></div>';
+
+  } else if (view === 'error') {
+    html += '<div class="ws-error-card"><div id="ws-err-txt" class="ws-err-text"></div>' +
+      '<button class="btn btn-ghost btn-sm" onclick="wsLoadWorkspaces()" id="ws-retry-btn"></button></div>';
+
+  } else if (view === 'create') {
+    html += '<div class="ws-create-form">' +
+      '<label class="form-label" id="ws-cname-lbl" style="display:block;margin-bottom:6px"></label>' +
+      '<input id="ws-name-inp" class="form-input" type="text" maxlength="255" autocomplete="off"' +
+        ' onkeydown="if(event.key===\'Enter\')wsSubmitCreate()">' +
+      '<div class="ws-create-err-msg" id="ws-create-err"></div>' +
+      '<div style="display:flex;gap:7px">' +
+        '<button class="btn btn-primary btn-sm" id="ws-create-btn" onclick="wsSubmitCreate()"></button>' +
+        '<button class="btn btn-ghost btn-sm" id="ws-cancel-btn" onclick="wsShowList()"></button>' +
+      '</div></div>';
+
+  } else if (view === 'list') {
+    // Active workspace card
+    if (WS_UI.activeId) {
+      html += '<div class="ws-active-card">' +
+        '<div class="ws-active-row">' +
+          '<div class="ws-status-dot ok"></div>' +
+          '<span id="ws-aname" class="ws-active-name-lbl"></span>' +
+          '<span id="ws-arole" class="ws-role-badge"></span>' +
+        '</div>' +
+        (WS_UI.restored ? '<div id="ws-restored-note" class="ws-restored-note"></div>' : '') +
+        '<div id="ws-sync-note" class="ws-sync-note"></div>' +
+      '</div>';
+    }
+    // Workspace list or empty state
+    if (_wsCnt === 0 && !WS_UI.activeId) {
+      // Truly empty — no workspaces and none cached
+      html += '<div class="ws-empty-state">' +
+        '<div class="ws-empty-icon">🏢</div>' +
+        '<div id="ws-empty-txt" class="ws-empty-text"></div>' +
+        '<div id="ws-empty-sub" class="ws-empty-sub"></div>' +
+        '<button class="btn btn-primary btn-sm" onclick="wsShowCreate()" id="ws-create-link" style="margin-top:4px"></button>' +
+      '</div>';
+    } else if (_wsCnt === 0 && WS_UI.activeId) {
+      // Offline restore — saved id shown in active card above; no list available
+      html += '<div class="ws-sync-note" id="ws-offline-note"></div>';
+    } else if (WS_UI.showSwitch || !WS_UI.activeId) {
+      html += '<div class="ws-list">';
+      for (var _i = 0; _i < _wsCnt; _i++) {
+        var _isAct = WS_UI.workspaces[_i].workspaceId === WS_UI.activeId;
+        html += '<div class="ws-row' + (_isAct ? ' ws-row-active' : '') + '">' +
+          '<div style="flex:1;min-width:0">' +
+            '<div class="ws-row-name" id="ws-rn-' + _i + '"></div>' +
+            '<div class="ws-row-role" id="ws-rr-' + _i + '"></div>' +
+          '</div>' +
+          (_isAct
+            ? '<span class="ws-active-chip" id="ws-chip-' + _i + '"></span>'
+            : '<button class="btn btn-secondary btn-xs" id="ws-act-' + _i + '"' +
+              (WS_UI.loading ? ' disabled' : '') +
+              ' onclick="wsActivateByIndex(' + _i + ')"></button>'
+          ) + '</div>';
+      }
+      html += '</div>';
+    }
+    // Footer: Switch / Create (conditional) / Refresh
+    html += '<div class="ws-footer-actions">';
+    if (WS_UI.activeId && _wsCnt > 1) {
+      html += '<button class="btn btn-ghost btn-sm" id="ws-switch-btn" onclick="wsToggleSwitch()"></button>';
+    }
+    if (_wsCnt > 0) {
+      html += '<button class="btn btn-ghost btn-sm" id="ws-new-btn" onclick="wsShowCreate()"></button>';
+    }
+    html += '<button class="btn btn-ghost btn-sm" id="ws-refresh-btn" onclick="wsLoadWorkspaces()"></button>';
+    html += '</div>';
+
+  } else {
+    html += '<button class="btn btn-ghost btn-sm" id="ws-idle-btn" onclick="wsLoadWorkspaces()"></button>';
+  }
+
+  card.innerHTML = html;
+
+  // ── Set all text via textContent — server values never touch innerHTML ────────
+  var _hdr = document.getElementById('ws-hdr');
+  if (_hdr) _hdr.textContent = t('wsSection');
+  var _cnt = document.getElementById('ws-cnt');
+  if (_cnt) _cnt.textContent = String(_wsCnt);
+
+  if (view === 'loading') {
+    var _lt = document.getElementById('ws-loading-txt'); if (_lt) _lt.textContent = t('wsLoading');
+  }
+  if (view === 'error') {
+    var _et = document.getElementById('ws-err-txt'); if (_et) _et.textContent = _wsErrorMsg(WS_UI.error);
+    var _rb = document.getElementById('ws-retry-btn'); if (_rb) _rb.textContent = t('wsRefresh');
+  }
+  if (view === 'create') {
+    var _cl = document.getElementById('ws-cname-lbl'); if (_cl) _cl.textContent = t('wsCreateName');
+    var _nin = document.getElementById('ws-name-inp'); if (_nin) _nin.placeholder = t('wsCreateName');
+    var _cb = document.getElementById('ws-create-btn'); if (_cb) _cb.textContent = t('wsCreateBtn');
+    var _cx = document.getElementById('ws-cancel-btn'); if (_cx) _cx.textContent = t('close');
+  }
+  if (view === 'list') {
+    if (WS_UI.activeId) {
+      var _an = document.getElementById('ws-aname'); if (_an) _an.textContent = WS_UI.activeName || WS_UI.activeId;
+      var _ar = document.getElementById('ws-arole');
+      if (_ar) { _ar.textContent = _wsRoleLabel(WS_UI.activeRole); _ar.dataset.role = WS_UI.activeRole || ''; }
+      var _sn = document.getElementById('ws-sync-note'); if (_sn) _sn.textContent = t('wsSyncNote');
+      if (WS_UI.restored) { var _rn = document.getElementById('ws-restored-note'); if (_rn) _rn.textContent = t('wsRestored'); }
+    }
+    if (_wsCnt === 0 && !WS_UI.activeId) {
+      var _et2 = document.getElementById('ws-empty-txt'); if (_et2) _et2.textContent = t('wsEmpty');
+      var _esub = document.getElementById('ws-empty-sub'); if (_esub) _esub.textContent = t('wsEmptySub');
+      var _ck = document.getElementById('ws-create-link'); if (_ck) _ck.textContent = t('wsCreate');
+    } else if (_wsCnt === 0 && WS_UI.activeId) {
+      var _on = document.getElementById('ws-offline-note'); if (_on) _on.textContent = t('wsOfflineNote');
+    } else if (WS_UI.showSwitch || !WS_UI.activeId) {
+      for (var _j = 0; _j < _wsCnt; _j++) {
+        var _w = WS_UI.workspaces[_j];
+        var _rn2 = document.getElementById('ws-rn-' + _j); if (_rn2) _rn2.textContent = _w.workspaceName || _w.workspaceId;
+        var _rr2 = document.getElementById('ws-rr-' + _j); if (_rr2) _rr2.textContent = _wsRoleLabel(_w.memberRole);
+        if (_w.workspaceId === WS_UI.activeId) {
+          var _ch = document.getElementById('ws-chip-' + _j); if (_ch) _ch.textContent = t('wsActive');
+        } else {
+          var _ab = document.getElementById('ws-act-' + _j); if (_ab) _ab.textContent = t('wsActivate');
+        }
+      }
+    }
+    var _sw = document.getElementById('ws-switch-btn');
+    if (_sw) _sw.textContent = WS_UI.showSwitch ? t('close') : t('wsSwitch');
+    var _nb = document.getElementById('ws-new-btn'); if (_nb) _nb.textContent = WS_UI.activeId ? t('wsCreateAnother') : t('wsCreate');
+    var _rfb = document.getElementById('ws-refresh-btn'); if (_rfb) _rfb.textContent = t('wsRefresh');
+  }
+  if (view === 'idle') {
+    var _ib = document.getElementById('ws-idle-btn'); if (_ib) _ib.textContent = t('wsRefresh');
+  }
 }
 
 function serverResetPIN(url, userId, username){
@@ -10297,11 +10816,7 @@ async function _supaSelect(table, query) {
   return [];
 }
 
-// ── 6A-3: Workspace ID ─
-function _ensureWorkspaceId(){
-  // retired in v6 — no Supabase credential reads
-  return DATA.cloud.workspaceId || 'ktp_main';
-}
+// ── 6A-3: retired in v6 — _ensureWorkspaceId() lives in persistence section above
 
 // ── 6A-1: Push ─
 async function supabasePush() {
@@ -11737,7 +12252,12 @@ try{(function(){
     if(typeof window.__BOOT_WATCHDOG__!=='undefined') clearTimeout(window.__BOOT_WATCHDOG__);
     __boot('initApp.done');
     if(isElectron && typeof restoreElectronState==='function'){
-      restoreElectronState().then(function(){ try{ render(); }catch(e){} }).catch(function(){});
+      restoreElectronState().then(function(){
+        try{ render(); }catch(e){}
+        if(typeof cloudInitStatus==='function') cloudInitStatus();
+      }).catch(function(){
+        if(typeof cloudInitStatus==='function') cloudInitStatus();
+      });
     }
     _resetIdleTimer(); // CH-1: start 30-min idle countdown on login
     if (isElectron && typeof checkLicenseStatus === 'function') {

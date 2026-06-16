@@ -1571,6 +1571,24 @@ async function runB3Tests() {
 
   // ── Cloud IPC (CLOUD-FOUNDATION-1B.2b) ────────────────────────────────────
   await _cloudIpcTest.registerAsync(testAsync, assert, assertEqual);
+
+  // ── Cloud Workspace (CLOUD-FOUNDATION-1E.2) ───────────────────────────────
+  await _cloudWorkspaceTest.registerAsync(testAsync, assert, assertEqual);
+
+  // ── Cloud Workspace IPC (CLOUD-FOUNDATION-1E.3) ───────────────────────────
+  await _cloudWorkspaceIpcTest.registerAsync(testAsync, assert, assertEqual);
+
+  // ── Preload Bridge (CLOUD-FOUNDATION-1E.4) ────────────────────────────────
+  await _preloadTest.registerAsync(testAsync, assert, assertEqual);
+
+  // ── Workspace State (CLOUD-FOUNDATION-1E.5) ──────────────────────────────
+  await _workspaceStateTest.registerAsync(testAsync, assert, assertEqual);
+
+  // ── Workspace UI (CLOUD-FOUNDATION-1E.6) ─────────────────────────────────
+  await _workspaceUiTest.registerAsync(testAsync, assert, assertEqual);
+
+  // ── Cloud Persistence Forensics (CLOUD-FOUNDATION-1E.6D) ─────────────────
+  await _cloudPersistenceTest.registerAsync(testAsync, assert, assertEqual);
 }
 
 // ── License Issuer (CH-4B) ────────────────────────────────────────────────────
@@ -1744,6 +1762,30 @@ _cloudAuthTest.register(test, assert, assertEqual);
 // ── Cloud IPC (CLOUD-FOUNDATION-1B.2b) ────────────────────────────────────────
 var _cloudIpcTest = require('./cloud-ipc.test.js');
 _cloudIpcTest.register(test, assert, assertEqual);
+
+// ── Cloud Workspace (CLOUD-FOUNDATION-1E.2) ───────────────────────────────────
+var _cloudWorkspaceTest = require('./cloud-workspace.test.js');
+_cloudWorkspaceTest.register(test, assert, assertEqual);
+
+// ── Cloud Workspace IPC (CLOUD-FOUNDATION-1E.3) ───────────────────────────────
+var _cloudWorkspaceIpcTest = require('./cloud-workspace-ipc.test.js');
+_cloudWorkspaceIpcTest.register(test, assert, assertEqual);
+
+// ── Preload Bridge (CLOUD-FOUNDATION-1E.4) ────────────────────────────────────
+var _preloadTest = require('./preload.test.js');
+_preloadTest.register(test, assert, assertEqual);
+
+// ── Workspace State (CLOUD-FOUNDATION-1E.5) ───────────────────────────────────
+var _workspaceStateTest = require('./workspace-state.test.js');
+_workspaceStateTest.register(test, assert, assertEqual);
+
+// ── Workspace UI (CLOUD-FOUNDATION-1E.6) ──────────────────────────────────────
+var _workspaceUiTest = require('./workspace-ui.test.js');
+_workspaceUiTest.register(test, assert, assertEqual);
+
+// ── Cloud Persistence Forensics (CLOUD-FOUNDATION-1E.6D) ──────────────────────
+var _cloudPersistenceTest = require('./cloud-persistence.test.js');
+_cloudPersistenceTest.register(test, assert, assertEqual);
 
 runB3Tests().then(function() {
   console.log('\n═══ Results: ' + passed + ' passed, ' + failed + ' failed ═══\n');

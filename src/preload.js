@@ -66,3 +66,11 @@ contextBridge.exposeInMainWorld('electron', {
   cloudLogout:         ()        => ipcRenderer.invoke('cloud:logout'),
   cloudRestoreSession: ()        => ipcRenderer.invoke('cloud:restoreSession'),
 });
+
+// ── Cloud Workspace (CLOUD-FOUNDATION-1E.4) ───────────────────────────────────
+contextBridge.exposeInMainWorld('cloudWorkspace', {
+  listWorkspaces:     ()        => ipcRenderer.invoke('cloud:listWorkspaces'),
+  createWorkspace:    (payload) => ipcRenderer.invoke('cloud:createWorkspace', payload),
+  activateWorkspace:  (payload) => ipcRenderer.invoke('cloud:activateWorkspace', payload),
+  getWorkspaceStatus: ()        => ipcRenderer.invoke('cloud:getWorkspaceStatus'),
+});

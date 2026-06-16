@@ -1,5 +1,5 @@
 {
-  "runAt": "2026-05-24T01:33:12.461Z",
+  "runAt": "2026-06-12T01:01:59.083Z",
   "passed": 62,
   "failed": 0,
   "warned": 1,
@@ -8,7 +8,7 @@
     {
       "name": "JSON backup serialisation is complete",
       "status": "PASS",
-      "dur": 1
+      "dur": 0
     },
     {
       "name": "JSON backup file is valid and parseable",
@@ -28,22 +28,22 @@
     {
       "name": "Backup includes correct financial totals",
       "status": "PASS",
-      "dur": 1
+      "dur": 0
     },
     {
       "name": "Backup timestamps are valid ISO format",
       "status": "PASS",
-      "dur": 0
+      "dur": 1
     },
     {
       "name": "Multiple backup files can coexist",
       "status": "PASS",
-      "dur": 3
+      "dur": 2
     },
     {
       "name": "Old backups are cleaned when limit exceeded",
       "status": "PASS",
-      "dur": 23
+      "dur": 18
     },
     {
       "name": "Restored data has identical tenant records",
@@ -58,7 +58,7 @@
     {
       "name": "Restored expenses match original exactly",
       "status": "PASS",
-      "dur": 0
+      "dur": 1
     },
     {
       "name": "Users survive restore with roles intact",
@@ -76,14 +76,14 @@
       "dur": 0
     },
     {
-      "name": "Alper account data survives restore",
+      "name": "Mgmt account data survives restore",
       "status": "PASS",
       "dur": 0
     },
     {
       "name": "Server password hashes survive restore and verify correctly",
       "status": "PASS",
-      "dur": 122
+      "dur": 115
     },
     {
       "name": "Truncated JSON detected and rejected",
@@ -118,7 +118,7 @@
     {
       "name": "Backup directory missing → created automatically",
       "status": "PASS",
-      "dur": 2
+      "dur": 1
     },
     {
       "name": "Interrupted backup does not corrupt source DB",
@@ -128,7 +128,7 @@
     {
       "name": "Interrupted restore: pre-restore backup exists before overwrite",
       "status": "PASS",
-      "dur": 5
+      "dur": 6
     },
     {
       "name": "Sync version increments on every push",
@@ -158,7 +158,7 @@
     {
       "name": "Duplicate expense import detection",
       "status": "PASS",
-      "dur": 1
+      "dur": 0
     },
     {
       "name": "WA log prevents duplicate reminders for same tenant+month",
@@ -173,12 +173,12 @@
     {
       "name": "Payment addition creates audit entry",
       "status": "PASS",
-      "dur": 45
+      "dur": 22
     },
     {
       "name": "User management actions tracked in audit",
       "status": "PASS",
-      "dur": 0
+      "dur": 1
     },
     {
       "name": "Login attempts (success + failure) tracked",
@@ -198,7 +198,7 @@
     {
       "name": "Audit history FIFO trim at 500 entries",
       "status": "PASS",
-      "dur": 1
+      "dur": 2
     },
     {
       "name": "Cannot delete admin user (self-protection)",
@@ -243,12 +243,12 @@
     {
       "name": "Expired token rejected",
       "status": "PASS",
-      "dur": 1
+      "dur": 0
     },
     {
       "name": "Tenant name cannot be empty",
       "status": "PASS",
-      "dur": 0
+      "dur": 1
     },
     {
       "name": "Rent values are non-negative numbers",
@@ -299,7 +299,7 @@
     {
       "name": "Sync errors logged with direction and version",
       "status": "PASS",
-      "dur": 1
+      "dur": 0
     },
     {
       "name": "Import failure preserves existing data",
