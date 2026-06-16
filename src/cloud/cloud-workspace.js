@@ -43,6 +43,11 @@ function _validateLocalWorkspaceId(id) {
   return t.length >= 1 && t.length <= 128;
 }
 
+function _validateWorkspaceId(id) {
+  if (typeof id !== 'string') return false;
+  return id.trim().length > 0;
+}
+
 // ── Error normalization ────────────────────────────────────────────────────────
 
 function _normalizeError(status, body) {
@@ -53,6 +58,7 @@ function _normalizeError(status, body) {
     var e = String(body.error);
     if (e === 'local_workspace_id_conflict') return 'workspace_conflict';
     if (e === 'workspace_not_found')         return 'workspace_not_found';
+    if (e === 'not_member')                  return 'workspace_not_found';
     if (e === 'permission_denied')           return 'permission_denied';
     if (e === 'not_authenticated')           return 'not_authenticated';
   }
@@ -240,6 +246,77 @@ async function getWorkspaceStatus() {
   };
 }
 
+// ── getSyncStatus (CLOUD-FOUNDATION-1F.3, read-only) ───────────────────────────
+
+async function getSyncStatus(workspaceId) {
+  if (!isConfigured()) return { ok: false, error: 'not_configured' };
+  if (!_validateWorkspaceId(workspaceId)) return { ok: false, error: 'invalid_input' };
+
+  var headers = await _buildHeaders(true);
+  if (!headers) return { ok: false, error: 'not_authenticated' };
+
+  var res, body;
+  try {
+    res  = await _doFetch(getSupabaseUrl() + '/rest/v1/rpc/get_sync_status', {
+      method:  'POST',
+      headers: headers,
+      body:    JSON.stringify({ p_workspace_id: workspaceId.trim() }),
+    });
+    body = await res.json();
+  } catch (_) {
+    return { ok: false, error: 'network_error' };
+  }
+
+  if (!res.ok || (body && body.ok === false)) {
+    return { ok: false, error: _normalizeError(res.status, body) };
+  }
+
+  return {
+    ok:              true,
+    currentRevision: typeof body.current_revision === 'number' ? body.current_revision : 0,
+    lockFree:        body.lock_free !== false,
+    lockExpiresAt:   body.lock_free === false ? (body.lock_expires_at || null) : null,
+  };
+}
+
+// ── getLatestSnapshotMetadata (CLOUD-FOUNDATION-1F.3, read-only) ──────────────
+// Intentionally omits storage_path, snapshot_hash, and pushed_by (raw user id) —
+// not needed for read-only status display.
+
+async function getLatestSnapshotMetadata(workspaceId) {
+  if (!isConfigured()) return { ok: false, error: 'not_configured' };
+  if (!_validateWorkspaceId(workspaceId)) return { ok: false, error: 'invalid_input' };
+
+  var headers = await _buildHeaders(true);
+  if (!headers) return { ok: false, error: 'not_authenticated' };
+
+  var res, body;
+  try {
+    res  = await _doFetch(getSupabaseUrl() + '/rest/v1/rpc/get_latest_snapshot_metadata', {
+      method:  'POST',
+      headers: headers,
+      body:    JSON.stringify({ p_workspace_id: workspaceId.trim() }),
+    });
+    body = await res.json();
+  } catch (_) {
+    return { ok: false, error: 'network_error' };
+  }
+
+  if (!res.ok || (body && body.ok === false)) {
+    return { ok: false, error: _normalizeError(res.status, body) };
+  }
+
+  var snap = body.snapshot || null;
+  return {
+    ok:       true,
+    snapshot: snap ? {
+      revision:  snap.revision,
+      createdAt: snap.created_at,
+      byteSize:  snap.byte_size,
+    } : null,
+  };
+}
+
 // ── Exports ────────────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -249,6 +326,8 @@ module.exports = {
   getWorkspaceStatus,
   getOrCreateDeviceId,
   registerDevice,
+  getSyncStatus,
+  getLatestSnapshotMetadata,
   // Test seams
   _setFetch,
   _setStore,
@@ -258,5 +337,6 @@ module.exports = {
   // Exported for unit tests
   _validateWorkspaceName,
   _validateLocalWorkspaceId,
+  _validateWorkspaceId,
   _normalizeError,
 };

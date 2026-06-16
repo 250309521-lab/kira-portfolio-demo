@@ -4101,6 +4101,11 @@ tbody tr[onclick] { cursor: pointer; }
 .ws-role-badge[data-role="member"]{background:rgba(16,185,129,.1);color:#34d399}
 .ws-sync-note{font-size:10.5px;color:var(--i4);margin-top:5px}
 .ws-restored-note{font-size:10.5px;color:var(--amber);margin-top:2px;margin-bottom:2px}
+.ws-sync-status-section{margin-top:8px;padding-top:8px;border-top:1px solid var(--bd-1)}
+.ws-sync-status-hdr{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.ws-sync-hdr-lbl{font-size:11px;font-weight:600;color:var(--i3);text-transform:uppercase;letter-spacing:.02em}
+.ws-sync-summary{font-size:11.5px;color:var(--i2);margin-top:4px}
+.ws-sync-detail{font-size:10.5px;color:var(--i4);margin-top:2px}
 .ws-empty-state{display:flex;flex-direction:column;align-items:center;text-align:center;padding:18px 16px;background:rgba(99,102,241,.05);border:1px dashed rgba(99,102,241,.2);border-radius:10px;margin-bottom:10px;gap:6px}
 .ws-empty-icon{font-size:24px;line-height:1;opacity:.65}
 .ws-empty-text{font-size:12.5px;font-weight:600;color:var(--i2)}
@@ -4141,6 +4146,10 @@ tbody tr[onclick] { cursor: pointer; }
 [data-theme="light"] .ws-active-chip{background:rgba(16,185,129,.11)!important;color:#047857!important}
 [data-theme="light"] .ws-sync-note{color:#5a7aa8!important}
 [data-theme="light"] .ws-restored-note{color:#b45309!important}
+[data-theme="light"] .ws-sync-status-section{border-top-color:rgba(30,50,100,.12)!important}
+[data-theme="light"] .ws-sync-hdr-lbl{color:#3a5a8a!important}
+[data-theme="light"] .ws-sync-summary{color:#1e3a5f!important}
+[data-theme="light"] .ws-sync-detail{color:#5a7aa8!important}
 [data-theme="light"] .ws-create-form{background:rgba(255,255,255,.8)!important;border-color:rgba(30,50,100,.12)!important}
 
 </style>
@@ -5052,6 +5061,18 @@ var STRINGS={
     wsActivated:'✅ Çalışma alanı aktifleştirildi.',
     wsCreateAnother:'Yeni Çalışma Alanı',
     wsOfflineNote:'Çevrimdışı — bağlantı yenilendiğinde güncellenir.',
+    wsSyncHdr:'Eşzamlama Durumu',
+    wsSyncCheckBtn:'Durumu Kontrol Et',
+    wsSyncRefreshBtn:'Yenile',
+    wsSyncChecking:'Kontrol ediliyor…',
+    wsSyncNotChecked:'Henüz kontrol edilmedi.',
+    wsSyncNotSynced:'Henüz eşzamlanmadı.',
+    wsSyncUpToDate:'Güncel.',
+    wsSyncNewerAvailable:'Bulutta daha yeni bir sürüm var.',
+    wsSyncLocked:'Başka bir cihaz/kullanıcı tarafından kilitlendi.',
+    wsSyncLocalUnknown:'Yerel değişiklikler takip edilmiyor.',
+    wsSyncLastChecked:'Son kontrol',
+    wsSyncSnapshotLbl:'Son yedek anlık görüntüsü',
     fieldNotFound:'Alan bulunamadı',pasted:'📋 Yapıştırıldı',pasteManual:'Ctrl+V ile yapıştırın',
     // Settings modals
     resetDataTitle:'🗑 Tüm Verileri Sıfırla',restoreTitle:'↩ Yedekten Geri Yükle',
@@ -5551,6 +5572,18 @@ var STRINGS={
     wsActivated:'✅ Workspace activated.',
     wsCreateAnother:'New Workspace',
     wsOfflineNote:'Offline — will update when reconnected.',
+    wsSyncHdr:'Sync Status',
+    wsSyncCheckBtn:'Check Status',
+    wsSyncRefreshBtn:'Refresh',
+    wsSyncChecking:'Checking…',
+    wsSyncNotChecked:'Not checked yet.',
+    wsSyncNotSynced:'Not synced yet.',
+    wsSyncUpToDate:'Up to date.',
+    wsSyncNewerAvailable:'Cloud has a newer snapshot.',
+    wsSyncLocked:'Locked by another device/user.',
+    wsSyncLocalUnknown:'Local changes not tracked yet.',
+    wsSyncLastChecked:'Last checked',
+    wsSyncSnapshotLbl:'Latest snapshot',
     fieldNotFound:'Field not found',pasted:'📋 Pasted',pasteManual:'Use Ctrl+V to paste',
     // Settings modals
     resetDataTitle:'🗑 Reset All Data',restoreTitle:'↩ Restore from Backup',
@@ -6474,8 +6507,6 @@ function obStep2(){
               onclick="obStepPin()">${t('obBackBtn')}</button>
       <button class="btn btn-ghost" style="width:100%;font-size:12px;color:var(--i4)"
               onclick="obSkipImport()">${t('obImport')}</button>
-      <button class="btn btn-ghost" style="width:100%;font-size:12px;color:var(--i4)"
-              onclick="obCloudBootstrap()">${t('obCloud')}</button>
     </div>
     <div class="login-version">${t('obFirstSetup')}</div>
   `);
@@ -8034,6 +8065,20 @@ var WS_UI = {
 var _wsRestored = false;
 var _cloudInitPending = false; // true while cloudInitStatus() is awaiting restore/refresh
 
+// ── Sync status UI (CLOUD-FOUNDATION-1F.3 — read-only) ───────────────────────
+// No writes, no sync apply, no backup upload/restore. Display only.
+var SYNC_UI = {
+  state:            'idle', // 'idle' | 'loading' | 'ready' | 'error'
+  currentRevision:  null,
+  lockFree:         null,
+  snapshot:         null,   // {revision, createdAt, byteSize} | null
+  error:            null,
+  lastCheckedAt:    null,
+  lastSeenRevision: null,   // in-memory only, not persisted — used to derive up-to-date vs newer
+  summaryBucket:    null,   // 'not_synced' | 'up_to_date' | 'newer'
+  checkedForId:     null,   // workspaceId this status was last fetched for
+};
+
 function _wsRoleLabel(role) {
   if (role === 'owner')  return t('wsRole_owner');
   if (role === 'admin')  return t('wsRole_admin');
@@ -8207,6 +8252,80 @@ function _wsRestoreOffline() {
   WS_UI.view       = 'list';
 }
 
+// ── Sync status (CLOUD-FOUNDATION-1F.3 — read-only) ──────────────────────────
+// Wires get_sync_status + get_latest_snapshot_metadata. No writes, no apply.
+
+async function wsRefreshSyncStatus() {
+  var bridge = _wsBridge();
+  var workspaceId = WS_UI.activeId;
+  if (!bridge || !workspaceId) return;
+
+  // Switching workspaces invalidates any prior revision baseline.
+  if (SYNC_UI.checkedForId !== null && SYNC_UI.checkedForId !== workspaceId) {
+    SYNC_UI.lastSeenRevision = null;
+  }
+
+  SYNC_UI.state = 'loading';
+  SYNC_UI.error = null;
+  renderWorkspaceCard();
+
+  var _prevSeen = SYNC_UI.lastSeenRevision;
+  var _statusRes, _snapRes;
+  try {
+    _statusRes = await bridge.getSyncStatus({ workspaceId: workspaceId });
+  } catch (_) {
+    SYNC_UI.state = 'error'; SYNC_UI.error = 'unknown_error'; renderWorkspaceCard(); return;
+  }
+  if (!_statusRes || !_statusRes.ok) {
+    SYNC_UI.state = 'error';
+    SYNC_UI.error = _statusRes ? (_statusRes.error || 'unknown_error') : 'unknown_error';
+    renderWorkspaceCard(); return;
+  }
+
+  try {
+    _snapRes = await bridge.getLatestSnapshotMetadata({ workspaceId: workspaceId });
+  } catch (_) {
+    SYNC_UI.state = 'error'; SYNC_UI.error = 'unknown_error'; renderWorkspaceCard(); return;
+  }
+  if (!_snapRes || !_snapRes.ok) {
+    SYNC_UI.state = 'error';
+    SYNC_UI.error = _snapRes ? (_snapRes.error || 'unknown_error') : 'unknown_error';
+    renderWorkspaceCard(); return;
+  }
+
+  SYNC_UI.currentRevision = _statusRes.currentRevision;
+  SYNC_UI.lockFree        = _statusRes.lockFree;
+  SYNC_UI.snapshot        = _snapRes.snapshot || null;
+  SYNC_UI.lastCheckedAt   = Date.now();
+  SYNC_UI.checkedForId    = workspaceId;
+
+  if (SYNC_UI.currentRevision === 0) {
+    SYNC_UI.summaryBucket = 'not_synced';
+  } else if (_prevSeen === null) {
+    // First check this session — cannot claim "up to date" without a prior baseline.
+    SYNC_UI.summaryBucket = 'newer';
+  } else if (SYNC_UI.currentRevision === _prevSeen) {
+    SYNC_UI.summaryBucket = 'up_to_date';
+  } else {
+    SYNC_UI.summaryBucket = 'newer';
+  }
+  SYNC_UI.lastSeenRevision = SYNC_UI.currentRevision;
+
+  SYNC_UI.state = 'ready';
+  renderWorkspaceCard();
+}
+
+function _syncStatusSummaryMsg() {
+  if (SYNC_UI.state === 'loading') return t('wsSyncChecking');
+  if (SYNC_UI.state === 'error')   return _wsErrorMsg(SYNC_UI.error);
+  if (SYNC_UI.state === 'ready') {
+    if (SYNC_UI.summaryBucket === 'not_synced') return t('wsSyncNotSynced');
+    if (SYNC_UI.summaryBucket === 'up_to_date') return t('wsSyncUpToDate');
+    if (SYNC_UI.summaryBucket === 'newer')      return t('wsSyncNewerAvailable');
+  }
+  return t('wsSyncNotChecked');
+}
+
 function renderWorkspaceCard() {
   var card = document.getElementById('cloud-workspace-card');
   if (!card) return;
@@ -8249,6 +8368,18 @@ function renderWorkspaceCard() {
         '</div>' +
         (WS_UI.restored ? '<div id="ws-restored-note" class="ws-restored-note"></div>' : '') +
         '<div id="ws-sync-note" class="ws-sync-note"></div>' +
+        '<div class="ws-sync-status-section">' +
+          '<div class="ws-sync-status-hdr">' +
+            '<span id="ws-sync-hdr" class="ws-sync-hdr-lbl"></span>' +
+            '<button class="btn btn-ghost btn-xs" id="ws-sync-refresh-btn" onclick="wsRefreshSyncStatus()"' +
+              (SYNC_UI.state === 'loading' ? ' disabled' : '') + '></button>' +
+          '</div>' +
+          '<div id="ws-sync-summary" class="ws-sync-summary"></div>' +
+          (SYNC_UI.state === 'ready' && SYNC_UI.snapshot ? '<div id="ws-sync-snapshot" class="ws-sync-detail"></div>' : '') +
+          (SYNC_UI.state === 'ready' && SYNC_UI.lockFree === false ? '<div id="ws-sync-lock-note" class="ws-sync-detail"></div>' : '') +
+          (SYNC_UI.state === 'ready' ? '<div id="ws-sync-local-note" class="ws-sync-detail"></div>' : '') +
+          (SYNC_UI.lastCheckedAt ? '<div id="ws-sync-lastchecked" class="ws-sync-detail"></div>' : '') +
+        '</div>' +
       '</div>';
     }
     // Workspace list or empty state
@@ -8324,6 +8455,26 @@ function renderWorkspaceCard() {
       if (_ar) { _ar.textContent = _wsRoleLabel(WS_UI.activeRole); _ar.dataset.role = WS_UI.activeRole || ''; }
       var _sn = document.getElementById('ws-sync-note'); if (_sn) _sn.textContent = t('wsSyncNote');
       if (WS_UI.restored) { var _rn = document.getElementById('ws-restored-note'); if (_rn) _rn.textContent = t('wsRestored'); }
+
+      var _syh = document.getElementById('ws-sync-hdr'); if (_syh) _syh.textContent = t('wsSyncHdr');
+      var _syrb = document.getElementById('ws-sync-refresh-btn');
+      if (_syrb) _syrb.textContent = SYNC_UI.state === 'loading' ? t('wsSyncChecking') : t('wsSyncRefreshBtn');
+      var _sysum = document.getElementById('ws-sync-summary'); if (_sysum) _sysum.textContent = _syncStatusSummaryMsg();
+      var _sysnap = document.getElementById('ws-sync-snapshot');
+      if (_sysnap && SYNC_UI.snapshot) {
+        _sysnap.textContent = t('wsSyncSnapshotLbl') + ': ' +
+          new Date(SYNC_UI.snapshot.createdAt).toLocaleString();
+      }
+      var _sylock = document.getElementById('ws-sync-lock-note'); if (_sylock) _sylock.textContent = t('wsSyncLocked');
+      var _syloc = document.getElementById('ws-sync-local-note'); if (_syloc) _syloc.textContent = t('wsSyncLocalUnknown');
+      var _sylc = document.getElementById('ws-sync-lastchecked');
+      if (_sylc && SYNC_UI.lastCheckedAt) {
+        _sylc.textContent = t('wsSyncLastChecked') + ': ' + new Date(SYNC_UI.lastCheckedAt).toLocaleTimeString();
+      }
+
+      if (SYNC_UI.checkedForId !== WS_UI.activeId && SYNC_UI.state !== 'loading') {
+        wsRefreshSyncStatus();
+      }
     }
     if (_wsCnt === 0 && !WS_UI.activeId) {
       var _et2 = document.getElementById('ws-empty-txt'); if (_et2) _et2.textContent = t('wsEmpty');
@@ -10765,10 +10916,14 @@ function importJSON(inp){
 
 
 // ════════════════════════════════════════════════════════════════
-// SUPABASE CLOUD SYNC v2
-// Pure fetch() — no npm package needed.
-// Anon/publishable key is safe in frontend (RLS controls access).
+// SUPABASE CLOUD SYNC v2 — LEGACY, RETIRED IN v6
+// All function bodies below are already no-op stubs (no real fetch
+// to Supabase). LEGACY_DISABLED is a hard fence on top of that, so
+// the legacy entry points (_focusPull/_startupPull) cannot reach
+// even the stub network paths. Cloud access in v6 goes exclusively
+// through window.cloudWorkspace / window.electron (main-process IPC).
 // ════════════════════════════════════════════════════════════════
+const LEGACY_DISABLED = true;
 
 function _readSupabaseInputs() {
   // retired in v6 — Supabase direct-fetch removed
@@ -10852,6 +11007,7 @@ setInterval(()=>{if(DATA.settings?.autoSave){autoRecalc();saveLocal();}},30000);
 let _focusPullActive = false;
 
 async function _focusPull(){
+  if(LEGACY_DISABLED) return;
   if(!PRODUCTION_MODE) return;
   if(!DATA.cloud?.enabled) return;
   if(!DATA.cloud?.supabaseUrl || !DATA.cloud?.supabaseKey) return;
@@ -10887,6 +11043,7 @@ let _startupSyncDone = false;
 async function _startupPull(){
   if(_startupSyncDone) return;
   _startupSyncDone = true;  // set before await — prevents re-entry on rapid login
+  if(LEGACY_DISABLED) return;
   if(!PRODUCTION_MODE) return;
   if(!DATA.cloud?.enabled) return;
   if(!DATA.cloud?.supabaseUrl || !DATA.cloud?.supabaseKey) return;

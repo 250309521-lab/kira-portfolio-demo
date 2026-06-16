@@ -73,4 +73,8 @@ contextBridge.exposeInMainWorld('cloudWorkspace', {
   createWorkspace:    (payload) => ipcRenderer.invoke('cloud:createWorkspace', payload),
   activateWorkspace:  (payload) => ipcRenderer.invoke('cloud:activateWorkspace', payload),
   getWorkspaceStatus: ()        => ipcRenderer.invoke('cloud:getWorkspaceStatus'),
+
+  // ── Sync status (read-only) (CLOUD-FOUNDATION-1F.3) ───────────────────────
+  getSyncStatus:             (payload) => ipcRenderer.invoke('cloud:getSyncStatus', payload),
+  getLatestSnapshotMetadata: (payload) => ipcRenderer.invoke('cloud:getLatestSnapshotMetadata', payload),
 });

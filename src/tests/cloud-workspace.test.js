@@ -131,6 +131,27 @@ function register(test, assert, assertEqual) {
   test('cloud-workspace: normalizeError — null body → unknown_error', function() {
     assertEqual(ws._normalizeError(500, null), 'unknown_error');
   });
+  test('cloud-workspace: normalizeError — not_member → workspace_not_found (CLOUD-FOUNDATION-1F.3)', function() {
+    assertEqual(ws._normalizeError(200, { ok: false, error: 'not_member' }), 'workspace_not_found');
+  });
+
+  console.log('\nCloud Workspace — WorkspaceId Validation (CLOUD-FOUNDATION-1F.3):');
+
+  test('cloud-workspace: validateWorkspaceId — non-empty string ok', function() {
+    assert(ws._validateWorkspaceId('ws-uuid-1'));
+  });
+  test('cloud-workspace: validateWorkspaceId — empty string rejected', function() {
+    assert(!ws._validateWorkspaceId(''));
+  });
+  test('cloud-workspace: validateWorkspaceId — whitespace-only rejected', function() {
+    assert(!ws._validateWorkspaceId('   '));
+  });
+  test('cloud-workspace: validateWorkspaceId — null rejected', function() {
+    assert(!ws._validateWorkspaceId(null));
+  });
+  test('cloud-workspace: validateWorkspaceId — number rejected', function() {
+    assert(!ws._validateWorkspaceId(42));
+  });
 }
 
 // ── Async tests ───────────────────────────────────────────────────────────────
@@ -307,6 +328,202 @@ async function registerAsync(testAsync, assert, assertEqual) {
     assert(!('deviceId'  in r), 'deviceId must not appear in response');
     assert(!('device_id' in r), 'device_id must not appear in response');
     assertEqual(r.deviceRegistered, true, 'deviceRegistered must be true');
+    ws._resetForTests();
+  });
+
+  // ── getSyncStatus (CLOUD-FOUNDATION-1F.3, read-only) ────────────────────────
+
+  await testAsync('cloud-workspace: getSyncStatus — not_configured when cloud not configured', async function() {
+    ws._resetForTests();
+    var prevUrl = process.env.SUPABASE_URL;
+    var prevKey = process.env.SUPABASE_PUBLISHABLE_KEY;
+    delete process.env.SUPABASE_URL;
+    delete process.env.SUPABASE_PUBLISHABLE_KEY;
+    var r = await ws.getSyncStatus('ws-1');
+    assertEqual(r.error, 'not_configured');
+    process.env.SUPABASE_URL = prevUrl;
+    process.env.SUPABASE_PUBLISHABLE_KEY = prevKey;
+    ws._resetForTests();
+  });
+
+  await testAsync('cloud-workspace: getSyncStatus — empty workspaceId → invalid_input', async function() {
+    ws._resetForTests();
+    ws._setAuth(makeMockAuth(true));
+    var r = await ws.getSyncStatus('');
+    assert(r.ok === false, 'must return ok:false');
+    assertEqual(r.error, 'invalid_input');
+    ws._resetForTests();
+  });
+
+  await testAsync('cloud-workspace: getSyncStatus — no access token → not_authenticated', async function() {
+    ws._resetForTests();
+    ws._setAuth(makeMockAuth(false));
+    var r = await ws.getSyncStatus('ws-1');
+    assert(r.ok === false, 'must return ok:false');
+    assertEqual(r.error, 'not_authenticated');
+    ws._resetForTests();
+  });
+
+  await testAsync('cloud-workspace: getSyncStatus — success returns sanitized fields, free lock', async function() {
+    ws._resetForTests();
+    ws._setAuth(makeMockAuth(true));
+    ws._setFetch(makeOkFetch({
+      ok: true, current_revision: 7, lock_free: true,
+      lock_held_by: 'user-uuid-should-not-leak', lock_expires_at: null,
+    }));
+    var r = await ws.getSyncStatus('ws-1');
+    assert(r.ok === true, 'must return ok:true');
+    assertEqual(r.currentRevision, 7);
+    assertEqual(r.lockFree, true);
+    assertEqual(r.lockExpiresAt, null);
+    assert(!('lock_held_by' in r), 'lock_held_by must never be returned');
+    assert(!('lockHeldBy'   in r), 'lockHeldBy must never be returned');
+    ws._resetForTests();
+  });
+
+  await testAsync('cloud-workspace: getSyncStatus — success returns lockExpiresAt when locked, omits lock holder', async function() {
+    ws._resetForTests();
+    ws._setAuth(makeMockAuth(true));
+    ws._setFetch(makeOkFetch({
+      ok: true, current_revision: 3, lock_free: false,
+      lock_held_by: 'user-uuid-should-not-leak', lock_expires_at: '2026-06-20T00:00:00Z',
+    }));
+    var r = await ws.getSyncStatus('ws-1');
+    assert(r.ok === true, 'must return ok:true');
+    assertEqual(r.lockFree, false);
+    assertEqual(r.lockExpiresAt, '2026-06-20T00:00:00Z');
+    assert(!('lock_held_by' in r), 'lock_held_by must never be returned');
+    ws._resetForTests();
+  });
+
+  await testAsync('cloud-workspace: getSyncStatus — not_member maps to workspace_not_found', async function() {
+    ws._resetForTests();
+    ws._setAuth(makeMockAuth(true));
+    ws._setFetch(makeOkFetch({ ok: false, error: 'not_member' }));
+    var r = await ws.getSyncStatus('ws-1');
+    assert(r.ok === false, 'must return ok:false');
+    assertEqual(r.error, 'workspace_not_found');
+    ws._resetForTests();
+  });
+
+  await testAsync('cloud-workspace: getSyncStatus — network error → network_error', async function() {
+    ws._resetForTests();
+    ws._setAuth(makeMockAuth(true));
+    ws._setFetch(makeThrowFetch());
+    var r = await ws.getSyncStatus('ws-1');
+    assert(r.ok === false, 'must return ok:false');
+    assertEqual(r.error, 'network_error');
+    ws._resetForTests();
+  });
+
+  // ── getLatestSnapshotMetadata (CLOUD-FOUNDATION-1F.3, read-only) ───────────
+
+  await testAsync('cloud-workspace: getLatestSnapshotMetadata — empty workspaceId → invalid_input', async function() {
+    ws._resetForTests();
+    ws._setAuth(makeMockAuth(true));
+    var r = await ws.getLatestSnapshotMetadata('   ');
+    assert(r.ok === false, 'must return ok:false');
+    assertEqual(r.error, 'invalid_input');
+    ws._resetForTests();
+  });
+
+  await testAsync('cloud-workspace: getLatestSnapshotMetadata — no access token → not_authenticated', async function() {
+    ws._resetForTests();
+    ws._setAuth(makeMockAuth(false));
+    var r = await ws.getLatestSnapshotMetadata('ws-1');
+    assert(r.ok === false, 'must return ok:false');
+    assertEqual(r.error, 'not_authenticated');
+    ws._resetForTests();
+  });
+
+  await testAsync('cloud-workspace: getLatestSnapshotMetadata — success returns sanitized snapshot, omits storage_path/hash/pushed_by', async function() {
+    ws._resetForTests();
+    ws._setAuth(makeMockAuth(true));
+    ws._setFetch(makeOkFetch({
+      ok: true,
+      snapshot: {
+        id: 'snap-1', revision: 7, snapshot_hash: 'sha-should-not-leak',
+        storage_path: '/should/not/leak', byte_size: 1024,
+        pushed_by: 'user-uuid-should-not-leak', created_at: '2026-06-15T12:00:00Z',
+      },
+    }));
+    var r = await ws.getLatestSnapshotMetadata('ws-1');
+    assert(r.ok === true, 'must return ok:true');
+    assert(r.snapshot !== null, 'snapshot must not be null');
+    assertEqual(r.snapshot.revision,  7);
+    assertEqual(r.snapshot.createdAt, '2026-06-15T12:00:00Z');
+    assertEqual(r.snapshot.byteSize,  1024);
+    assert(!('storage_path'  in r.snapshot), 'storage_path must never be returned');
+    assert(!('snapshot_hash' in r.snapshot), 'snapshot_hash must never be returned');
+    assert(!('pushed_by'     in r.snapshot), 'pushed_by must never be returned');
+    ws._resetForTests();
+  });
+
+  await testAsync('cloud-workspace: getLatestSnapshotMetadata — no snapshot yet returns ok:true, snapshot:null', async function() {
+    ws._resetForTests();
+    ws._setAuth(makeMockAuth(true));
+    ws._setFetch(makeOkFetch({ ok: true, snapshot: null }));
+    var r = await ws.getLatestSnapshotMetadata('ws-1');
+    assert(r.ok === true, 'must return ok:true');
+    assertEqual(r.snapshot, null, 'snapshot must be null when none exists yet');
+    ws._resetForTests();
+  });
+
+  await testAsync('cloud-workspace: getLatestSnapshotMetadata — not_member maps to workspace_not_found', async function() {
+    ws._resetForTests();
+    ws._setAuth(makeMockAuth(true));
+    ws._setFetch(makeOkFetch({ ok: false, error: 'not_member' }));
+    var r = await ws.getLatestSnapshotMetadata('ws-1');
+    assert(r.ok === false, 'must return ok:false');
+    assertEqual(r.error, 'workspace_not_found');
+    ws._resetForTests();
+  });
+
+  await testAsync('cloud-workspace: getLatestSnapshotMetadata — network error → network_error', async function() {
+    ws._resetForTests();
+    ws._setAuth(makeMockAuth(true));
+    ws._setFetch(makeThrowFetch());
+    var r = await ws.getLatestSnapshotMetadata('ws-1');
+    assert(r.ok === false, 'must return ok:false');
+    assertEqual(r.error, 'network_error');
+    ws._resetForTests();
+  });
+
+  // ── No write RPCs called by read-only functions ─────────────────────────────
+
+  await testAsync('cloud-workspace: getSyncStatus only calls get_sync_status RPC, never a write RPC', async function() {
+    ws._resetForTests();
+    ws._setAuth(makeMockAuth(true));
+    var calledUrls = [];
+    ws._setFetch(function(url) {
+      calledUrls.push(url);
+      return Promise.resolve({ ok: true, status: 200, json: function() {
+        return Promise.resolve({ ok: true, current_revision: 1, lock_free: true });
+      } });
+    });
+    await ws.getSyncStatus('ws-1');
+    assert(calledUrls.length === 1, 'exactly one fetch call expected');
+    assert(/\/rpc\/get_sync_status$/.test(calledUrls[0]), 'must call get_sync_status RPC');
+    assert(!/push_snapshot|create_workspace|register_device|apply|restore/.test(calledUrls[0]),
+      'must never call a write RPC');
+    ws._resetForTests();
+  });
+
+  await testAsync('cloud-workspace: getLatestSnapshotMetadata only calls get_latest_snapshot_metadata RPC, never a write RPC', async function() {
+    ws._resetForTests();
+    ws._setAuth(makeMockAuth(true));
+    var calledUrls = [];
+    ws._setFetch(function(url) {
+      calledUrls.push(url);
+      return Promise.resolve({ ok: true, status: 200, json: function() {
+        return Promise.resolve({ ok: true, snapshot: null });
+      } });
+    });
+    await ws.getLatestSnapshotMetadata('ws-1');
+    assert(calledUrls.length === 1, 'exactly one fetch call expected');
+    assert(/\/rpc\/get_latest_snapshot_metadata$/.test(calledUrls[0]), 'must call get_latest_snapshot_metadata RPC');
+    assert(!/push_snapshot|create_workspace|register_device|apply|restore/.test(calledUrls[0]),
+      'must never call a write RPC');
     ws._resetForTests();
   });
 }

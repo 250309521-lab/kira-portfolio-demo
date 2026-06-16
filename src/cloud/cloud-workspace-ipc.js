@@ -36,6 +36,12 @@ function _validateActivatePayload(payload) {
   return true;
 }
 
+function _validateWorkspaceIdPayload(payload) {
+  if (!payload || typeof payload !== 'object') return false;
+  if (typeof payload.workspaceId !== 'string' || !payload.workspaceId.trim()) return false;
+  return true;
+}
+
 // Registers all cloud workspace IPC handlers on ipcMain.
 // workspace is an optional seam — defaults to require('./cloud-workspace') when omitted.
 function register(ipcMain, licenseGuard, log, workspace) {
@@ -98,6 +104,41 @@ function register(ipcMain, licenseGuard, log, workspace) {
       return { ok: false, error: 'unknown_error' };
     }
   });
+
+  // ── cloud:getSyncStatus (CLOUD-FOUNDATION-1F.3, read-only) ───────────────────
+
+  ipcMain.handle('cloud:getSyncStatus', async function(_event, payload) {
+    try {
+      var guard = await licenseGuard();
+      if (!guard.ok) return { ok: false, error: 'license_required' };
+      if (!_validateWorkspaceIdPayload(payload)) return { ok: false, error: 'invalid_input' };
+      var result = await workspace.getSyncStatus(payload.workspaceId);
+      return _sanitize(result);
+    } catch (e) {
+      log('cloud:getSyncStatus error: ' + ((e && e.code) || 'unknown_error'));
+      return { ok: false, error: 'unknown_error' };
+    }
+  });
+
+  // ── cloud:getLatestSnapshotMetadata (CLOUD-FOUNDATION-1F.3, read-only) ───────
+
+  ipcMain.handle('cloud:getLatestSnapshotMetadata', async function(_event, payload) {
+    try {
+      var guard = await licenseGuard();
+      if (!guard.ok) return { ok: false, error: 'license_required' };
+      if (!_validateWorkspaceIdPayload(payload)) return { ok: false, error: 'invalid_input' };
+      var result = await workspace.getLatestSnapshotMetadata(payload.workspaceId);
+      return _sanitize(result);
+    } catch (e) {
+      log('cloud:getLatestSnapshotMetadata error: ' + ((e && e.code) || 'unknown_error'));
+      return { ok: false, error: 'unknown_error' };
+    }
+  });
 }
 
-module.exports = { register, _validateCreatePayload, _validateActivatePayload };
+module.exports = {
+  register,
+  _validateCreatePayload,
+  _validateActivatePayload,
+  _validateWorkspaceIdPayload,
+};

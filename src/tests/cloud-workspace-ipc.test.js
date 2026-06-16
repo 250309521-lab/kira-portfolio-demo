@@ -48,6 +48,14 @@ function makeMockWorkspace(overrides) {
       _track('getWorkspaceStatus', []);
       return Promise.resolve({ ok: true, hasWorkspace: false, workspaces: [], userId: 'uid-1' });
     },
+    getSyncStatus: function(workspaceId) {
+      _track('getSyncStatus', [workspaceId]);
+      return Promise.resolve({ ok: true, currentRevision: 1, lockFree: true, lockExpiresAt: null });
+    },
+    getLatestSnapshotMetadata: function(workspaceId) {
+      _track('getLatestSnapshotMetadata', [workspaceId]);
+      return Promise.resolve({ ok: true, snapshot: null });
+    },
   };
   var ws = Object.assign({}, base, overrides || {});
   ws._calls = _calls;
@@ -73,13 +81,30 @@ function register(test, assert, assertEqual) {
 
   console.log('\nCloud Workspace IPC — Channel Registration:');
 
-  test('cloud-workspace-ipc: register creates all four required channels', function() {
+  test('cloud-workspace-ipc: register creates all six required channels', function() {
     var ipc = makeMockIpcMain();
     ipc_module.register(ipc, makeGuard(true), makeLog(), makeMockWorkspace());
     assert(ipc._hasChannel('cloud:listWorkspaces'),    'cloud:listWorkspaces must be registered');
     assert(ipc._hasChannel('cloud:createWorkspace'),   'cloud:createWorkspace must be registered');
     assert(ipc._hasChannel('cloud:activateWorkspace'), 'cloud:activateWorkspace must be registered');
     assert(ipc._hasChannel('cloud:getWorkspaceStatus'),'cloud:getWorkspaceStatus must be registered');
+    assert(ipc._hasChannel('cloud:getSyncStatus'),     'cloud:getSyncStatus must be registered (CLOUD-FOUNDATION-1F.3)');
+    assert(ipc._hasChannel('cloud:getLatestSnapshotMetadata'), 'cloud:getLatestSnapshotMetadata must be registered (CLOUD-FOUNDATION-1F.3)');
+  });
+
+  console.log('\nCloud Workspace IPC — WorkspaceId Payload Validation (CLOUD-FOUNDATION-1F.3):');
+
+  test('cloud-workspace-ipc: _validateWorkspaceIdPayload — valid payload ok', function() {
+    assert(ipc_module._validateWorkspaceIdPayload({ workspaceId: 'ws-uuid-001' }) === true);
+  });
+  test('cloud-workspace-ipc: _validateWorkspaceIdPayload — null payload rejected', function() {
+    assert(ipc_module._validateWorkspaceIdPayload(null) === false);
+  });
+  test('cloud-workspace-ipc: _validateWorkspaceIdPayload — missing workspaceId rejected', function() {
+    assert(ipc_module._validateWorkspaceIdPayload({}) === false);
+  });
+  test('cloud-workspace-ipc: _validateWorkspaceIdPayload — whitespace-only workspaceId rejected', function() {
+    assert(ipc_module._validateWorkspaceIdPayload({ workspaceId: '   ' }) === false);
   });
 
   console.log('\nCloud Workspace IPC — createWorkspace Payload Validation:');
@@ -168,6 +193,26 @@ async function registerAsync(testAsync, assert, assertEqual) {
     assert(!mockWs._calls.getWorkspaceStatus, 'workspace.getWorkspaceStatus must not be called when license blocked');
   });
 
+  await testAsync('cloud-workspace-ipc: cloud:getSyncStatus license block returns license_required and does not call workspace', async function() {
+    var ipc = makeMockIpcMain();
+    var mockWs = makeMockWorkspace();
+    ipc_module.register(ipc, makeGuard(false), makeLog(), mockWs);
+    var r = await ipc._invoke('cloud:getSyncStatus', {}, { workspaceId: 'ws-001' });
+    assert(r.ok === false,                   'ok must be false when license blocked');
+    assertEqual(r.error, 'license_required', 'error must be license_required');
+    assert(!mockWs._calls.getSyncStatus,     'workspace.getSyncStatus must not be called when license blocked');
+  });
+
+  await testAsync('cloud-workspace-ipc: cloud:getLatestSnapshotMetadata license block returns license_required and does not call workspace', async function() {
+    var ipc = makeMockIpcMain();
+    var mockWs = makeMockWorkspace();
+    ipc_module.register(ipc, makeGuard(false), makeLog(), mockWs);
+    var r = await ipc._invoke('cloud:getLatestSnapshotMetadata', {}, { workspaceId: 'ws-001' });
+    assert(r.ok === false,                            'ok must be false when license blocked');
+    assertEqual(r.error, 'license_required',           'error must be license_required');
+    assert(!mockWs._calls.getLatestSnapshotMetadata,   'workspace.getLatestSnapshotMetadata must not be called when license blocked');
+  });
+
   // ── Input validation ───────────────────────────────────────────────────────
 
   await testAsync('cloud-workspace-ipc: cloud:createWorkspace null payload returns invalid_input', async function() {
@@ -203,6 +248,34 @@ async function registerAsync(testAsync, assert, assertEqual) {
     ipc_module.register(ipc, makeGuard(true), makeLog(), makeMockWorkspace());
     var r = await ipc._invoke('cloud:activateWorkspace', {}, { workspaceId: '' });
     assertEqual(r.error, 'invalid_input', 'empty workspaceId must return invalid_input');
+  });
+
+  await testAsync('cloud-workspace-ipc: cloud:getSyncStatus null payload returns invalid_input', async function() {
+    var ipc = makeMockIpcMain();
+    ipc_module.register(ipc, makeGuard(true), makeLog(), makeMockWorkspace());
+    var r = await ipc._invoke('cloud:getSyncStatus', {}, null);
+    assertEqual(r.error, 'invalid_input', 'null payload must return invalid_input');
+  });
+
+  await testAsync('cloud-workspace-ipc: cloud:getSyncStatus empty workspaceId returns invalid_input', async function() {
+    var ipc = makeMockIpcMain();
+    ipc_module.register(ipc, makeGuard(true), makeLog(), makeMockWorkspace());
+    var r = await ipc._invoke('cloud:getSyncStatus', {}, { workspaceId: '' });
+    assertEqual(r.error, 'invalid_input', 'empty workspaceId must return invalid_input');
+  });
+
+  await testAsync('cloud-workspace-ipc: cloud:getLatestSnapshotMetadata null payload returns invalid_input', async function() {
+    var ipc = makeMockIpcMain();
+    ipc_module.register(ipc, makeGuard(true), makeLog(), makeMockWorkspace());
+    var r = await ipc._invoke('cloud:getLatestSnapshotMetadata', {}, null);
+    assertEqual(r.error, 'invalid_input', 'null payload must return invalid_input');
+  });
+
+  await testAsync('cloud-workspace-ipc: cloud:getLatestSnapshotMetadata empty workspaceId returns invalid_input', async function() {
+    var ipc = makeMockIpcMain();
+    ipc_module.register(ipc, makeGuard(true), makeLog(), makeMockWorkspace());
+    var r = await ipc._invoke('cloud:getLatestSnapshotMetadata', {}, { workspaceId: '   ' });
+    assertEqual(r.error, 'invalid_input', 'whitespace-only workspaceId must return invalid_input');
   });
 
   // ── Correct module invocation ──────────────────────────────────────────────
@@ -250,6 +323,48 @@ async function registerAsync(testAsync, assert, assertEqual) {
       'workspace.getWorkspaceStatus must be called exactly once');
   });
 
+  await testAsync('cloud-workspace-ipc: cloud:getSyncStatus calls workspace.getSyncStatus with workspaceId', async function() {
+    var ipc = makeMockIpcMain();
+    var mockWs = makeMockWorkspace();
+    ipc_module.register(ipc, makeGuard(true), makeLog(), mockWs);
+    var r = await ipc._invoke('cloud:getSyncStatus', {}, { workspaceId: 'ws-uuid-xyz' });
+    assert(r.ok === true, 'must return ok:true');
+    assert(mockWs._calls.getSyncStatus && mockWs._calls.getSyncStatus.length === 1,
+      'workspace.getSyncStatus must be called exactly once');
+    assertEqual(mockWs._calls.getSyncStatus[0][0], 'ws-uuid-xyz', 'workspaceId must be forwarded');
+  });
+
+  await testAsync('cloud-workspace-ipc: cloud:getLatestSnapshotMetadata calls workspace.getLatestSnapshotMetadata with workspaceId', async function() {
+    var ipc = makeMockIpcMain();
+    var mockWs = makeMockWorkspace();
+    ipc_module.register(ipc, makeGuard(true), makeLog(), mockWs);
+    var r = await ipc._invoke('cloud:getLatestSnapshotMetadata', {}, { workspaceId: 'ws-uuid-xyz' });
+    assert(r.ok === true, 'must return ok:true');
+    assert(mockWs._calls.getLatestSnapshotMetadata && mockWs._calls.getLatestSnapshotMetadata.length === 1,
+      'workspace.getLatestSnapshotMetadata must be called exactly once');
+    assertEqual(mockWs._calls.getLatestSnapshotMetadata[0][0], 'ws-uuid-xyz', 'workspaceId must be forwarded');
+  });
+
+  // ── No write methods invoked by read-only channels ─────────────────────────
+
+  await testAsync('cloud-workspace-ipc: cloud:getSyncStatus never calls any write-capable workspace method', async function() {
+    var ipc = makeMockIpcMain();
+    var mockWs = makeMockWorkspace();
+    ipc_module.register(ipc, makeGuard(true), makeLog(), mockWs);
+    await ipc._invoke('cloud:getSyncStatus', {}, { workspaceId: 'ws-1' });
+    assert(!mockWs._calls.createWorkspace,   'createWorkspace must not be called');
+    assert(!mockWs._calls.activateWorkspace, 'activateWorkspace must not be called');
+  });
+
+  await testAsync('cloud-workspace-ipc: cloud:getLatestSnapshotMetadata never calls any write-capable workspace method', async function() {
+    var ipc = makeMockIpcMain();
+    var mockWs = makeMockWorkspace();
+    ipc_module.register(ipc, makeGuard(true), makeLog(), mockWs);
+    await ipc._invoke('cloud:getLatestSnapshotMetadata', {}, { workspaceId: 'ws-1' });
+    assert(!mockWs._calls.createWorkspace,   'createWorkspace must not be called');
+    assert(!mockWs._calls.activateWorkspace, 'activateWorkspace must not be called');
+  });
+
   // ── Response scrubbing ─────────────────────────────────────────────────────
 
   await testAsync('cloud-workspace-ipc: response strips deviceId and device_id', async function() {
@@ -293,6 +408,36 @@ async function registerAsync(testAsync, assert, assertEqual) {
     assert(!('service_role'       in r), 'service_role must be stripped');
   });
 
+  await testAsync('cloud-workspace-ipc: cloud:getSyncStatus response strips device_id and access_token if present', async function() {
+    var ipc = makeMockIpcMain();
+    ipc_module.register(ipc, makeGuard(true), makeLog(), makeMockWorkspace({
+      getSyncStatus: function() {
+        return Promise.resolve({
+          ok: true, currentRevision: 1, lockFree: true,
+          device_id: 'SECRET', access_token: 'TOK',
+        });
+      },
+    }));
+    var r = await ipc._invoke('cloud:getSyncStatus', {}, { workspaceId: 'ws-1' });
+    assert(!('device_id'     in r), 'device_id must be stripped');
+    assert(!('access_token'  in r), 'access_token must be stripped');
+  });
+
+  await testAsync('cloud-workspace-ipc: cloud:getLatestSnapshotMetadata response strips service_role and refresh_token if present', async function() {
+    var ipc = makeMockIpcMain();
+    ipc_module.register(ipc, makeGuard(true), makeLog(), makeMockWorkspace({
+      getLatestSnapshotMetadata: function() {
+        return Promise.resolve({
+          ok: true, snapshot: { revision: 1, createdAt: '2026-06-15T00:00:00Z', byteSize: 10 },
+          service_role: 'SR', refresh_token: 'RTOK',
+        });
+      },
+    }));
+    var r = await ipc._invoke('cloud:getLatestSnapshotMetadata', {}, { workspaceId: 'ws-1' });
+    assert(!('service_role'  in r), 'service_role must be stripped');
+    assert(!('refresh_token' in r), 'refresh_token must be stripped');
+  });
+
   // ── Exception handling ─────────────────────────────────────────────────────
 
   await testAsync('cloud-workspace-ipc: workspace.listWorkspaces throw returns unknown_error', async function() {
@@ -324,6 +469,26 @@ async function registerAsync(testAsync, assert, assertEqual) {
       activateWorkspace: function() { return Promise.reject(new Error('network gone')); },
     }));
     var r = await ipc._invoke('cloud:activateWorkspace', {}, { workspaceId: 'ws-001' });
+    assert(r.ok === false,                'ok must be false on rejected promise');
+    assertEqual(r.error, 'unknown_error', 'error must be unknown_error');
+  });
+
+  await testAsync('cloud-workspace-ipc: workspace.getSyncStatus throw returns unknown_error', async function() {
+    var ipc = makeMockIpcMain();
+    ipc_module.register(ipc, makeGuard(true), makeLog(), makeMockWorkspace({
+      getSyncStatus: function() { return Promise.reject(new Error('network gone')); },
+    }));
+    var r = await ipc._invoke('cloud:getSyncStatus', {}, { workspaceId: 'ws-001' });
+    assert(r.ok === false,                'ok must be false on rejected promise');
+    assertEqual(r.error, 'unknown_error', 'error must be unknown_error');
+  });
+
+  await testAsync('cloud-workspace-ipc: workspace.getLatestSnapshotMetadata throw returns unknown_error', async function() {
+    var ipc = makeMockIpcMain();
+    ipc_module.register(ipc, makeGuard(true), makeLog(), makeMockWorkspace({
+      getLatestSnapshotMetadata: function() { return Promise.reject(new Error('network gone')); },
+    }));
+    var r = await ipc._invoke('cloud:getLatestSnapshotMetadata', {}, { workspaceId: 'ws-001' });
     assert(r.ok === false,                'ok must be false on rejected promise');
     assertEqual(r.error, 'unknown_error', 'error must be unknown_error');
   });

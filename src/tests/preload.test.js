@@ -90,6 +90,20 @@ function register(test, assert, assertEqual) {
       'getWorkspaceStatus must be a function');
   });
 
+  test('preload: cloudWorkspace.getSyncStatus is a function (CLOUD-FOUNDATION-1F.3)', function() {
+    var mock = makeElectronMock();
+    loadPreload(mock);
+    assert(typeof mock._worlds.cloudWorkspace.getSyncStatus === 'function',
+      'getSyncStatus must be a function');
+  });
+
+  test('preload: cloudWorkspace.getLatestSnapshotMetadata is a function (CLOUD-FOUNDATION-1F.3)', function() {
+    var mock = makeElectronMock();
+    loadPreload(mock);
+    assert(typeof mock._worlds.cloudWorkspace.getLatestSnapshotMetadata === 'function',
+      'getLatestSnapshotMetadata must be a function');
+  });
+
   test('preload: cloudWorkspace exposes no forbidden keys', function() {
     var mock = makeElectronMock();
     loadPreload(mock);
@@ -99,13 +113,16 @@ function register(test, assert, assertEqual) {
     });
   });
 
-  test('preload: cloudWorkspace exposes exactly the four expected methods and nothing else', function() {
+  test('preload: cloudWorkspace exposes exactly the six expected methods and nothing else', function() {
     var mock = makeElectronMock();
     loadPreload(mock);
     var keys = Object.keys(mock._worlds.cloudWorkspace).sort();
-    var expected = ['activateWorkspace', 'createWorkspace', 'getWorkspaceStatus', 'listWorkspaces'];
+    var expected = [
+      'activateWorkspace', 'createWorkspace', 'getLatestSnapshotMetadata',
+      'getSyncStatus', 'getWorkspaceStatus', 'listWorkspaces',
+    ].sort();
     assertEqual(keys.join(','), expected.join(','),
-      'cloudWorkspace must expose exactly the four workspace methods');
+      'cloudWorkspace must expose exactly the six workspace methods');
   });
 
   test('preload: cloudWorkspace is separate from window.electron', function() {
@@ -159,6 +176,26 @@ async function registerAsync(testAsync, assert, assertEqual) {
     await mock._worlds.cloudWorkspace.getWorkspaceStatus();
     assert(mock._invokeLog.some(function(e) { return e.channel === 'cloud:getWorkspaceStatus'; }),
       'cloud:getWorkspaceStatus must be invoked');
+  });
+
+  await testAsync('preload: getSyncStatus(payload) invokes cloud:getSyncStatus with payload forwarded (CLOUD-FOUNDATION-1F.3)', async function() {
+    var mock = makeElectronMock();
+    loadPreload(mock);
+    var payload = { workspaceId: 'ws-uuid-test-001' };
+    await mock._worlds.cloudWorkspace.getSyncStatus(payload);
+    var entry = mock._invokeLog.find(function(e) { return e.channel === 'cloud:getSyncStatus'; });
+    assert(entry !== undefined, 'cloud:getSyncStatus must be invoked');
+    assertEqual(entry.payload.workspaceId, 'ws-uuid-test-001', 'payload.workspaceId must be forwarded');
+  });
+
+  await testAsync('preload: getLatestSnapshotMetadata(payload) invokes cloud:getLatestSnapshotMetadata with payload forwarded (CLOUD-FOUNDATION-1F.3)', async function() {
+    var mock = makeElectronMock();
+    loadPreload(mock);
+    var payload = { workspaceId: 'ws-uuid-test-001' };
+    await mock._worlds.cloudWorkspace.getLatestSnapshotMetadata(payload);
+    var entry = mock._invokeLog.find(function(e) { return e.channel === 'cloud:getLatestSnapshotMetadata'; });
+    assert(entry !== undefined, 'cloud:getLatestSnapshotMetadata must be invoked');
+    assertEqual(entry.payload.workspaceId, 'ws-uuid-test-001', 'payload.workspaceId must be forwarded');
   });
 }
 

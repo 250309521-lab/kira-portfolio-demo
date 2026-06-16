@@ -1,5 +1,8 @@
 'use strict';
 
+const fs   = require('fs');
+const path = require('path');
+
 /**
  * Workspace UI Tests — CLOUD-FOUNDATION-1E.6
  *
@@ -607,6 +610,135 @@ function register(test, assert, assertEqual) {
     u.state.view = 'list';
     u.fns.renderWorkspaceCard();
     assertEqual(u.dom._cardDisplay, '');
+  });
+
+  // ── Sync status (CLOUD-FOUNDATION-1F.3, read-only) — static source checks ────
+  // These read the real renderer.html, since the inline WS_UI mirror above predates
+  // the sync-status feature. They verify the actual implementation, not a copy of it.
+
+  console.log('\nSync Status (CLOUD-FOUNDATION-1F.3) — static source checks:');
+
+  var _rendererSrc = fs.readFileSync(path.join(__dirname, '..', 'renderer.html'), 'utf8');
+
+  test('sync status: SYNC_UI state object exists in renderer.html', function() {
+    assert(/var SYNC_UI = \{/.test(_rendererSrc), 'SYNC_UI state object must exist');
+  });
+
+  test('sync status: wsRefreshSyncStatus only calls getSyncStatus and getLatestSnapshotMetadata on the bridge', function() {
+    var m = _rendererSrc.match(/async function wsRefreshSyncStatus\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(m, 'wsRefreshSyncStatus function must exist');
+    var body = m[1];
+    assert(/bridge\.getSyncStatus\(/.test(body), 'must call bridge.getSyncStatus');
+    assert(/bridge\.getLatestSnapshotMetadata\(/.test(body), 'must call bridge.getLatestSnapshotMetadata');
+    // No write-capable bridge methods may be called from this read-only function.
+    assert(!/bridge\.(createWorkspace|activateWorkspace)\(/.test(body),
+      'wsRefreshSyncStatus must never call a write-capable bridge method');
+  });
+
+  test('sync status: no raw ipcRenderer usage anywhere in renderer.html', function() {
+    assert(!/ipcRenderer/.test(_rendererSrc), 'renderer.html must never reference ipcRenderer directly');
+  });
+
+  test('sync status: no direct Supabase/fetch call from renderer.html sync status code', function() {
+    var m = _rendererSrc.match(/async function wsRefreshSyncStatus\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(m, 'wsRefreshSyncStatus function must exist');
+    assert(!/fetch\(/.test(m[1]), 'wsRefreshSyncStatus must not call fetch() directly — must go through the bridge');
+    assert(!/supabase/i.test(m[1]), 'wsRefreshSyncStatus must not reference Supabase directly');
+  });
+
+  test('sync status: rendered sync HTML section never embeds dynamic sync fields via innerHTML interpolation', function() {
+    var m = _rendererSrc.match(/\} else if \(view === 'list'\) \{([\s\S]*?)\n  \} else \{/);
+    assert(m, 'view === list HTML-building branch must exist');
+    var body = m[1];
+    // The HTML-building string concatenation must not directly embed SYNC_UI dynamic values
+    // (currentRevision, snapshot.*, lockExpiresAt) — those must only be set via textContent later.
+    assert(!/\+\s*SYNC_UI\.snapshot\./.test(body), 'snapshot fields must not be string-concatenated into innerHTML');
+    assert(!/\+\s*SYNC_UI\.currentRevision/.test(body), 'currentRevision must not be string-concatenated into innerHTML');
+    assert(!/\+\s*SYNC_UI\.lockExpiresAt/.test(body), 'lockExpiresAt must not be string-concatenated into innerHTML');
+  });
+
+  test('sync status: textContent pass sets ws-sync-summary, ws-sync-snapshot, ws-sync-lock-note, ws-sync-lastchecked via textContent only', function() {
+    assert(/getElementById\('ws-sync-summary'\)[\s\S]{0,80}\.textContent\s*=/.test(_rendererSrc),
+      'ws-sync-summary must be set via textContent');
+    assert(/getElementById\('ws-sync-snapshot'\)[\s\S]{0,200}\.textContent\s*=/.test(_rendererSrc),
+      'ws-sync-snapshot must be set via textContent');
+    assert(/getElementById\('ws-sync-lock-note'\)[\s\S]{0,80}\.textContent\s*=/.test(_rendererSrc),
+      'ws-sync-lock-note must be set via textContent');
+    assert(/getElementById\('ws-sync-lastchecked'\)[\s\S]{0,200}\.textContent\s*=/.test(_rendererSrc),
+      'ws-sync-lastchecked must be set via textContent');
+  });
+
+  test('sync status: getSyncStatus does not expose lock_held_by / pushed_by anywhere in renderer.html', function() {
+    assert(!/lock_held_by/.test(_rendererSrc), 'lock_held_by must never appear in renderer.html');
+    assert(!/pushed_by/.test(_rendererSrc),    'pushed_by must never appear in renderer.html');
+  });
+
+  test('sync status: SYNC_UI never stores deviceId/device_id/snapshot_hash/storage_path', function() {
+    var m = _rendererSrc.match(/var SYNC_UI = \{([\s\S]*?)\n\};/);
+    assert(m, 'SYNC_UI object literal must exist');
+    var body = m[1];
+    assert(!/deviceId|device_id/.test(body),  'SYNC_UI must not declare a device id field');
+    assert(!/snapshot_hash/.test(body),       'SYNC_UI must not declare a snapshot_hash field');
+    assert(!/storage_path/.test(body),        'SYNC_UI must not declare a storage_path field');
+  });
+
+  // ── Legacy direct-Supabase fence (CLOUD-FOUNDATION-1F.3A) — static source checks ─
+
+  console.log('\nLegacy Direct Supabase Fence (CLOUD-FOUNDATION-1F.3A) — static source checks:');
+
+  test('legacy fence: LEGACY_DISABLED flag is declared and set to true', function() {
+    assert(/const LEGACY_DISABLED = true;/.test(_rendererSrc),
+      'LEGACY_DISABLED must exist and be hard-set to true');
+  });
+
+  test('legacy fence: _focusPull (focus-triggered silent pull) is gated by LEGACY_DISABLED before any cloud check', function() {
+    var m = _rendererSrc.match(/async function _focusPull\(\)\{([\s\S]*?)\n\}/);
+    assert(m, '_focusPull function must exist');
+    assert(/^\s*if\(LEGACY_DISABLED\) return;/m.test(m[1]),
+      '_focusPull must short-circuit on LEGACY_DISABLED before touching DATA.cloud');
+  });
+
+  test('legacy fence: _startupPull (startup auto-pull) is gated by LEGACY_DISABLED before any cloud check', function() {
+    var m = _rendererSrc.match(/async function _startupPull\(\)\{([\s\S]*?)\n\}/);
+    assert(m, '_startupPull function must exist');
+    assert(/if\(LEGACY_DISABLED\) return;/.test(m[1]),
+      '_startupPull must short-circuit on LEGACY_DISABLED before touching DATA.cloud');
+  });
+
+  test('legacy fence: supabasePush/supabasePull contain no real fetch() call (already retired stubs)', function() {
+    var push = _rendererSrc.match(/async function supabasePush\(\)\s*\{([\s\S]*?)\n\}/);
+    var pull = _rendererSrc.match(/async function supabasePull\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(push && pull, 'supabasePush and supabasePull must exist');
+    assert(!/fetch\(/.test(push[1]), 'supabasePush must not perform a real fetch() call');
+    assert(!/fetch\(/.test(pull[1]), 'supabasePull must not perform a real fetch() call');
+  });
+
+  test('legacy fence: legacy direct-Supabase entry points (supabaseConnect/checkSupabaseStatus) are not wired to any UI element', function() {
+    assert(!/onclick\s*=\s*["']supabaseConnect\(/.test(_rendererSrc),
+      'supabaseConnect must not be reachable from an onclick handler');
+    assert(!/onclick\s*=\s*["']checkSupabaseStatus\(/.test(_rendererSrc),
+      'checkSupabaseStatus must not be reachable from an onclick handler');
+    assert(!/id=["']supa-msg["']/.test(_rendererSrc),
+      'the legacy supa-msg DOM element must not exist (no UI surface to drive it)');
+  });
+
+  test('legacy fence: cloudSync() data-mutation call sites all funnel through the now-retired no-op stub', function() {
+    var m = _rendererSrc.match(/async function cloudSync\(dir='push'\)\{([\s\S]*?)\n\}/);
+    assert(m, 'cloudSync function must exist');
+    assert(!/fetch\(/.test(m[1]) && !/supabasePush|supabasePull/.test(m[1]),
+      'cloudSync must remain a no-op and must not call supabasePush/supabasePull or fetch()');
+  });
+
+  test('legacy fence: onboarding wizard no longer offers a "Cloud" entry point into the dead-end Supabase credential form', function() {
+    assert(!/onclick="obCloudBootstrap\(\)"/.test(_rendererSrc),
+      'onboarding step 3 must not expose a button that opens the legacy Supabase credential form');
+  });
+
+  test('legacy fence: SYNC_UI/WS_UI (1E/1F cloud state) are never assigned into DATA, so ktp_v5 never persists them', function() {
+    assert(!/DATA\.cloud\s*=\s*SYNC_UI/.test(_rendererSrc), 'SYNC_UI must never be assigned into DATA.cloud');
+    assert(!/DATA\.(syncStatus|workspaceCloud)\s*=/.test(_rendererSrc), 'no DATA.syncStatus/workspaceCloud field must exist');
+    assert(!/DATA\.cloud\.supabaseKey\s*=\s*[^'"]/.test(_rendererSrc) || /DATA\.cloud\.supabaseKey\s*=\s*['"]{2}/.test(_rendererSrc),
+      'DATA.cloud.supabaseKey must never be assigned a non-empty literal');
   });
 }
 
