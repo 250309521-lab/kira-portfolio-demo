@@ -135,6 +135,56 @@ function register(test, assert, assertEqual) {
     assert(!('listWorkspaces' in mock._worlds.electron),
       'listWorkspaces must not appear on the electron bridge');
   });
+
+  // ── Cloud Backup bridge (CLOUD-FOUNDATION-1F.4A) ────────────────────────────
+
+  test('preload: cloudBackup bridge is registered as a separate world', function() {
+    var mock = makeElectronMock();
+    loadPreload(mock);
+    assert('cloudBackup' in mock._worlds, 'cloudBackup must be registered via exposeInMainWorld');
+  });
+
+  test('preload: cloudBackup.getCloudBackupReadiness is a function', function() {
+    var mock = makeElectronMock();
+    loadPreload(mock);
+    assert(typeof mock._worlds.cloudBackup.getCloudBackupReadiness === 'function',
+      'getCloudBackupReadiness must be a function');
+  });
+
+  test('preload: cloudBackup.buildCloudBackupPreflight is a function', function() {
+    var mock = makeElectronMock();
+    loadPreload(mock);
+    assert(typeof mock._worlds.cloudBackup.buildCloudBackupPreflight === 'function',
+      'buildCloudBackupPreflight must be a function');
+  });
+
+  test('preload: cloudBackup exposes no forbidden keys', function() {
+    var mock = makeElectronMock();
+    loadPreload(mock);
+    var api = mock._worlds.cloudBackup;
+    FORBIDDEN_KEYS.forEach(function(k) {
+      assert(!(k in api), 'cloudBackup must not expose key: ' + k);
+    });
+  });
+
+  test('preload: cloudBackup exposes exactly the two expected methods and nothing else', function() {
+    var mock = makeElectronMock();
+    loadPreload(mock);
+    var keys = Object.keys(mock._worlds.cloudBackup).sort();
+    var expected = ['buildCloudBackupPreflight', 'getCloudBackupReadiness'].sort();
+    assertEqual(keys.join(','), expected.join(','),
+      'cloudBackup must expose exactly the two readiness/preflight methods');
+  });
+
+  test('preload: cloudBackup exposes no write/upload/restore methods', function() {
+    var mock = makeElectronMock();
+    loadPreload(mock);
+    var api = mock._worlds.cloudBackup;
+    ['uploadBackup', 'createBackup', 'restoreBackup', 'applyBackup',
+     'createCloudBackupMetadata', 'pushSnapshot'].forEach(function(k) {
+      assert(!(k in api), 'cloudBackup must not expose write method: ' + k);
+    });
+  });
 }
 
 // ── Async tests ───────────────────────────────────────────────────────────────
@@ -195,6 +245,26 @@ async function registerAsync(testAsync, assert, assertEqual) {
     await mock._worlds.cloudWorkspace.getLatestSnapshotMetadata(payload);
     var entry = mock._invokeLog.find(function(e) { return e.channel === 'cloud:getLatestSnapshotMetadata'; });
     assert(entry !== undefined, 'cloud:getLatestSnapshotMetadata must be invoked');
+    assertEqual(entry.payload.workspaceId, 'ws-uuid-test-001', 'payload.workspaceId must be forwarded');
+  });
+
+  await testAsync('preload: getCloudBackupReadiness(payload) invokes cloud:getCloudBackupReadiness with payload forwarded (CLOUD-FOUNDATION-1F.4A)', async function() {
+    var mock = makeElectronMock();
+    loadPreload(mock);
+    var payload = { workspaceId: 'ws-uuid-test-001' };
+    await mock._worlds.cloudBackup.getCloudBackupReadiness(payload);
+    var entry = mock._invokeLog.find(function(e) { return e.channel === 'cloud:getCloudBackupReadiness'; });
+    assert(entry !== undefined, 'cloud:getCloudBackupReadiness must be invoked');
+    assertEqual(entry.payload.workspaceId, 'ws-uuid-test-001', 'payload.workspaceId must be forwarded');
+  });
+
+  await testAsync('preload: buildCloudBackupPreflight(payload) invokes cloud:buildCloudBackupPreflight with payload forwarded (CLOUD-FOUNDATION-1F.4A)', async function() {
+    var mock = makeElectronMock();
+    loadPreload(mock);
+    var payload = { workspaceId: 'ws-uuid-test-001', rendererState: '{}' };
+    await mock._worlds.cloudBackup.buildCloudBackupPreflight(payload);
+    var entry = mock._invokeLog.find(function(e) { return e.channel === 'cloud:buildCloudBackupPreflight'; });
+    assert(entry !== undefined, 'cloud:buildCloudBackupPreflight must be invoked');
     assertEqual(entry.payload.workspaceId, 'ws-uuid-test-001', 'payload.workspaceId must be forwarded');
   });
 }

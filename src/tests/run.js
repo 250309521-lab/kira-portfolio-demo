@@ -1578,6 +1578,10 @@ async function runB3Tests() {
   // ── Cloud Workspace IPC (CLOUD-FOUNDATION-1E.3) ───────────────────────────
   await _cloudWorkspaceIpcTest.registerAsync(testAsync, assert, assertEqual);
 
+  // ── Cloud Backup readiness/preflight (CLOUD-FOUNDATION-1F.4A) ─────────────
+  await _cloudBackupTest.registerAsync(testAsync, assert, assertEqual);
+  await _cloudBackupIpcTest.registerAsync(testAsync, assert, assertEqual);
+
   // ── Preload Bridge (CLOUD-FOUNDATION-1E.4) ────────────────────────────────
   await _preloadTest.registerAsync(testAsync, assert, assertEqual);
 
@@ -1770,6 +1774,13 @@ _cloudWorkspaceTest.register(test, assert, assertEqual);
 // ── Cloud Workspace IPC (CLOUD-FOUNDATION-1E.3) ───────────────────────────────
 var _cloudWorkspaceIpcTest = require('./cloud-workspace-ipc.test.js');
 _cloudWorkspaceIpcTest.register(test, assert, assertEqual);
+
+// ── Cloud Backup readiness/preflight (CLOUD-FOUNDATION-1F.4A) ──────────────────
+var _cloudBackupTest = require('./cloud-backup.test.js');
+_cloudBackupTest.register(test, assert, assertEqual);
+
+var _cloudBackupIpcTest = require('./cloud-backup-ipc.test.js');
+_cloudBackupIpcTest.register(test, assert, assertEqual);
 
 // ── Preload Bridge (CLOUD-FOUNDATION-1E.4) ────────────────────────────────────
 var _preloadTest = require('./preload.test.js');

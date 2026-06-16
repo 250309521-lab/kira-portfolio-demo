@@ -4106,6 +4106,7 @@ tbody tr[onclick] { cursor: pointer; }
 .ws-sync-hdr-lbl{font-size:11px;font-weight:600;color:var(--i3);text-transform:uppercase;letter-spacing:.02em}
 .ws-sync-summary{font-size:11.5px;color:var(--i2);margin-top:4px}
 .ws-sync-detail{font-size:10.5px;color:var(--i4);margin-top:2px}
+.ws-backup-soon{font-size:10px;color:var(--i4);margin-top:5px;font-style:italic;opacity:.75}
 .ws-empty-state{display:flex;flex-direction:column;align-items:center;text-align:center;padding:18px 16px;background:rgba(99,102,241,.05);border:1px dashed rgba(99,102,241,.2);border-radius:10px;margin-bottom:10px;gap:6px}
 .ws-empty-icon{font-size:24px;line-height:1;opacity:.65}
 .ws-empty-text{font-size:12.5px;font-weight:600;color:var(--i2)}
@@ -5073,6 +5074,18 @@ var STRINGS={
     wsSyncLocalUnknown:'Yerel değişiklikler takip edilmiyor.',
     wsSyncLastChecked:'Son kontrol',
     wsSyncSnapshotLbl:'Son yedek anlık görüntüsü',
+    wsRole_editor:'Editör',wsRole_viewer:'Görüntüleyici',
+    wsBackupHdr:'Bulut Yedek',
+    wsBackupChecking:'Hazırlık kontrol ediliyor…',
+    wsBackupNotChecked:'Henüz kontrol edilmedi.',
+    wsBackupReady:'Yedeklemeye hazır.',
+    wsBackupPermissionDenied:'Bu rol bulut yedeği oluşturamaz.',
+    wsBackupTooLarge:'Yedek çok büyük (sınır aşıldı).',
+    wsBackupRoleLbl:'Rol',
+    wsBackupSizeLbl:'Tahmini yedek boyutu',
+    wsBackupSizeUnknown:'hesaplanamadı',
+    wsBackupLastLocalLbl:'Son yerel yedek',
+    wsBackupComingSoon:'Bulut yedek yükleme bir sonraki sürümde gelecek.',
     fieldNotFound:'Alan bulunamadı',pasted:'📋 Yapıştırıldı',pasteManual:'Ctrl+V ile yapıştırın',
     // Settings modals
     resetDataTitle:'🗑 Tüm Verileri Sıfırla',restoreTitle:'↩ Yedekten Geri Yükle',
@@ -5584,6 +5597,18 @@ var STRINGS={
     wsSyncLocalUnknown:'Local changes not tracked yet.',
     wsSyncLastChecked:'Last checked',
     wsSyncSnapshotLbl:'Latest snapshot',
+    wsRole_editor:'Editor',wsRole_viewer:'Viewer',
+    wsBackupHdr:'Cloud Backup',
+    wsBackupChecking:'Checking readiness…',
+    wsBackupNotChecked:'Not checked yet.',
+    wsBackupReady:'Ready to back up.',
+    wsBackupPermissionDenied:'This role cannot create a cloud backup.',
+    wsBackupTooLarge:'Backup too large (limit exceeded).',
+    wsBackupRoleLbl:'Role',
+    wsBackupSizeLbl:'Estimated backup size',
+    wsBackupSizeUnknown:'unavailable',
+    wsBackupLastLocalLbl:'Last local backup',
+    wsBackupComingSoon:'Cloud backup upload is coming in the next phase.',
     fieldNotFound:'Field not found',pasted:'📋 Pasted',pasteManual:'Use Ctrl+V to paste',
     // Settings modals
     resetDataTitle:'🗑 Reset All Data',restoreTitle:'↩ Restore from Backup',
@@ -8079,11 +8104,35 @@ var SYNC_UI = {
   checkedForId:     null,   // workspaceId this status was last fetched for
 };
 
+// ── Cloud backup readiness UI (CLOUD-FOUNDATION-1F.4A — read-only/preflight) ──
+// No upload, no restore, no metadata write. Readiness display only.
+var BACKUP_UI = {
+  state:             'idle', // 'idle' | 'loading' | 'ready' | 'error'
+  role:              null,
+  canBackup:         null,
+  byteSize:          null,
+  withinLimit:       null,
+  maxBytes:          null,
+  lastLocalBackupAt: null,
+  error:             null,
+  lastCheckedAt:     null,
+  checkedForId:      null,   // workspaceId this readiness was last fetched for
+};
+
 function _wsRoleLabel(role) {
   if (role === 'owner')  return t('wsRole_owner');
   if (role === 'admin')  return t('wsRole_admin');
+  if (role === 'editor') return t('wsRole_editor');
+  if (role === 'viewer') return t('wsRole_viewer');
   if (role === 'member') return t('wsRole_member');
   return role ? String(role) : '';
+}
+
+function _fmtBytes(n) {
+  if (typeof n !== 'number' || !isFinite(n) || n < 0) return '—';
+  if (n < 1024)        return n + ' B';
+  if (n < 1048576)     return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1048576).toFixed(1) + ' MB';
 }
 
 function _wsErrorMsg(errCode) {
@@ -8098,6 +8147,11 @@ function _wsErrorMsg(errCode) {
 
 function _wsBridge() {
   if (typeof window !== 'undefined' && window.cloudWorkspace) return window.cloudWorkspace;
+  return null;
+}
+
+function _backupBridge() {
+  if (typeof window !== 'undefined' && window.cloudBackup) return window.cloudBackup;
   return null;
 }
 
@@ -8326,6 +8380,73 @@ function _syncStatusSummaryMsg() {
   return t('wsSyncNotChecked');
 }
 
+// ── Cloud backup readiness (CLOUD-FOUNDATION-1F.4A — read-only/preflight) ──────
+// Calls only read-only bridge methods. NEVER uploads, restores, or writes cloud
+// backup metadata. The preflight builds the archive in the main process IN
+// MEMORY (no disk write) purely to estimate size.
+async function wsRefreshBackupReadiness() {
+  var bridge = _backupBridge();
+  var workspaceId = WS_UI.activeId;
+  if (!bridge || !workspaceId) return;
+
+  BACKUP_UI.state = 'loading';
+  BACKUP_UI.error = null;
+  renderWorkspaceCard();
+
+  var _readyRes;
+  try {
+    _readyRes = await bridge.getCloudBackupReadiness({ workspaceId: workspaceId });
+  } catch (_) {
+    BACKUP_UI.state = 'error'; BACKUP_UI.error = 'unknown_error';
+    BACKUP_UI.checkedForId = workspaceId; renderWorkspaceCard(); return;
+  }
+  if (!_readyRes || !_readyRes.ok) {
+    BACKUP_UI.state = 'error';
+    BACKUP_UI.error = _readyRes ? (_readyRes.error || 'unknown_error') : 'unknown_error';
+    BACKUP_UI.checkedForId = workspaceId; renderWorkspaceCard(); return;
+  }
+
+  BACKUP_UI.role      = _readyRes.role || null;
+  BACKUP_UI.canBackup = _readyRes.canBackup === true;
+  BACKUP_UI.maxBytes  = typeof _readyRes.maxBytes === 'number' ? _readyRes.maxBytes : null;
+
+  // Estimate backup size via preflight (built in-memory in main; no upload).
+  var _pf = null;
+  try {
+    _pf = await bridge.buildCloudBackupPreflight({
+      workspaceId:   workspaceId,
+      rendererState: JSON.stringify(DATA),
+    });
+  } catch (_) { _pf = null; }
+
+  if (_pf && _pf.ok) {
+    BACKUP_UI.byteSize          = typeof _pf.byteSize === 'number' ? _pf.byteSize : null;
+    BACKUP_UI.withinLimit       = _pf.withinLimit !== false;
+    if (typeof _pf.maxBytes === 'number') BACKUP_UI.maxBytes = _pf.maxBytes;
+    BACKUP_UI.lastLocalBackupAt = _pf.lastLocalBackupAt || null;
+  } else {
+    BACKUP_UI.byteSize          = null;
+    BACKUP_UI.withinLimit       = null;
+    BACKUP_UI.lastLocalBackupAt = (_pf && _pf.lastLocalBackupAt) || null;
+  }
+
+  BACKUP_UI.lastCheckedAt = Date.now();
+  BACKUP_UI.checkedForId  = workspaceId;
+  BACKUP_UI.state = 'ready';
+  renderWorkspaceCard();
+}
+
+function _backupReadinessMsg() {
+  if (BACKUP_UI.state === 'loading') return t('wsBackupChecking');
+  if (BACKUP_UI.state === 'error')   return _wsErrorMsg(BACKUP_UI.error);
+  if (BACKUP_UI.state === 'ready') {
+    if (BACKUP_UI.withinLimit === false) return t('wsBackupTooLarge');
+    if (BACKUP_UI.canBackup === false)   return t('wsBackupPermissionDenied');
+    return t('wsBackupReady');
+  }
+  return t('wsBackupNotChecked');
+}
+
 function renderWorkspaceCard() {
   var card = document.getElementById('cloud-workspace-card');
   if (!card) return;
@@ -8379,6 +8500,19 @@ function renderWorkspaceCard() {
           (SYNC_UI.state === 'ready' && SYNC_UI.lockFree === false ? '<div id="ws-sync-lock-note" class="ws-sync-detail"></div>' : '') +
           (SYNC_UI.state === 'ready' ? '<div id="ws-sync-local-note" class="ws-sync-detail"></div>' : '') +
           (SYNC_UI.lastCheckedAt ? '<div id="ws-sync-lastchecked" class="ws-sync-detail"></div>' : '') +
+        '</div>' +
+        '<div class="ws-sync-status-section ws-backup-section">' +
+          '<div class="ws-sync-status-hdr">' +
+            '<span id="ws-backup-hdr" class="ws-sync-hdr-lbl"></span>' +
+            '<button class="btn btn-ghost btn-xs" id="ws-backup-refresh-btn" onclick="wsRefreshBackupReadiness()"' +
+              (BACKUP_UI.state === 'loading' ? ' disabled' : '') + '></button>' +
+          '</div>' +
+          '<div id="ws-backup-summary" class="ws-sync-summary"></div>' +
+          (BACKUP_UI.state === 'ready' ? '<div id="ws-backup-role" class="ws-sync-detail"></div>' : '') +
+          (BACKUP_UI.state === 'ready' ? '<div id="ws-backup-size" class="ws-sync-detail"></div>' : '') +
+          (BACKUP_UI.state === 'ready' && BACKUP_UI.lastLocalBackupAt ? '<div id="ws-backup-lastlocal" class="ws-sync-detail"></div>' : '') +
+          (BACKUP_UI.lastCheckedAt ? '<div id="ws-backup-lastchecked" class="ws-sync-detail"></div>' : '') +
+          '<div id="ws-backup-soon" class="ws-backup-soon"></div>' +
         '</div>' +
       '</div>';
     }
@@ -8474,6 +8608,32 @@ function renderWorkspaceCard() {
 
       if (SYNC_UI.checkedForId !== WS_UI.activeId && SYNC_UI.state !== 'loading') {
         wsRefreshSyncStatus();
+      }
+
+      // ── Cloud backup readiness (read-only) — all values via textContent ───────
+      var _bkh = document.getElementById('ws-backup-hdr'); if (_bkh) _bkh.textContent = t('wsBackupHdr');
+      var _bkrb = document.getElementById('ws-backup-refresh-btn');
+      if (_bkrb) _bkrb.textContent = BACKUP_UI.state === 'loading' ? t('wsBackupChecking') : t('wsSyncRefreshBtn');
+      var _bksum = document.getElementById('ws-backup-summary'); if (_bksum) _bksum.textContent = _backupReadinessMsg();
+      var _bkrole = document.getElementById('ws-backup-role');
+      if (_bkrole) _bkrole.textContent = t('wsBackupRoleLbl') + ': ' + _wsRoleLabel(BACKUP_UI.role);
+      var _bksize = document.getElementById('ws-backup-size');
+      if (_bksize) {
+        _bksize.textContent = t('wsBackupSizeLbl') + ': ' +
+          (typeof BACKUP_UI.byteSize === 'number' ? _fmtBytes(BACKUP_UI.byteSize) : t('wsBackupSizeUnknown'));
+      }
+      var _bkll = document.getElementById('ws-backup-lastlocal');
+      if (_bkll && BACKUP_UI.lastLocalBackupAt) {
+        _bkll.textContent = t('wsBackupLastLocalLbl') + ': ' + new Date(BACKUP_UI.lastLocalBackupAt).toLocaleString();
+      }
+      var _bklc = document.getElementById('ws-backup-lastchecked');
+      if (_bklc && BACKUP_UI.lastCheckedAt) {
+        _bklc.textContent = t('wsSyncLastChecked') + ': ' + new Date(BACKUP_UI.lastCheckedAt).toLocaleTimeString();
+      }
+      var _bksoon = document.getElementById('ws-backup-soon'); if (_bksoon) _bksoon.textContent = t('wsBackupComingSoon');
+
+      if (BACKUP_UI.checkedForId !== WS_UI.activeId && BACKUP_UI.state !== 'loading') {
+        wsRefreshBackupReadiness();
       }
     }
     if (_wsCnt === 0 && !WS_UI.activeId) {

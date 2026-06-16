@@ -706,6 +706,28 @@ function setupIPC() {
   // ── Cloud Workspace (CLOUD-FOUNDATION-1E.3) ───────────────────────────────
   require('./cloud/cloud-workspace-ipc').register(ipcMain, licenseGuard, log);
 
+  // ── Cloud Backup readiness/preflight (CLOUD-FOUNDATION-1F.4A, read-only) ───
+  // buildPreflightArchive builds the full backup IN MEMORY only — it never
+  // writes a file, uploads to storage, or mutates cloud_backups/audit_logs.
+  require('./cloud/cloud-backup-ipc').register(ipcMain, licenseGuard, log, {
+    buildPreflightArchive: function(rendererStateStr, importProfilesStr) {
+      if (!store) initDatabase();
+      var archive    = buildFullBackup(rendererStateStr || '{}', importProfilesStr || null, 'manual');
+      var archiveStr = JSON.stringify(archive);
+      return {
+        byteSize:   Buffer.byteLength(archiveStr, 'utf8'),
+        checksum:   sha256(archiveStr),
+        appVersion: APP_VER,
+      };
+    },
+    getLastLocalBackupAt: function() {
+      try {
+        if (!store || !Array.isArray(store.backup_records) || !store.backup_records.length) return null;
+        return store.backup_records[0].created_at || null;
+      } catch (_) { return null; }
+    },
+  });
+
   ipcMain.on('titlebar:setColor', (_, opts) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.setTitleBarOverlay({ height: 52, ...opts });

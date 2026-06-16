@@ -78,3 +78,9 @@ contextBridge.exposeInMainWorld('cloudWorkspace', {
   getSyncStatus:             (payload) => ipcRenderer.invoke('cloud:getSyncStatus', payload),
   getLatestSnapshotMetadata: (payload) => ipcRenderer.invoke('cloud:getLatestSnapshotMetadata', payload),
 });
+
+// ── Cloud Backup readiness/preflight (read-only) (CLOUD-FOUNDATION-1F.4A) ──────
+contextBridge.exposeInMainWorld('cloudBackup', {
+  getCloudBackupReadiness:   (payload) => ipcRenderer.invoke('cloud:getCloudBackupReadiness', payload),
+  buildCloudBackupPreflight: (payload) => ipcRenderer.invoke('cloud:buildCloudBackupPreflight', payload),
+});

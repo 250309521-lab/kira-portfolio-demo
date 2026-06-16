@@ -740,6 +740,61 @@ function register(test, assert, assertEqual) {
     assert(!/DATA\.cloud\.supabaseKey\s*=\s*[^'"]/.test(_rendererSrc) || /DATA\.cloud\.supabaseKey\s*=\s*['"]{2}/.test(_rendererSrc),
       'DATA.cloud.supabaseKey must never be assigned a non-empty literal');
   });
+
+  // ── Cloud backup readiness UI (CLOUD-FOUNDATION-1F.4A) — static source checks ──
+
+  console.log('\nCloud Backup Readiness UI (CLOUD-FOUNDATION-1F.4A) — static source checks:');
+
+  test('backup readiness: BACKUP_UI state object exists in renderer.html', function() {
+    assert(/var BACKUP_UI = \{/.test(_rendererSrc), 'BACKUP_UI state object must exist');
+  });
+
+  test('backup readiness: wsRefreshBackupReadiness only calls read-only backup bridge methods', function() {
+    var m = _rendererSrc.match(/async function wsRefreshBackupReadiness\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(m, 'wsRefreshBackupReadiness function must exist');
+    var body = m[1];
+    assert(/bridge\.getCloudBackupReadiness\(/.test(body),   'must call getCloudBackupReadiness');
+    assert(/bridge\.buildCloudBackupPreflight\(/.test(body), 'must call buildCloudBackupPreflight');
+    // No write/upload/restore bridge methods may be referenced anywhere.
+    assert(!/bridge\.(upload|restore|apply|createBackup|pushSnapshot)/i.test(body),
+      'wsRefreshBackupReadiness must never call a write/upload/restore method');
+  });
+
+  test('backup readiness: no fetch()/Supabase reference inside wsRefreshBackupReadiness', function() {
+    var m = _rendererSrc.match(/async function wsRefreshBackupReadiness\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(m, 'wsRefreshBackupReadiness must exist');
+    assert(!/fetch\(/.test(m[1]),   'must not call fetch() directly');
+    assert(!/supabase/i.test(m[1]), 'must not reference Supabase directly');
+  });
+
+  test('backup readiness: no upload backup button is wired yet (preflight phase only)', function() {
+    assert(!/onclick="wsUploadBackup\(/.test(_rendererSrc),  'no wsUploadBackup handler must be wired');
+    assert(!/onclick="wsCloudBackup\(/.test(_rendererSrc),   'no wsCloudBackup handler must be wired');
+    // A read-only refresh button is allowed.
+    assert(/onclick="wsRefreshBackupReadiness\(\)"/.test(_rendererSrc), 'refresh button must be wired');
+  });
+
+  test('backup readiness: dynamic values are set via textContent, not innerHTML interpolation', function() {
+    var m = _rendererSrc.match(/\} else if \(view === 'list'\) \{([\s\S]*?)\n  \} else \{/);
+    assert(m, 'view === list HTML-building branch must exist');
+    var body = m[1];
+    assert(!/\+\s*BACKUP_UI\.byteSize/.test(body),   'byteSize must not be concatenated into innerHTML');
+    assert(!/\+\s*BACKUP_UI\.role/.test(body),       'role must not be concatenated into innerHTML');
+    assert(!/\+\s*BACKUP_UI\.lastLocalBackupAt/.test(body), 'lastLocalBackupAt must not be concatenated into innerHTML');
+    assert(/getElementById\('ws-backup-summary'\)[\s\S]{0,80}\.textContent\s*=/.test(_rendererSrc),
+      'ws-backup-summary must be set via textContent');
+    assert(/getElementById\('ws-backup-size'\)[\s\S]{0,200}\.textContent\s*=/.test(_rendererSrc),
+      'ws-backup-size must be set via textContent');
+  });
+
+  test('backup readiness: renderer never references device id, storage path, or raw checksum', function() {
+    assert(!/BACKUP_UI\.(deviceId|device_id|storagePath|storage_path|checksum)/.test(_rendererSrc),
+      'BACKUP_UI must not carry device id / storage path / raw checksum');
+  });
+
+  test('backup readiness: no raw ipcRenderer usage anywhere in renderer.html', function() {
+    assert(!/ipcRenderer/.test(_rendererSrc), 'renderer.html must never reference ipcRenderer directly');
+  });
 }
 
 async function registerAsync(testAsync, assert, assertEqual) {
