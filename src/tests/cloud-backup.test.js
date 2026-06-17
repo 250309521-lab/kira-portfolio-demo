@@ -4,7 +4,8 @@
 if (!process.env.SUPABASE_URL)             process.env.SUPABASE_URL             = 'http://localhost:54321';
 if (!process.env.SUPABASE_PUBLISHABLE_KEY) process.env.SUPABASE_PUBLISHABLE_KEY = 'test-anon-key';
 
-const cb = require('../cloud/cloud-backup');
+const cb     = require('../cloud/cloud-backup');
+const config = require('../cloud/cloud-config');
 
 // ── Mock helpers ──────────────────────────────────────────────────────────────
 
@@ -415,6 +416,173 @@ async function registerAsync(testAsync, assert, assertEqual) {
       assert(!seenUrls.some(function(u) { return u.includes(name); }),
         'must never call: ' + name);
     });
+  });
+
+  // ── listCloudBackups (CLOUD-FOUNDATION-1F.4C) ─────────────────────────────
+
+  await testAsync('cloud-backup: listCloudBackups — success returns stripped backup rows', async function() {
+    cb._setAuth(makeMockAuth(true));
+    cb._setFetch(function() {
+      return Promise.resolve({
+        ok: true, status: 200,
+        json: function() {
+          return Promise.resolve([
+            { id: 'b-1', backup_trigger: 'manual', byte_size: 490102,
+              app_version: '6.0.0', format_version: 1, created_at: '2026-06-17T22:53:24Z',
+              storage_path: 'workspaces/ws-1/secret.ktpbackup',
+              checksum: 'a'.repeat(64), device_id: 'dev-1' },
+          ]);
+        },
+      });
+    });
+    var r = await cb.listCloudBackups(WS_ID);
+    cb._resetForTests();
+    assert(r.ok, 'must return ok');
+    assertEqual(r.backups.length, 1, 'must have one backup');
+    var b = r.backups[0];
+    assertEqual(b.backupId,      'b-1');
+    assertEqual(b.trigger,       'manual');
+    assertEqual(b.byteSize,      490102);
+    assertEqual(b.appVersion,    '6.0.0');
+    assertEqual(b.formatVersion, 1);
+    assertEqual(b.createdAt,     '2026-06-17T22:53:24Z');
+    assert(!('storage_path' in b), 'storage_path must be stripped');
+    assert(!('checksum'     in b), 'checksum must be stripped');
+    assert(!('device_id'    in b), 'device_id must be stripped');
+    assert(!('storagePath'  in b), 'storagePath must be stripped');
+  });
+
+  await testAsync('cloud-backup: listCloudBackups — not_configured when config absent', async function() {
+    config._setConfigForTests('', '');
+    try {
+      var r = await cb.listCloudBackups(WS_ID);
+      assertEqual(r.error, 'not_configured');
+    } finally { config._resetConfigForTests(); cb._resetForTests(); }
+  });
+
+  await testAsync('cloud-backup: listCloudBackups — not_authenticated when no token', async function() {
+    cb._setAuth(makeMockAuth(false));
+    var r = await cb.listCloudBackups(WS_ID);
+    cb._resetForTests();
+    assertEqual(r.error, 'not_authenticated');
+  });
+
+  await testAsync('cloud-backup: listCloudBackups — network_error on fetch throw', async function() {
+    cb._setAuth(makeMockAuth(true));
+    cb._setFetch(function() { return Promise.reject(new Error('net')); });
+    var r = await cb.listCloudBackups(WS_ID);
+    cb._resetForTests();
+    assertEqual(r.error, 'network_error');
+  });
+
+  await testAsync('cloud-backup: listCloudBackups — returns empty array when no backups', async function() {
+    cb._setAuth(makeMockAuth(true));
+    cb._setFetch(function() {
+      return Promise.resolve({ ok: true, json: function() { return Promise.resolve([]); } });
+    });
+    var r = await cb.listCloudBackups(WS_ID);
+    cb._resetForTests();
+    assert(r.ok, 'must return ok');
+    assertEqual(r.backups.length, 0, 'must return empty array');
+  });
+
+  await testAsync('cloud-backup: listCloudBackups — sends Accept-Profile: ktp header', async function() {
+    var capturedHeaders = null;
+    cb._setAuth(makeMockAuth(true));
+    cb._setFetch(function(_url, opts) {
+      capturedHeaders = opts ? opts.headers : null;
+      return Promise.resolve({ ok: true, json: function() { return Promise.resolve([]); } });
+    });
+    await cb.listCloudBackups(WS_ID);
+    cb._resetForTests();
+    assert(capturedHeaders !== null, 'headers must be captured');
+    assertEqual(capturedHeaders['Accept-Profile'], 'ktp', 'must send Accept-Profile: ktp');
+  });
+
+  // ── getBackupDownloadPreflight (CLOUD-FOUNDATION-1F.4C) ──────────────────
+
+  // Helper: makes a mock fetch that uses text() (matching the defensive res.text() path).
+  function makePfFetch(payload, httpOk) {
+    var body = JSON.stringify(payload);
+    return function() {
+      return Promise.resolve({
+        ok: httpOk !== false,
+        status: httpOk !== false ? 200 : 400,
+        text: function() { return Promise.resolve(body); },
+      });
+    };
+  }
+
+  await testAsync('cloud-backup: getBackupDownloadPreflight — success strips storage_path and checksum', async function() {
+    cb._setAuth(makeMockAuth(true));
+    cb._setFetch(makePfFetch({ ok: true, bucket: 'ktp-backups',
+      storage_path: 'workspaces/ws-1/secret.ktpbackup',
+      checksum: 'a'.repeat(64), byte_size: 490102 }));
+    var r = await cb.getBackupDownloadPreflight(WS_ID, 'b-uuid-1');
+    cb._resetForTests();
+    assert(r.ok, 'must return ok');
+    assertEqual(r.backupId, 'b-uuid-1');
+    assertEqual(r.byteSize, 490102);
+    assert(!('storage_path' in r), 'storage_path must never be returned');
+    assert(!('storagePath'  in r), 'storagePath must never be returned');
+    assert(!('checksum'     in r), 'checksum must never be returned');
+    assert(!('bucket'       in r), 'bucket must not be returned');
+  });
+
+  await testAsync('cloud-backup: getBackupDownloadPreflight — backup_not_found maps correctly', async function() {
+    cb._setAuth(makeMockAuth(true));
+    cb._setFetch(makePfFetch({ ok: false, error: 'backup_not_found' }, false));
+    var r = await cb.getBackupDownloadPreflight(WS_ID, 'b-missing');
+    cb._resetForTests();
+    assertEqual(r.error, 'backup_not_found');
+  });
+
+  await testAsync('cloud-backup: getBackupDownloadPreflight — not_authenticated when no token', async function() {
+    cb._setAuth(makeMockAuth(false));
+    var r = await cb.getBackupDownloadPreflight(WS_ID, 'b-uuid-1');
+    cb._resetForTests();
+    assertEqual(r.error, 'not_authenticated');
+  });
+
+  await testAsync('cloud-backup: getBackupDownloadPreflight — never exposes dangerous fields', async function() {
+    cb._setAuth(makeMockAuth(true));
+    cb._setFetch(makePfFetch({ ok: true, bucket: 'ktp-backups',
+      storage_path: 'workspaces/x/f.ktpbackup',
+      checksum: 'a'.repeat(64), byte_size: 100 }));
+    var r = await cb.getBackupDownloadPreflight(WS_ID, 'b-uuid-1');
+    cb._resetForTests();
+    ['storage_path','storagePath','checksum','device_id','deviceId',
+     'access_token','refresh_token','service_role','archiveStr'].forEach(function(k) {
+      assert(!(k in r), 'preflight must not expose: ' + k);
+    });
+  });
+
+  await testAsync('cloud-backup: getBackupDownloadPreflight — empty response body maps to download_preflight_failed', async function() {
+    cb._setAuth(makeMockAuth(true));
+    cb._setFetch(function() {
+      return Promise.resolve({
+        ok: true, status: 204,
+        text: function() { return Promise.resolve(''); },
+      });
+    });
+    var r = await cb.getBackupDownloadPreflight(WS_ID, 'b-uuid-1');
+    cb._resetForTests();
+    assert(!r.ok, 'must return ok:false for empty body');
+    assertEqual(r.error, 'download_preflight_failed', 'empty body → download_preflight_failed');
+  });
+
+  await testAsync('cloud-backup: getBackupDownloadPreflight — malformed JSON maps to download_preflight_failed', async function() {
+    cb._setAuth(makeMockAuth(true));
+    cb._setFetch(function() {
+      return Promise.resolve({
+        ok: true, status: 200,
+        text: function() { return Promise.resolve('{not valid json'); },
+      });
+    });
+    var r = await cb.getBackupDownloadPreflight(WS_ID, 'b-uuid-1');
+    cb._resetForTests();
+    assert(!r.ok, 'must return ok:false for malformed JSON');
+    assertEqual(r.error, 'download_preflight_failed', 'malformed JSON → download_preflight_failed');
   });
 }
 

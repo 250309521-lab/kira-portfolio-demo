@@ -167,13 +167,16 @@ function register(test, assert, assertEqual) {
     });
   });
 
-  test('preload: cloudBackup exposes exactly the three expected methods and nothing else (CLOUD-FOUNDATION-1F.4B)', function() {
+  test('preload: cloudBackup exposes exactly the five expected methods and nothing else (CLOUD-FOUNDATION-1F.4C)', function() {
     var mock = makeElectronMock();
     loadPreload(mock);
     var keys = Object.keys(mock._worlds.cloudBackup).sort();
-    var expected = ['buildCloudBackupPreflight', 'createManualBackup', 'getCloudBackupReadiness'].sort();
+    var expected = [
+      'buildCloudBackupPreflight', 'createManualBackup', 'getCloudBackupReadiness',
+      'listBackups', 'createBackupDownloadPreflight',
+    ].sort();
     assertEqual(keys.join(','), expected.join(','),
-      'cloudBackup must expose exactly the three readiness/preflight/upload methods');
+      'cloudBackup must expose exactly the five readiness/preflight/upload/list methods');
   });
 
   test('preload: cloudBackup.createManualBackup is a function (CLOUD-FOUNDATION-1F.4B)', function() {
@@ -181,6 +184,20 @@ function register(test, assert, assertEqual) {
     loadPreload(mock);
     assert(typeof mock._worlds.cloudBackup.createManualBackup === 'function',
       'createManualBackup must be a function');
+  });
+
+  test('preload: cloudBackup.listBackups is a function (CLOUD-FOUNDATION-1F.4C)', function() {
+    var mock = makeElectronMock();
+    loadPreload(mock);
+    assert(typeof mock._worlds.cloudBackup.listBackups === 'function',
+      'listBackups must be a function');
+  });
+
+  test('preload: cloudBackup.createBackupDownloadPreflight is a function (CLOUD-FOUNDATION-1F.4C)', function() {
+    var mock = makeElectronMock();
+    loadPreload(mock);
+    assert(typeof mock._worlds.cloudBackup.createBackupDownloadPreflight === 'function',
+      'createBackupDownloadPreflight must be a function');
   });
 
   test('preload: cloudBackup exposes no forbidden restore/sync methods', function() {

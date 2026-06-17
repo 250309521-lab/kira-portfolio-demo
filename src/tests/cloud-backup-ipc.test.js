@@ -42,6 +42,14 @@ function makeMockBackup(overrides) {
         metadata: { p_workspace_id: input.workspaceId, p_checksum: input.checksum },
       };
     },
+    listCloudBackups: function(workspaceId) {
+      _track('listCloudBackups', [workspaceId]);
+      return Promise.resolve({ ok: true, backups: [] });
+    },
+    getBackupDownloadPreflight: function(workspaceId, backupId) {
+      _track('getBackupDownloadPreflight', [workspaceId, backupId]);
+      return Promise.resolve({ ok: true, backupId: backupId, byteSize: 1024 });
+    },
   };
   var b = Object.assign({}, base, overrides || {});
   b._calls = _calls;
@@ -78,12 +86,14 @@ function register(test, assert, assertEqual) {
 
   console.log('\nCloud Backup IPC — Channel Registration (CLOUD-FOUNDATION-1F.4A):');
 
-  test('cloud-backup-ipc: register creates all three channels (CLOUD-FOUNDATION-1F.4B)', function() {
+  test('cloud-backup-ipc: register creates all five channels (CLOUD-FOUNDATION-1F.4C)', function() {
     var ipc = makeMockIpcMain();
     ipc_module.register(ipc, makeGuard(true), makeLog(), makeDeps(makeMockBackup()));
-    assert(ipc._hasChannel('cloud:getCloudBackupReadiness'),   'readiness channel must exist');
-    assert(ipc._hasChannel('cloud:buildCloudBackupPreflight'), 'preflight channel must exist');
-    assert(ipc._hasChannel('cloud:createManualBackup'),        'manual backup channel must exist');
+    assert(ipc._hasChannel('cloud:getCloudBackupReadiness'),          'readiness channel must exist');
+    assert(ipc._hasChannel('cloud:buildCloudBackupPreflight'),        'preflight channel must exist');
+    assert(ipc._hasChannel('cloud:createManualBackup'),               'manual backup channel must exist');
+    assert(ipc._hasChannel('cloud:listBackups'),                      'listBackups channel must exist');
+    assert(ipc._hasChannel('cloud:createBackupDownloadPreflight'),    'downloadPreflight channel must exist');
   });
 
   test('cloud-backup-ipc: _pickManualBackupResult whitelists safe fields only', function() {
@@ -368,6 +378,97 @@ async function registerAsync(testAsync, assert, assertEqual) {
     ipc_module.register(ipc, makeGuard(true), makeLog(), makeDeps(backup));
     var r = await ipc._invoke('cloud:createManualBackup', {}, { workspaceId: WS_ID });
     assert(r.ok, 'succeeded without any forbidden method being called');
+  });
+
+  // ── cloud:listBackups (CLOUD-FOUNDATION-1F.4C) ───────────────────────────
+
+  await testAsync('cloud-backup-ipc: listBackups — success whitelists safe fields only', async function() {
+    var ipc = makeMockIpcMain();
+    var backup = makeMockBackup();
+    backup.listCloudBackups = async function() {
+      return { ok: true, backups: [
+        { backupId: 'b-1', trigger: 'manual', byteSize: 490102, appVersion: '6.0.0',
+          formatVersion: 1, createdAt: '2026-06-17T22:53:24Z',
+          storage_path: 'MUST_BE_STRIPPED', checksum: 'MUST_BE_STRIPPED', device_id: 'MUST_BE_STRIPPED' },
+      ]};
+    };
+    ipc_module.register(ipc, makeGuard(true), makeLog(), makeDeps(backup));
+    var r = await ipc._invoke('cloud:listBackups', {}, { workspaceId: WS_ID });
+    assert(r.ok, 'must return ok');
+    assertEqual(r.backups.length, 1);
+    var b = r.backups[0];
+    assertEqual(b.backupId, 'b-1');
+    assertEqual(b.byteSize, 490102);
+    assert(!('storage_path' in b), 'storage_path must be stripped by IPC whitelist');
+    assert(!('checksum'     in b), 'checksum must be stripped by IPC whitelist');
+    assert(!('device_id'    in b), 'device_id must be stripped by IPC whitelist');
+  });
+
+  await testAsync('cloud-backup-ipc: listBackups — license guard blocks request', async function() {
+    var ipc = makeMockIpcMain();
+    ipc_module.register(ipc, makeGuard(false), makeLog(), makeDeps(makeMockBackup()));
+    var r = await ipc._invoke('cloud:listBackups', {}, { workspaceId: WS_ID });
+    assert(!r.ok); assertEqual(r.error, 'license_required');
+  });
+
+  await testAsync('cloud-backup-ipc: listBackups — missing workspaceId returns invalid_input', async function() {
+    var ipc = makeMockIpcMain();
+    ipc_module.register(ipc, makeGuard(true), makeLog(), makeDeps(makeMockBackup()));
+    var r = await ipc._invoke('cloud:listBackups', {}, {});
+    assert(!r.ok); assertEqual(r.error, 'invalid_input');
+  });
+
+  await testAsync('cloud-backup-ipc: _pickBackupList — whitelists and strips nested rows', async function() {
+    var result = { ok: true, backups: [
+      { backupId: 'b-1', trigger: 'manual', byteSize: 100, appVersion: '6.0.0',
+        formatVersion: 1, createdAt: '2026-01-01T00:00:00Z',
+        storage_path: 'LEAK', checksum: 'LEAK', device_id: 'LEAK',
+        access_token: 'LEAK', service_role: 'LEAK' },
+    ]};
+    var r = ipc_module._pickBackupList(result);
+    var b = r.backups[0];
+    assert(!('storage_path'  in b), 'storage_path stripped');
+    assert(!('checksum'      in b), 'checksum stripped');
+    assert(!('device_id'     in b), 'device_id stripped');
+    assert(!('access_token'  in b), 'access_token stripped');
+    assert(!('service_role'  in b), 'service_role stripped');
+    assertEqual(b.backupId, 'b-1');
+    assertEqual(b.byteSize, 100);
+  });
+
+  // ── cloud:createBackupDownloadPreflight (CLOUD-FOUNDATION-1F.4C) ─────────
+
+  await testAsync('cloud-backup-ipc: createBackupDownloadPreflight — success strips storage_path/checksum', async function() {
+    var ipc = makeMockIpcMain();
+    var backup = makeMockBackup();
+    backup.getBackupDownloadPreflight = async function() {
+      return { ok: true, backupId: 'b-uuid-1', byteSize: 490102,
+        storage_path: 'MUST_BE_STRIPPED', checksum: 'MUST_BE_STRIPPED' };
+    };
+    ipc_module.register(ipc, makeGuard(true), makeLog(), makeDeps(backup));
+    var r = await ipc._invoke('cloud:createBackupDownloadPreflight', {},
+      { workspaceId: WS_ID, backupId: 'b-uuid-1' });
+    assert(r.ok);
+    assertEqual(r.backupId, 'b-uuid-1');
+    assertEqual(r.byteSize, 490102);
+    assert(!('storage_path' in r), 'storage_path stripped');
+    assert(!('checksum'     in r), 'checksum stripped');
+  });
+
+  await testAsync('cloud-backup-ipc: createBackupDownloadPreflight — missing backupId returns invalid_input', async function() {
+    var ipc = makeMockIpcMain();
+    ipc_module.register(ipc, makeGuard(true), makeLog(), makeDeps(makeMockBackup()));
+    var r = await ipc._invoke('cloud:createBackupDownloadPreflight', {},
+      { workspaceId: WS_ID });
+    assert(!r.ok); assertEqual(r.error, 'invalid_input');
+  });
+
+  await testAsync('cloud-backup-ipc: createBackupDownloadPreflight — license guard blocks', async function() {
+    var ipc = makeMockIpcMain();
+    ipc_module.register(ipc, makeGuard(false), makeLog(), makeDeps(makeMockBackup()));
+    var r = await ipc._invoke('cloud:createBackupDownloadPreflight', {},
+      { workspaceId: WS_ID, backupId: 'b-uuid-1' });
+    assert(!r.ok); assertEqual(r.error, 'license_required');
   });
 }
 

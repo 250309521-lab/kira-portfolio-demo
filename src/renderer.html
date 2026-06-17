@@ -4110,6 +4110,15 @@ tbody tr[onclick] { cursor: pointer; }
 .ws-backup-confirm{margin-top:6px;padding:8px 10px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:8px}
 .ws-backup-upload-success{font-size:10.5px;color:var(--green,#22c55e);margin-top:4px}
 .ws-backup-upload-error{font-size:10.5px;color:var(--red,#f43f5e);margin-top:4px}
+.ws-backup-list-section{margin-top:8px;border-top:1px solid var(--bd-1);padding-top:8px}
+.ws-bkpl-list{display:flex;flex-direction:column;gap:4px;margin-top:4px}
+.ws-bkpl-row{display:flex;flex-direction:column;gap:2px;padding:5px 0;border-bottom:1px solid var(--bd-1,rgba(255,255,255,.06))}
+.ws-bkpl-meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:11px}
+.ws-bkpl-date{color:var(--t2);min-width:120px}
+.ws-bkpl-size{color:var(--t3);font-variant-numeric:tabular-nums}
+.ws-bkpl-trigger{color:var(--i4);font-size:10px;text-transform:uppercase;letter-spacing:.04em}
+.ws-bkpl-pf-ok{font-size:10px;color:var(--green,#22c55e)}
+.ws-bkpl-pf-err{font-size:10px;color:var(--red,#f43f5e)}
 .ws-empty-state{display:flex;flex-direction:column;align-items:center;text-align:center;padding:18px 16px;background:rgba(99,102,241,.05);border:1px dashed rgba(99,102,241,.2);border-radius:10px;margin-bottom:10px;gap:6px}
 .ws-empty-icon{font-size:24px;line-height:1;opacity:.65}
 .ws-empty-text{font-size:12.5px;font-weight:600;color:var(--i2)}
@@ -5101,6 +5110,13 @@ var STRINGS={
     wsBackupUploadFailed:'Yükleme başarısız oldu.',
     wsBackupMetadataFailed:'Meta veri yazma başarısız; yedek yüklemesi temizlendi.',
     wsBackupCleanupFailed:'Meta veri hatası ve nesne temizleme başarısız (yetim yükleme riski).',
+    wsBackupListHdr:'Bulut Yedek Geçmişi',wsBackupListLoading:'Yedekler yükleniyor…',
+    wsBackupListEmpty:'Henüz bulut yedeği yok.',wsBackupListError:'Yedek listesi yüklenemedi.',
+    wsBackupListRefresh:'Listeyi yenile',wsBackupListTrigger_manual:'Manuel',
+    wsBackupPrepDownload:'İndirme hazırlığı',
+    wsBackupPreflightOk:'Yedek doğrulandı — indirme gelecek güncellemede kullanılabilir.',
+    wsBackupPreflightErr:'Yedek doğrulaması başarısız.',
+    wsBackupDownloadNote:'İndirme/geri yükleme bu sürümde uygulanmaz.',
     fieldNotFound:'Alan bulunamadı',pasted:'📋 Yapıştırıldı',pasteManual:'Ctrl+V ile yapıştırın',
     // Settings modals
     resetDataTitle:'🗑 Tüm Verileri Sıfırla',restoreTitle:'↩ Yedekten Geri Yükle',
@@ -5636,6 +5652,13 @@ var STRINGS={
     wsBackupUploadFailed:'Upload failed.',
     wsBackupMetadataFailed:'Metadata write failed; uploaded object was cleaned up.',
     wsBackupCleanupFailed:'Metadata write failed and cleanup also failed (orphaned upload risk).',
+    wsBackupListHdr:'Cloud Backup History',wsBackupListLoading:'Loading backups…',
+    wsBackupListEmpty:'No cloud backups yet.',wsBackupListError:'Failed to load backup list.',
+    wsBackupListRefresh:'Refresh list',wsBackupListTrigger_manual:'Manual',
+    wsBackupPrepDownload:'Prepare download',
+    wsBackupPreflightOk:'Backup verified — download will be available in a future update.',
+    wsBackupPreflightErr:'Backup verification failed.',
+    wsBackupDownloadNote:'Download/restore is not applied in this version.',
     fieldNotFound:'Field not found',pasted:'📋 Pasted',pasteManual:'Use Ctrl+V to paste',
     // Settings modals
     resetDataTitle:'🗑 Reset All Data',restoreTitle:'↩ Restore from Backup',
@@ -8151,6 +8174,20 @@ var BACKUP_UI = {
   lastUploadBytes:   null,
 };
 
+// ── Cloud backup list + download preflight (CLOUD-FOUNDATION-1F.4C, read-only) ──
+// Never restores. Never writes. Never applies sync.
+var BACKUP_LIST_UI = {
+  state:          'idle',  // 'idle' | 'loading' | 'ready' | 'error'
+  backups:        [],
+  error:          null,
+  checkedForId:   null,
+  // Per-row download preflight (explicit user action only)
+  preflightId:    null,    // backupId currently being preflighted
+  preflightState: 'idle',  // 'idle' | 'loading' | 'ready' | 'error'
+  preflightResult: null,   // {backupId, byteSize} | null
+  preflightError: null,
+};
+
 function _wsRoleLabel(role) {
   if (role === 'owner')  return t('wsRole_owner');
   if (role === 'admin')  return t('wsRole_admin');
@@ -8549,6 +8586,64 @@ async function wsConfirmManualBackup() {
   BACKUP_UI.lastUploadBytes = typeof _res.byteSize === 'number' ? _res.byteSize : null;
   toast(t('wsBackupUploadSuccess'), 'green');
   renderWorkspaceCard();
+  wsRefreshBackupList(); // auto-refresh list after successful upload
+}
+
+// ── Cloud backup list (CLOUD-FOUNDATION-1F.4C, read-only) ────────────────────
+// NEVER restores. NEVER applies. NEVER writes. Reads only.
+
+async function wsRefreshBackupList() {
+  var bridge = _backupBridge();
+  var workspaceId = WS_UI.activeId;
+  if (!bridge || !workspaceId) return;
+  BACKUP_LIST_UI.state = 'loading'; BACKUP_LIST_UI.error = null;
+  BACKUP_LIST_UI.checkedForId = workspaceId;
+  renderWorkspaceCard();
+  var _r;
+  try { _r = await bridge.listBackups({ workspaceId: workspaceId }); } catch (_) {
+    BACKUP_LIST_UI.state = 'error'; BACKUP_LIST_UI.error = 'unknown_error';
+    renderWorkspaceCard(); return;
+  }
+  if (!_r || !_r.ok) {
+    BACKUP_LIST_UI.state = 'error';
+    BACKUP_LIST_UI.error = _r ? (_r.error || 'unknown_error') : 'unknown_error';
+    renderWorkspaceCard(); return;
+  }
+  BACKUP_LIST_UI.backups = Array.isArray(_r.backups) ? _r.backups : [];
+  BACKUP_LIST_UI.state = 'ready';
+  renderWorkspaceCard();
+}
+
+// Preflight for a specific backup (read-only access check only, no download/restore).
+// Accepts a numeric LIST INDEX — never a raw string in onclick to avoid HTML escaping issues.
+async function wsStartDownloadPreflight(idx) {
+  var backup = BACKUP_LIST_UI.backups[idx];
+  if (!backup || typeof backup.backupId !== 'string' || !backup.backupId) return;
+  var backupId = backup.backupId;
+  var bridge = _backupBridge();
+  var workspaceId = WS_UI.activeId;
+  if (!bridge || !workspaceId) return;
+  if (BACKUP_LIST_UI.preflightState === 'loading') return; // re-entry guard
+  BACKUP_LIST_UI.preflightId     = backupId;
+  BACKUP_LIST_UI.preflightState  = 'loading';
+  BACKUP_LIST_UI.preflightResult = null;
+  BACKUP_LIST_UI.preflightError  = null;
+  renderWorkspaceCard();
+  var _r;
+  try {
+    _r = await bridge.createBackupDownloadPreflight({ workspaceId: workspaceId, backupId: backupId });
+  } catch (_) {
+    BACKUP_LIST_UI.preflightState = 'error'; BACKUP_LIST_UI.preflightError = 'download_preflight_failed';
+    renderWorkspaceCard(); return;
+  }
+  if (!_r || !_r.ok) {
+    BACKUP_LIST_UI.preflightState = 'error';
+    BACKUP_LIST_UI.preflightError = _r ? (_r.error || 'download_preflight_failed') : 'download_preflight_failed';
+    renderWorkspaceCard(); return;
+  }
+  BACKUP_LIST_UI.preflightResult = { backupId: _r.backupId, byteSize: _r.byteSize };
+  BACKUP_LIST_UI.preflightState  = 'ready';
+  renderWorkspaceCard();
 }
 
 function renderWorkspaceCard() {
@@ -8637,6 +8732,51 @@ function renderWorkspaceCard() {
                     : '<button class="btn btn-primary btn-xs" id="ws-backup-upload-btn" onclick="wsShowBackupConfirm()"></button>'))
             : '<div id="ws-backup-soon" class="ws-backup-soon"></div>') +
         '</div>' +
+      '</div>' +
+      // ── Cloud backup list (1F.4C, read-only) ─────────────────────────────
+      '<div class="ws-sync-status-section ws-backup-list-section">' +
+        '<div class="ws-sync-status-hdr">' +
+          '<span id="ws-bkpl-hdr" class="ws-sync-hdr-lbl"></span>' +
+          '<button class="btn btn-ghost btn-xs" id="ws-bkpl-refresh-btn"' +
+            (BACKUP_LIST_UI.state === 'loading' ? ' disabled' : '') +
+            ' onclick="wsRefreshBackupList()"></button>' +
+        '</div>' +
+        '<div id="ws-bkpl-note" class="ws-sync-detail" style="margin-bottom:4px"></div>' +
+        (BACKUP_LIST_UI.state === 'loading'
+          ? '<div id="ws-bkpl-loading" class="ws-sync-summary"></div>'
+          : '') +
+        (BACKUP_LIST_UI.state === 'error'
+          ? '<div id="ws-bkpl-err" class="ws-sync-summary"></div>'
+          : '') +
+        (BACKUP_LIST_UI.state === 'ready' && BACKUP_LIST_UI.backups.length === 0
+          ? '<div id="ws-bkpl-empty" class="ws-sync-summary"></div>'
+          : '') +
+        (BACKUP_LIST_UI.state === 'ready' && BACKUP_LIST_UI.backups.length > 0
+          ? '<div class="ws-bkpl-list">' +
+            BACKUP_LIST_UI.backups.map(function(b, _bi) {
+              var _isPf = BACKUP_LIST_UI.preflightId === b.backupId;
+              return '<div class="ws-bkpl-row">' +
+                '<div class="ws-bkpl-meta">' +
+                  '<span class="ws-bkpl-date" id="ws-bkpl-date-' + _bi + '"></span>' +
+                  '<span class="ws-bkpl-size" id="ws-bkpl-size-' + _bi + '"></span>' +
+                  '<span class="ws-bkpl-trigger" id="ws-bkpl-trig-' + _bi + '"></span>' +
+                '</div>' +
+                (_isPf && BACKUP_LIST_UI.preflightState === 'loading'
+                  ? '<span class="ws-sync-summary" id="ws-bkpl-pf-' + _bi + '"></span>'
+                  : '') +
+                (_isPf && BACKUP_LIST_UI.preflightState === 'ready'
+                  ? '<div class="ws-bkpl-pf-ok ws-sync-detail" id="ws-bkpl-pf-' + _bi + '"></div>'
+                  : '') +
+                (_isPf && BACKUP_LIST_UI.preflightState === 'error'
+                  ? '<div class="ws-bkpl-pf-err ws-sync-detail" id="ws-bkpl-pf-' + _bi + '"></div>'
+                  : '') +
+                '<button class="btn btn-ghost btn-xs" id="ws-bkpl-prep-' + _bi + '"' +
+                  (BACKUP_LIST_UI.preflightState === 'loading' ? ' disabled' : '') +
+                  ' onclick="wsStartDownloadPreflight(' + _bi + ')"></button>' +
+              '</div>';
+            }).join('') +
+          '</div>'
+          : '') +
       '</div>';
     }
     // Workspace list or empty state
@@ -8791,6 +8931,44 @@ function renderWorkspaceCard() {
 
       if (BACKUP_UI.checkedForId !== WS_UI.activeId && BACKUP_UI.state !== 'loading') {
         wsRefreshBackupReadiness();
+      }
+
+      // ── Backup list text-setting (CLOUD-FOUNDATION-1F.4C) ─────────────────
+      var _bkplhdr = document.getElementById('ws-bkpl-hdr');
+      if (_bkplhdr) _bkplhdr.textContent = t('wsBackupListHdr');
+      var _bkplrfr = document.getElementById('ws-bkpl-refresh-btn');
+      if (_bkplrfr) _bkplrfr.textContent = t('wsBackupListRefresh');
+      var _bkplnote = document.getElementById('ws-bkpl-note');
+      if (_bkplnote) _bkplnote.textContent = t('wsBackupDownloadNote');
+      var _bkpll = document.getElementById('ws-bkpl-loading');
+      if (_bkpll) _bkpll.textContent = t('wsBackupListLoading');
+      var _bkple = document.getElementById('ws-bkpl-err');
+      if (_bkple) _bkple.textContent = t('wsBackupListError');
+      var _bkplem = document.getElementById('ws-bkpl-empty');
+      if (_bkplem) _bkplem.textContent = t('wsBackupListEmpty');
+      if (BACKUP_LIST_UI.state === 'ready') {
+        for (var _li = 0; _li < BACKUP_LIST_UI.backups.length; _li++) {
+          var _lb = BACKUP_LIST_UI.backups[_li];
+          var _ldate = document.getElementById('ws-bkpl-date-' + _li);
+          if (_ldate) _ldate.textContent = _lb.createdAt ? new Date(_lb.createdAt).toLocaleString() : '—';
+          var _lsize = document.getElementById('ws-bkpl-size-' + _li);
+          if (_lsize) _lsize.textContent = typeof _lb.byteSize === 'number' ? _fmtBytes(_lb.byteSize) : '—';
+          var _ltrig = document.getElementById('ws-bkpl-trig-' + _li);
+          if (_ltrig) _ltrig.textContent = _lb.trigger === 'manual' ? t('wsBackupListTrigger_manual') : (_lb.trigger || '');
+          var _lprep = document.getElementById('ws-bkpl-prep-' + _li);
+          if (_lprep) _lprep.textContent = t('wsBackupPrepDownload');
+          var _lpf = document.getElementById('ws-bkpl-pf-' + _li);
+          if (_lpf) {
+            if (BACKUP_LIST_UI.preflightId === _lb.backupId) {
+              if (BACKUP_LIST_UI.preflightState === 'loading')  _lpf.textContent = t('wsBackupListLoading');
+              else if (BACKUP_LIST_UI.preflightState === 'ready')  _lpf.textContent = t('wsBackupPreflightOk');
+              else if (BACKUP_LIST_UI.preflightState === 'error')  _lpf.textContent = t('wsBackupPreflightErr');
+            }
+          }
+        }
+      }
+      if (BACKUP_LIST_UI.checkedForId !== WS_UI.activeId && BACKUP_LIST_UI.state === 'idle') {
+        wsRefreshBackupList();
       }
     }
     if (_wsCnt === 0 && !WS_UI.activeId) {

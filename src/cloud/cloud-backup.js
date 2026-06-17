@@ -172,13 +172,17 @@ function _mapDerivedError(code) {
 }
 
 // ── Auth header helpers (mirrors cloud-workspace.js _buildHeaders) ──────────────
+// isWrite=true  → Content-Profile: ktp  (PostgREST schema for write/RPC)
+// isWrite=false → Accept-Profile: ktp   (PostgREST schema for read)
+// Storage requests (upload/delete) use isWrite=false but the extra Accept-Profile
+// header is irrelevant to the Storage API and safely ignored.
 
 async function _buildAuthHeaders(isWrite) {
   var token = await _auth().getAccessToken();
   if (!token) return null;
   var h = Object.assign({}, getBaseHeaders());
   h['Authorization'] = 'Bearer ' + token;
-  if (isWrite) h['Content-Profile'] = 'ktp';
+  h[isWrite ? 'Content-Profile' : 'Accept-Profile'] = 'ktp';
   return h;
 }
 
@@ -315,12 +319,120 @@ async function createManualCloudBackup(input) {
   };
 }
 
+// ── listCloudBackups (1F.4C, read-only) ──────────────────────────────────────
+// Returns a safe, stripped list of recent cloud backups for the workspace.
+// storage_path, checksum, and device_id are intentionally excluded.
+
+const LIST_BACKUP_LIMIT_MAX = 50;
+const LIST_BACKUP_FIELDS = 'id,backup_trigger,byte_size,app_version,format_version,created_at';
+
+async function listCloudBackups(workspaceId, options) {
+  if (!isConfigured()) return { ok: false, error: 'not_configured' };
+  if (!_validateWorkspaceId(workspaceId)) return { ok: false, error: 'invalid_input' };
+
+  var limit = 10;
+  if (options && typeof options.limit === 'number' && options.limit > 0) {
+    limit = Math.min(Math.floor(options.limit), LIST_BACKUP_LIMIT_MAX);
+  }
+
+  var headers = await _buildAuthHeaders(false);
+  if (!headers) return { ok: false, error: 'not_authenticated' };
+
+  var url = getSupabaseUrl()
+    + '/rest/v1/cloud_backups'
+    + '?workspace_id=eq.' + encodeURIComponent(workspaceId.trim())
+    + '&select=' + LIST_BACKUP_FIELDS
+    + '&order=created_at.desc'
+    + '&limit=' + limit;
+
+  var res, body;
+  try {
+    res  = await _doFetch(url, { method: 'GET', headers: headers });
+    body = await res.json();
+  } catch (_) {
+    return { ok: false, error: 'network_error' };
+  }
+  if (!res.ok) return { ok: false, error: 'unknown_error' };
+  if (!Array.isArray(body)) return { ok: false, error: 'unknown_error' };
+
+  return {
+    ok: true,
+    backups: body.map(function(row) {
+      return {
+        backupId:      typeof row.id             === 'string' ? row.id             : null,
+        trigger:       typeof row.backup_trigger  === 'string' ? row.backup_trigger : null,
+        byteSize:      typeof row.byte_size       === 'number' ? row.byte_size      : null,
+        appVersion:    typeof row.app_version     === 'string' ? row.app_version    : null,
+        formatVersion: typeof row.format_version  === 'number' ? row.format_version : null,
+        createdAt:     typeof row.created_at      === 'string' ? row.created_at     : null,
+        // storage_path, checksum, device_id intentionally omitted
+      };
+    }),
+  };
+}
+
+// ── getBackupDownloadPreflight (1F.4C, read-only) ────────────────────────────
+// Validates that the caller has access to a specific backup via the existing
+// create_backup_download_url RPC. Returns only safe metadata.
+// Does NOT return storage_path, checksum, or a signed URL (download is 1F.4D+).
+// Does NOT restore or apply.
+
+async function getBackupDownloadPreflight(workspaceId, backupId) {
+  if (!isConfigured()) return { ok: false, error: 'not_configured' };
+  if (!_validateWorkspaceId(workspaceId)) return { ok: false, error: 'invalid_input' };
+  if (typeof backupId !== 'string' || !backupId.trim()) return { ok: false, error: 'invalid_input' };
+
+  var headers = await _buildAuthHeaders(true);
+  if (!headers) return { ok: false, error: 'not_authenticated' };
+
+  var res, body;
+  try {
+    res = await _doFetch(getSupabaseUrl() + '/rest/v1/rpc/create_backup_download_url', {
+      method:  'POST',
+      headers: headers,
+      body:    JSON.stringify({
+        p_workspace_id: workspaceId.trim(),
+        p_backup_id:    backupId.trim(),
+      }),
+    });
+  } catch (_) {
+    return { ok: false, error: 'network_error' };
+  }
+
+  // Parse body defensively — empty body (204, or failed RPC) must not throw.
+  try {
+    var raw = await res.text();
+    body = raw && raw.trim() ? JSON.parse(raw) : null;
+  } catch (_) {
+    return { ok: false, error: 'download_preflight_failed' };
+  }
+
+  if (!res.ok || !body || body.ok !== true) {
+    var errCode = (body && typeof body.error === 'string') ? body.error : '';
+    if (errCode === 'backup_not_found')  return { ok: false, error: 'backup_not_found' };
+    if (errCode === 'not_member')        return { ok: false, error: 'workspace_not_found' };
+    if (errCode === 'not_authenticated') return { ok: false, error: 'not_authenticated' };
+    if (!body)                           return { ok: false, error: 'download_preflight_failed' };
+    return { ok: false, error: 'unknown_error' };
+  }
+
+  // Strip storage_path and checksum — never returned to renderer.
+  return {
+    ok:       true,
+    backupId: backupId.trim(),
+    byteSize: typeof body.byte_size === 'number' ? body.byte_size : null,
+    // No signed URL in 1F.4C — download not yet implemented.
+  };
+}
+
 // ── Exports ──────────────────────────────────────────────────────────────────
 
 module.exports = {
   getCloudBackupReadiness,
   derivePreflightMetadata,
   createManualCloudBackup,
+  listCloudBackups,
+  getBackupDownloadPreflight,
   MAX_CLOUD_BACKUP_BYTES,
   BACKUP_ROLES,
   VALID_TRIGGERS,

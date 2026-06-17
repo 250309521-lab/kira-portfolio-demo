@@ -71,6 +71,34 @@ function _pickManualBackupResult(result) {
   };
 }
 
+// Whitelist the backup-list response: only safe metadata per backup row.
+// storage_path, checksum, and device_id are never returned.
+function _pickBackupList(result) {
+  if (!result || result.ok !== true) return _sanitize(result);
+  var backups = Array.isArray(result.backups) ? result.backups.map(function(b) {
+    return {
+      backupId:      typeof b.backupId      === 'string' ? b.backupId      : null,
+      trigger:       typeof b.trigger       === 'string' ? b.trigger       : null,
+      byteSize:      typeof b.byteSize      === 'number' ? b.byteSize      : null,
+      appVersion:    typeof b.appVersion    === 'string' ? b.appVersion    : null,
+      formatVersion: typeof b.formatVersion === 'number' ? b.formatVersion : null,
+      createdAt:     typeof b.createdAt     === 'string' ? b.createdAt     : null,
+    };
+  }) : [];
+  return { ok: true, backups: backups };
+}
+
+// Whitelist the download-preflight response: access-validated safe metadata only.
+// storage_path, checksum, and signed URL (not generated in 1F.4C) never appear.
+function _pickDownloadPreflight(result) {
+  if (!result || result.ok !== true) return _sanitize(result);
+  return {
+    ok:       true,
+    backupId: typeof result.backupId === 'string' ? result.backupId : null,
+    byteSize: typeof result.byteSize === 'number' ? result.byteSize : null,
+  };
+}
+
 // register(ipcMain, licenseGuard, log, deps)
 //   deps.cloudBackup              — defaults to require('./cloud-backup')
 //   deps.buildPreflightArchive    — (rendererState, importProfiles) => { byteSize, checksum }
@@ -142,6 +170,44 @@ function register(ipcMain, licenseGuard, log, deps) {
     }
   });
 
+  // ── cloud:listBackups (1F.4C, read-only) ──────────────────────────────────────
+  ipcMain.handle('cloud:listBackups', async function(_event, payload) {
+    try {
+      var guard = await licenseGuard();
+      if (!guard.ok) return { ok: false, error: 'license_required' };
+      if (!_validateWorkspaceIdPayload(payload)) return { ok: false, error: 'invalid_input' };
+      var result = await cloudBackup.listCloudBackups(
+        payload.workspaceId,
+        { limit: typeof payload.limit === 'number' ? payload.limit : 10 }
+      );
+      return _pickBackupList(result);
+    } catch (e) {
+      log('cloud:listBackups error: ' + ((e && e.code) || 'unknown_error'));
+      return { ok: false, error: 'unknown_error' };
+    }
+  });
+
+  // ── cloud:createBackupDownloadPreflight (1F.4C, read-only) ────────────────────
+  // Validates access to a specific backup. Does NOT download bytes, restore, or apply.
+  ipcMain.handle('cloud:createBackupDownloadPreflight', async function(_event, payload) {
+    try {
+      var guard = await licenseGuard();
+      if (!guard.ok) return { ok: false, error: 'license_required' };
+      if (!_validateWorkspaceIdPayload(payload)) return { ok: false, error: 'invalid_input' };
+      if (typeof payload.backupId !== 'string' || !payload.backupId.trim()) {
+        return { ok: false, error: 'invalid_input' };
+      }
+      var result = await cloudBackup.getBackupDownloadPreflight(
+        payload.workspaceId,
+        payload.backupId
+      );
+      return _pickDownloadPreflight(result);
+    } catch (e) {
+      log('cloud:createBackupDownloadPreflight error: ' + ((e && e.code) || 'unknown_error'));
+      return { ok: false, error: 'unknown_error' };
+    }
+  });
+
   // ── cloud:createManualBackup (1F.4B, guarded write — explicit user action only) ──
   ipcMain.handle('cloud:createManualBackup', async function(_event, payload) {
     try {
@@ -187,6 +253,8 @@ module.exports = {
   _sanitize,
   _pickPreflight,
   _pickManualBackupResult,
+  _pickBackupList,
+  _pickDownloadPreflight,
   _validateWorkspaceIdPayload,
   _STRIP_KEYS,
 };

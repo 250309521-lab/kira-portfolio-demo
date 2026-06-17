@@ -877,6 +877,28 @@ function register(test, assert, assertEqual) {
     assert(!/ipcRenderer/.test(_rendererSrc), 'renderer.html must never reference ipcRenderer directly');
   });
 
+  // ── Backup list onclick safety (CLOUD-FOUNDATION-1F.4C-PREFLIGHT-CRASH-FIX) ──
+
+  test('backup list: wsStartDownloadPreflight onclick uses numeric index not JSON.stringify(backupId)', function() {
+    // JSON.stringify of a UUID string produces "uuid" (with double-quotes) which
+    // breaks the onclick="..." HTML attribute and causes SyntaxError on click.
+    // The fix: pass the array index (a safe integer) instead.
+    assert(!/wsStartDownloadPreflight\(JSON\.stringify/.test(_rendererSrc),
+      'onclick must not use JSON.stringify — breaks onclick attribute with double-quoted strings');
+    // Confirm the index pattern is present: wsStartDownloadPreflight(' + _bi + ')
+    assert(/wsStartDownloadPreflight\('\s*\+\s*_bi\s*\+\s*'\)/.test(_rendererSrc),
+      'onclick must use the numeric _bi index pattern');
+  });
+
+  test('backup list: wsStartDownloadPreflight onclick never calls restore/download bytes/apply', function() {
+    assert(!/wsStartDownloadPreflight[\s\S]{0,300}restoreBackup/.test(_rendererSrc),
+      'wsStartDownloadPreflight must not call restoreBackup');
+    assert(!/wsStartDownloadPreflight[\s\S]{0,300}applyBackup/.test(_rendererSrc),
+      'wsStartDownloadPreflight must not call applyBackup');
+    assert(!/wsStartDownloadPreflight[\s\S]{0,300}downloadBytes/.test(_rendererSrc),
+      'wsStartDownloadPreflight must not download bytes');
+  });
+
   // ── Error-state recovery UI (CLOUD-FOUNDATION-1F.4B-REMOTE-GATE-C1) ──────────
 
   test('error state: unknown_error shows ws-create-from-err button', function() {
