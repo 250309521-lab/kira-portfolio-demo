@@ -167,22 +167,29 @@ function register(test, assert, assertEqual) {
     });
   });
 
-  test('preload: cloudBackup exposes exactly the two expected methods and nothing else', function() {
+  test('preload: cloudBackup exposes exactly the three expected methods and nothing else (CLOUD-FOUNDATION-1F.4B)', function() {
     var mock = makeElectronMock();
     loadPreload(mock);
     var keys = Object.keys(mock._worlds.cloudBackup).sort();
-    var expected = ['buildCloudBackupPreflight', 'getCloudBackupReadiness'].sort();
+    var expected = ['buildCloudBackupPreflight', 'createManualBackup', 'getCloudBackupReadiness'].sort();
     assertEqual(keys.join(','), expected.join(','),
-      'cloudBackup must expose exactly the two readiness/preflight methods');
+      'cloudBackup must expose exactly the three readiness/preflight/upload methods');
   });
 
-  test('preload: cloudBackup exposes no write/upload/restore methods', function() {
+  test('preload: cloudBackup.createManualBackup is a function (CLOUD-FOUNDATION-1F.4B)', function() {
+    var mock = makeElectronMock();
+    loadPreload(mock);
+    assert(typeof mock._worlds.cloudBackup.createManualBackup === 'function',
+      'createManualBackup must be a function');
+  });
+
+  test('preload: cloudBackup exposes no forbidden restore/sync methods', function() {
     var mock = makeElectronMock();
     loadPreload(mock);
     var api = mock._worlds.cloudBackup;
     ['uploadBackup', 'createBackup', 'restoreBackup', 'applyBackup',
-     'createCloudBackupMetadata', 'pushSnapshot'].forEach(function(k) {
-      assert(!(k in api), 'cloudBackup must not expose write method: ' + k);
+     'createCloudBackupMetadata', 'pushSnapshot', 'syncApply'].forEach(function(k) {
+      assert(!(k in api), 'cloudBackup must not expose method: ' + k);
     });
   });
 }
@@ -266,6 +273,17 @@ async function registerAsync(testAsync, assert, assertEqual) {
     var entry = mock._invokeLog.find(function(e) { return e.channel === 'cloud:buildCloudBackupPreflight'; });
     assert(entry !== undefined, 'cloud:buildCloudBackupPreflight must be invoked');
     assertEqual(entry.payload.workspaceId, 'ws-uuid-test-001', 'payload.workspaceId must be forwarded');
+  });
+
+  await testAsync('preload: createManualBackup(payload) invokes cloud:createManualBackup with payload forwarded (CLOUD-FOUNDATION-1F.4B)', async function() {
+    var mock = makeElectronMock();
+    loadPreload(mock);
+    var payload = { workspaceId: 'ws-uuid-test-001', rendererState: '{"a":1}' };
+    await mock._worlds.cloudBackup.createManualBackup(payload);
+    var entry = mock._invokeLog.find(function(e) { return e.channel === 'cloud:createManualBackup'; });
+    assert(entry !== undefined, 'cloud:createManualBackup must be invoked');
+    assertEqual(entry.payload.workspaceId, 'ws-uuid-test-001', 'payload.workspaceId must be forwarded');
+    assertEqual(entry.payload.rendererState, '{"a":1}', 'payload.rendererState must be forwarded');
   });
 }
 

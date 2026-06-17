@@ -1,21 +1,24 @@
 'use strict';
 
-// CLOUD-FOUNDATION-1F.4A — Cloud Backup Readiness + Preflight (READ-ONLY).
+// CLOUD-FOUNDATION-1F.4A/1F.4B — Cloud Backup Readiness + Manual Upload.
 //
-// This module performs ONLY read-only / preflight checks. It NEVER:
-//   • uploads a file to storage
-//   • calls create_cloud_backup_metadata
-//   • writes the cloud_backups table
-//   • writes audit_logs
-//   • mutates any table or storage object
+// getCloudBackupReadiness() / derivePreflightMetadata() remain READ-ONLY / pure
+// (1F.4A, frozen behavior — never upload, never write cloud_backups/audit_logs).
 //
-// getCloudBackupReadiness() performs a single read (listWorkspaces, a GET) to
-// resolve the caller's role. derivePreflightMetadata() is a PURE function with
-// no network access at all — it validates a locally-built backup descriptor and
-// derives the metadata shape / storage path that a FUTURE upload phase (1F.4B)
-// would use, without contacting the cloud.
+// createManualCloudBackup() (1F.4B) is the first guarded WRITE path. It only
+// runs on an explicit caller request (the IPC layer is only invoked when the
+// user clicks the manual backup button — there is no timer/startup/focus
+// trigger anywhere in this module). It:
+//   • re-confirms auth + role immediately before upload (fresh preflight)
+//   • uploads the already-built .ktpbackup archive to the ktp-backups bucket
+//   • calls create_cloud_backup_metadata only after a successful upload
+//   • best-effort deletes the uploaded object if the metadata write fails
+// It NEVER restores, never calls create_backup_download_url, never calls
+// snapshot/lock RPCs, and never returns a token/device id/storage path/raw
+// checksum to its caller.
 
-const { isConfigured } = require('./cloud-config');
+const crypto = require('crypto');
+const { isConfigured, getSupabaseUrl, getBaseHeaders } = require('./cloud-config');
 const _defaultAuth      = require('./cloud-auth');
 const _defaultWorkspace = require('./cloud-workspace');
 
@@ -28,17 +31,21 @@ const MAX_CLOUD_BACKUP_BYTES = 100 * 1024 * 1024;
 const BACKUP_ROLES   = ['owner', 'admin', 'editor'];
 const VALID_TRIGGERS = ['manual', 'auto', 'pre_restore', 'migration'];
 const CHECKSUM_RE    = /^[0-9a-f]{64}$/;
+const BACKUP_BUCKET  = 'ktp-backups';
 
 // ── Test seams ───────────────────────────────────────────────────────────────
 let _authImpl      = null;
 let _workspaceImpl = null;
+let _fetchImpl      = null;
 
 function _setAuth(a)      { _authImpl      = a || null; }
 function _setWorkspace(w) { _workspaceImpl = w || null; }
-function _resetForTests() { _authImpl = null; _workspaceImpl = null; }
+function _setFetch(fn)    { _fetchImpl      = fn || null; }
+function _resetForTests() { _authImpl = null; _workspaceImpl = null; _fetchImpl = null; }
 
 function _auth()      { return _authImpl      || _defaultAuth; }
 function _workspace() { return _workspaceImpl || _defaultWorkspace; }
+function _doFetch(url, opts) { return (_fetchImpl || global.fetch)(url, opts); }
 
 // ── Validation helpers ───────────────────────────────────────────────────────
 
@@ -47,13 +54,14 @@ function _validateWorkspaceId(id) {
   return id.trim().length > 0;
 }
 
-// Derives a safe, deterministic-shape storage path WITHOUT including any device
-// id or secret. The real per-device path is built at actual-upload time (1F.4B);
-// here we only prove a valid path can be derived.
-function _safeStoragePath(workspaceId) {
+// Derives a safe storage path WITHOUT including any device id or secret.
+// idSuffix defaults to 'pending' for preflight-only callers (1F.4A, unchanged
+// shape). Real uploads (1F.4B) pass an opaque random suffix — never a device id.
+function _safeStoragePath(workspaceId, idSuffix) {
   var ws = String(workspaceId || '').trim();
   var ts = new Date().toISOString().replace(/[:.]/g, '-');
-  return 'workspaces/' + ws + '/' + ts + '_pending.ktpbackup';
+  var suffix = (typeof idSuffix === 'string' && idSuffix) ? idSuffix : 'pending';
+  return 'workspaces/' + ws + '/' + ts + '_' + suffix + '.ktpbackup';
 }
 
 // ── getCloudBackupReadiness (read-only) ──────────────────────────────────────
@@ -151,17 +159,175 @@ function derivePreflightMetadata(input) {
   };
 }
 
+// Maps a derivePreflightMetadata() validation error onto the 1F.4B error
+// vocabulary (checksum_failed / backup_build_failed) so callers never leak the
+// internal "invalid_*" shape-validation codes.
+function _mapDerivedError(code) {
+  if (code === 'invalid_checksum') return 'checksum_failed';
+  if (code === 'invalid_byte_size' || code === 'invalid_input' ||
+      code === 'invalid_trigger'   || code === 'invalid_format_version') {
+    return 'backup_build_failed';
+  }
+  return code || 'unknown_error';
+}
+
+// ── Auth header helpers (mirrors cloud-workspace.js _buildHeaders) ──────────────
+
+async function _buildAuthHeaders(isWrite) {
+  var token = await _auth().getAccessToken();
+  if (!token) return null;
+  var h = Object.assign({}, getBaseHeaders());
+  h['Authorization'] = 'Bearer ' + token;
+  if (isWrite) h['Content-Profile'] = 'ktp';
+  return h;
+}
+
+// ── Storage upload / cleanup (1F.4B) ─────────────────────────────────────────
+
+async function _uploadArchive(storagePath, archiveStr, headers) {
+  var url = getSupabaseUrl() + '/storage/v1/object/' + BACKUP_BUCKET + '/' + storagePath;
+  // Override Content-Type: bucket allows only application/octet-stream.
+  var h = Object.assign({}, headers, { 'Content-Type': 'application/octet-stream' });
+  var res;
+  try {
+    res = await _doFetch(url, { method: 'POST', headers: h, body: archiveStr });
+  } catch (_) {
+    return { ok: false, error: 'network_error' };
+  }
+  if (!res.ok) return { ok: false, error: 'upload_failed' };
+  return { ok: true };
+}
+
+// Best-effort cleanup of an orphaned object after a failed metadata write.
+// Returns {ok:true} only if the delete request itself succeeded.
+async function _deleteUploadedObject(storagePath, headers) {
+  var url = getSupabaseUrl() + '/storage/v1/object/' + BACKUP_BUCKET;
+  try {
+    var res = await _doFetch(url, {
+      method:  'DELETE',
+      headers: headers,
+      body:    JSON.stringify({ prefixes: [storagePath] }),
+    });
+    return { ok: res.ok === true };
+  } catch (_) {
+    return { ok: false };
+  }
+}
+
+async function _writeBackupMetadata(metadataPayload, headers) {
+  var url = getSupabaseUrl() + '/rest/v1/rpc/create_cloud_backup_metadata';
+  var res, body;
+  try {
+    res  = await _doFetch(url, { method: 'POST', headers: headers, body: JSON.stringify(metadataPayload) });
+    body = await res.json();
+  } catch (_) {
+    return { ok: false, error: 'network_error' };
+  }
+  if (!res.ok || !body || body.ok !== true) {
+    return { ok: false, error: 'metadata_failed' };
+  }
+  return { ok: true, backupId: body.backup_id };
+}
+
+// ── createManualCloudBackup (1F.4B, guarded write path) ──────────────────────
+// Caller (cloud-backup-ipc.js) only invokes this in direct response to an
+// explicit user click — never on a timer, startup, or focus event.
+//
+// input: { workspaceId, archiveStr, byteSize, checksum, appVersion }
+//   archiveStr/byteSize/checksum are produced by main.js from the EXISTING
+//   local .ktpbackup builder (buildFullBackup); this module never builds or
+//   reads local files itself.
+//
+// Never restores, never calls create_backup_download_url, never calls a
+// snapshot/lock RPC, and never returns a token/device id/storage path/raw
+// checksum.
+
+async function createManualCloudBackup(input) {
+  input = input || {};
+  if (!isConfigured()) return { ok: false, error: 'not_configured' };
+
+  var workspaceId = typeof input.workspaceId === 'string' ? input.workspaceId.trim() : '';
+  if (!_validateWorkspaceId(workspaceId)) return { ok: false, error: 'invalid_input' };
+
+  // Step 1 — re-run preflight immediately before touching storage.
+  var readiness = await getCloudBackupReadiness(workspaceId);
+  if (!readiness.ok) {
+    return { ok: false, error: readiness.error === 'workspace_not_found' ? 'no_active_workspace' : readiness.error };
+  }
+  if (!readiness.canBackup) return { ok: false, error: 'permission_denied' };
+
+  if (typeof input.archiveStr !== 'string' || !input.archiveStr) {
+    return { ok: false, error: 'backup_build_failed' };
+  }
+
+  var derived = derivePreflightMetadata({
+    workspaceId: workspaceId,
+    byteSize:    input.byteSize,
+    checksum:    input.checksum,
+    trigger:     'manual',
+    appVersion:  input.appVersion,
+  });
+  if (!derived.ok) return { ok: false, error: _mapDerivedError(derived.error) };
+  if (!derived.withinLimit) return { ok: false, error: 'backup_too_large' };
+
+  var uploadHeaders = await _buildAuthHeaders(false);
+  if (!uploadHeaders) return { ok: false, error: 'not_authenticated' };
+
+  // Opaque per-upload suffix — never a device id, never derived from secrets.
+  var backupSuffix = crypto.randomBytes(8).toString('hex');
+  var storagePath  = _safeStoragePath(workspaceId, backupSuffix);
+
+  // Step 2 — upload the archive.
+  var uploadResult = await _uploadArchive(storagePath, input.archiveStr, uploadHeaders);
+  if (!uploadResult.ok) return { ok: false, error: uploadResult.error || 'upload_failed' };
+
+  // Step 3 — write metadata only after a successful upload.
+  var rpcHeaders = await _buildAuthHeaders(true);
+  if (!rpcHeaders) return { ok: false, error: 'not_authenticated' };
+
+  var metadataPayload = {
+    p_workspace_id:   workspaceId,
+    p_storage_path:   storagePath,
+    p_byte_size:      derived.byteSize,
+    p_checksum:       input.checksum,
+    p_backup_trigger: 'manual',
+    p_format_version: derived.formatVersion,
+  };
+  if (typeof input.appVersion === 'string' && input.appVersion) {
+    metadataPayload.p_app_version = input.appVersion.slice(0, 32);
+  }
+
+  var metaResult = await _writeBackupMetadata(metadataPayload, rpcHeaders);
+  if (!metaResult.ok) {
+    // Metadata write failed AFTER a successful upload — attempt best-effort
+    // cleanup so we never leave a silently orphaned object without reporting it.
+    var cleanup = await _deleteUploadedObject(storagePath, uploadHeaders);
+    return { ok: false, error: cleanup.ok ? 'metadata_failed' : 'cleanup_failed' };
+  }
+
+  // Step 4 — sanitized success. Never returns storagePath/checksum/device id.
+  return {
+    ok:        true,
+    backupId:  typeof metaResult.backupId === 'string' ? metaResult.backupId : null,
+    createdAt: new Date().toISOString(),
+    byteSize:  derived.byteSize,
+    trigger:   'manual',
+  };
+}
+
 // ── Exports ──────────────────────────────────────────────────────────────────
 
 module.exports = {
   getCloudBackupReadiness,
   derivePreflightMetadata,
+  createManualCloudBackup,
   MAX_CLOUD_BACKUP_BYTES,
   BACKUP_ROLES,
   VALID_TRIGGERS,
   // Test seams
   _setAuth,
   _setWorkspace,
+  _setFetch,
   _resetForTests,
   // Exported for unit tests
   _validateWorkspaceId,

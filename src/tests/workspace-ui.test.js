@@ -767,11 +767,85 @@ function register(test, assert, assertEqual) {
     assert(!/supabase/i.test(m[1]), 'must not reference Supabase directly');
   });
 
-  test('backup readiness: no upload backup button is wired yet (preflight phase only)', function() {
-    assert(!/onclick="wsUploadBackup\(/.test(_rendererSrc),  'no wsUploadBackup handler must be wired');
-    assert(!/onclick="wsCloudBackup\(/.test(_rendererSrc),   'no wsCloudBackup handler must be wired');
-    // A read-only refresh button is allowed.
-    assert(/onclick="wsRefreshBackupReadiness\(\)"/.test(_rendererSrc), 'refresh button must be wired');
+  // ── Cloud Backup Manual Upload UI (CLOUD-FOUNDATION-1F.4B) ─────────────────
+
+  console.log('\nCloud Backup Manual Upload UI (CLOUD-FOUNDATION-1F.4B) — static source checks:');
+
+  test('backup upload: manual backup button is wired to wsShowBackupConfirm (1F.4B)', function() {
+    assert(/onclick="wsShowBackupConfirm\(\)"/.test(_rendererSrc), 'wsShowBackupConfirm must be wired to upload button');
+    assert(/onclick="wsConfirmManualBackup\(\)"/.test(_rendererSrc), 'wsConfirmManualBackup must be wired to confirm button');
+    assert(/onclick="wsCancelBackupConfirm\(\)"/.test(_rendererSrc), 'wsCancelBackupConfirm must be wired to cancel button');
+    // Refresh button from 1F.4A still present.
+    assert(/onclick="wsRefreshBackupReadiness\(\)"/.test(_rendererSrc), 'refresh button must still be wired');
+    // No legacy/wrong handler names wired.
+    assert(!/onclick="wsUploadBackup\(/.test(_rendererSrc),   'no wsUploadBackup handler must be wired');
+    assert(!/onclick="wsCloudBackup\(/.test(_rendererSrc),    'no wsCloudBackup handler must be wired');
+    assert(!/onclick="wsRestoreBackup\(/.test(_rendererSrc),  'no restore handler must be wired');
+    assert(!/onclick="wsApplyBackup\(/.test(_rendererSrc),    'no apply handler must be wired');
+  });
+
+  test('backup upload: wsConfirmManualBackup only uses read-only bridge methods except createManualBackup', function() {
+    var m = _rendererSrc.match(/async function wsConfirmManualBackup\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(m, 'wsConfirmManualBackup must exist');
+    var body = m[1];
+    assert(/bridge\.createManualBackup\(/.test(body), 'must call createManualBackup');
+    // Must NOT call restore/apply/sync.
+    assert(!/bridge\.(restore|apply|pushSnapshot|syncApply)/i.test(body),
+      'wsConfirmManualBackup must never call a restore/sync method');
+    assert(!/fetch\(/.test(body),   'must not call fetch() directly');
+    assert(!/supabase/i.test(body), 'must not reference Supabase directly');
+  });
+
+  test('backup upload: button is disabled while uploading (no double-submit)', function() {
+    assert(/BACKUP_UI\.uploadState === .uploading. \? .* disabled/.test(_rendererSrc) ||
+           (/ws-backup-upload-btn/.test(_rendererSrc) && /disabled/.test(_rendererSrc)),
+      'upload button must be disabled during uploading state');
+    assert(/uploadState === .uploading.[\s\S]{0,40}return/.test(_rendererSrc) ||
+           /if \(BACKUP_UI\.uploadState === .uploading.\) return/.test(_rendererSrc),
+      'wsConfirmManualBackup must guard against re-entry while uploading');
+  });
+
+  test('backup upload: no auto-upload wired to startup/focus/timer', function() {
+    // wsConfirmManualBackup must not appear in startup or focus handlers.
+    var startup = _rendererSrc.match(/function _startupPull\(\)\{([\s\S]*?)\n\}/);
+    if (startup) assert(!/wsConfirmManualBackup/.test(startup[1]), 'no auto-upload in _startupPull');
+    assert(!/setInterval[^)]*wsConfirmManualBackup/.test(_rendererSrc), 'no timer auto-upload');
+    assert(!/addEventListener['"`,\s]*focus['"`,\s]*[\s\S]{0,200}wsConfirmManualBackup/.test(_rendererSrc),
+      'no focus auto-upload');
+  });
+
+  test('backup upload: upload result values set via textContent only', function() {
+    assert(/getElementById\(.ws-backup-upload-ok.\)[\s\S]{0,400}\.textContent\s*=/.test(_rendererSrc),
+      'upload success message must be set via textContent');
+    assert(/getElementById\(.ws-backup-upload-err.\)[\s\S]{0,400}\.textContent\s*=/.test(_rendererSrc),
+      'upload error message must be set via textContent');
+    // No BACKUP_UI field concatenated directly into innerHTML
+    assert(!/\+\s*BACKUP_UI\.uploadError/.test(_rendererSrc), 'uploadError must not be concatenated into innerHTML');
+    // lastUploadAt/lastUploadBytes are fine to concatenate into a local variable before textContent —
+    // the ban is on concatenation directly into innerHTML strings (card.innerHTML = html + ...).
+    // The critical check is that the results are never injected via innerHTML:
+    assert(!/html\s*\+=[\s\S]{0,200}BACKUP_UI\.lastUploadAt/.test(_rendererSrc), 'lastUploadAt must not go into innerHTML');
+    assert(!/html\s*\+=[\s\S]{0,200}BACKUP_UI\.uploadError/.test(_rendererSrc), 'uploadError must not go into innerHTML');
+  });
+
+  test('backup upload: renderer never exposes uploadState-sensitive internal fields', function() {
+    assert(!/BACKUP_UI\.(storagePath|checksum|archiveStr|device_id|deviceId|token)/.test(_rendererSrc),
+      'BACKUP_UI must not carry sensitive internal fields');
+  });
+
+  test('backup upload: confirm box explains upload scope (no restore/sync warning text)', function() {
+    // wsBackupNoRestoreWarning i18n key must exist in both languages.
+    assert(/wsBackupNoRestoreWarning/.test(_rendererSrc), 'wsBackupNoRestoreWarning i18n key must exist');
+    // wsBackupConfirmText must exist.
+    assert(/wsBackupConfirmText/.test(_rendererSrc), 'wsBackupConfirmText i18n key must exist');
+  });
+
+  test('backup upload: no direct restore path exposed from backup bridge or upload handler', function() {
+    var confirmFn = _rendererSrc.match(/async function wsConfirmManualBackup\(\)\s*\{([\s\S]*?)\n\}/);
+    if (confirmFn) {
+      assert(!/restoreBackup|restoreFull|applyBackup/i.test(confirmFn[1]),
+        'wsConfirmManualBackup must never call any restore method');
+    }
   });
 
   test('backup readiness: dynamic values are set via textContent, not innerHTML interpolation', function() {

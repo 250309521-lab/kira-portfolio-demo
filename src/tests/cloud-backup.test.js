@@ -13,6 +13,9 @@ function makeMockAuth(authenticated) {
     getSessionMeta: function() {
       return authenticated ? { ok: true, userId: 'u1' } : { ok: false };
     },
+    getAccessToken: async function() {
+      return authenticated ? 'mock-jwt-token' : null;
+    },
   };
 }
 
@@ -226,6 +229,192 @@ async function registerAsync(testAsync, assert, assertEqual) {
     assert(mockWs._calls.listWorkspaces === 1, 'listWorkspaces called once');
     assertEqual(mockWs._calls.createWorkspace, 0);
     assertEqual(mockWs._calls.activateWorkspace, 0);
+  });
+
+  // ── createManualCloudBackup (CLOUD-FOUNDATION-1F.4B) ─────────────────────────
+
+  console.log('\nCloud Backup — Manual Upload (CLOUD-FOUNDATION-1F.4B):');
+
+  var GOOD_ARCHIVE = JSON.stringify({ manifest: { formatVersion: 1 }, data: 'test' });
+
+  function makeFetch(overrides) {
+    var _calls = { upload: 0, rpc: 0, delete: 0 };
+    var fn = async function(url, opts) {
+      if (url.includes('/storage/v1/object/')) {
+        if (opts.method === 'DELETE') {
+          _calls.delete++;
+          return { ok: (overrides && overrides.deleteOk === false) ? false : true };
+        }
+        _calls.upload++;
+        var uploadOk = !(overrides && overrides.uploadFail);
+        return { ok: uploadOk };
+      }
+      if (url.includes('/rest/v1/rpc/create_cloud_backup_metadata')) {
+        _calls.rpc++;
+        var rpcOk = !(overrides && overrides.rpcFail);
+        return {
+          ok: rpcOk,
+          json: async function() {
+            return rpcOk ? { ok: true, backup_id: 'bkp-uuid-001' } : { ok: false, error: 'permission_denied' };
+          },
+        };
+      }
+      return { ok: true, json: async function() { return { ok: true }; } };
+    };
+    fn._calls = _calls;
+    return fn;
+  }
+
+  function setupManual(opts) {
+    opts = opts || {};
+    cb._setAuth(makeMockAuth(opts.authOk !== false));
+    var wsOpts = opts.wsOpts || { workspaces: [{ workspaceId: WS_ID, memberRole: opts.role || 'owner' }] };
+    cb._setWorkspace(makeMockWorkspace(wsOpts));
+    var fetch = opts.fetch || makeFetch();
+    cb._setFetch(fetch);
+    return fetch;
+  }
+
+  await testAsync('cloud-backup: createManualCloudBackup — success returns sanitized result', async function() {
+    var f = setupManual();
+    var r = await cb.createManualCloudBackup({ workspaceId: WS_ID, archiveStr: GOOD_ARCHIVE, byteSize: 200, checksum: GOOD_CHECKSUM });
+    cb._resetForTests();
+    assert(r.ok, 'must be ok');
+    assertEqual(r.backupId, 'bkp-uuid-001');
+    assert(typeof r.createdAt === 'string', 'createdAt must be a string');
+    assertEqual(r.byteSize, 200);
+    assertEqual(r.trigger, 'manual');
+    assert(!('storagePath' in r), 'storagePath must not be returned');
+    assert(!('checksum'    in r), 'checksum must not be returned');
+    assert(!('deviceId'    in r), 'deviceId must not be returned');
+    assertEqual(f._calls.upload, 1, 'upload must be called once');
+    assertEqual(f._calls.rpc,    1, 'metadata RPC must be called once');
+    assertEqual(f._calls.delete, 0, 'delete must not be called on success');
+  });
+
+  await testAsync('cloud-backup: createManualCloudBackup — upload failure → upload_failed, no RPC called', async function() {
+    var f = setupManual({ fetch: makeFetch({ uploadFail: true }) });
+    var r = await cb.createManualCloudBackup({ workspaceId: WS_ID, archiveStr: GOOD_ARCHIVE, byteSize: 200, checksum: GOOD_CHECKSUM });
+    cb._resetForTests();
+    assert(!r.ok); assertEqual(r.error, 'upload_failed');
+    assertEqual(f._calls.rpc,    0, 'RPC must not be called when upload fails');
+    assertEqual(f._calls.delete, 0, 'cleanup must not be called when upload fails');
+  });
+
+  await testAsync('cloud-backup: createManualCloudBackup — metadata failure + successful cleanup → metadata_failed', async function() {
+    var f = setupManual({ fetch: makeFetch({ rpcFail: true }) });
+    var r = await cb.createManualCloudBackup({ workspaceId: WS_ID, archiveStr: GOOD_ARCHIVE, byteSize: 200, checksum: GOOD_CHECKSUM });
+    cb._resetForTests();
+    assert(!r.ok); assertEqual(r.error, 'metadata_failed');
+    assertEqual(f._calls.upload, 1, 'upload must have been called');
+    assertEqual(f._calls.rpc,    1, 'RPC must have been attempted');
+    assertEqual(f._calls.delete, 1, 'cleanup delete must have been attempted');
+  });
+
+  await testAsync('cloud-backup: createManualCloudBackup — metadata failure + cleanup failure → cleanup_failed', async function() {
+    var f = setupManual({ fetch: makeFetch({ rpcFail: true, deleteOk: false }) });
+    var r = await cb.createManualCloudBackup({ workspaceId: WS_ID, archiveStr: GOOD_ARCHIVE, byteSize: 200, checksum: GOOD_CHECKSUM });
+    cb._resetForTests();
+    assert(!r.ok); assertEqual(r.error, 'cleanup_failed');
+    assertEqual(f._calls.delete, 1, 'cleanup must have been attempted');
+  });
+
+  await testAsync('cloud-backup: createManualCloudBackup — viewer → permission_denied before upload', async function() {
+    var f = setupManual({ role: 'viewer' });
+    var r = await cb.createManualCloudBackup({ workspaceId: WS_ID, archiveStr: GOOD_ARCHIVE, byteSize: 200, checksum: GOOD_CHECKSUM });
+    cb._resetForTests();
+    assert(!r.ok); assertEqual(r.error, 'permission_denied');
+    assertEqual(f._calls.upload, 0, 'upload must not be called for viewer');
+  });
+
+  await testAsync('cloud-backup: createManualCloudBackup — not authenticated → no upload', async function() {
+    var f = setupManual({ authOk: false });
+    var r = await cb.createManualCloudBackup({ workspaceId: WS_ID, archiveStr: GOOD_ARCHIVE, byteSize: 200, checksum: GOOD_CHECKSUM });
+    cb._resetForTests();
+    assert(!r.ok); assertEqual(r.error, 'not_authenticated');
+    assertEqual(f._calls.upload, 0);
+  });
+
+  await testAsync('cloud-backup: createManualCloudBackup — workspace not found → no_active_workspace', async function() {
+    setupManual({ wsOpts: { workspaces: [{ workspaceId: 'other', memberRole: 'owner' }] } });
+    var r = await cb.createManualCloudBackup({ workspaceId: WS_ID, archiveStr: GOOD_ARCHIVE, byteSize: 200, checksum: GOOD_CHECKSUM });
+    cb._resetForTests();
+    assert(!r.ok); assertEqual(r.error, 'no_active_workspace');
+  });
+
+  await testAsync('cloud-backup: createManualCloudBackup — oversized archive → backup_too_large, no upload', async function() {
+    var f = setupManual();
+    var r = await cb.createManualCloudBackup({ workspaceId: WS_ID, archiveStr: GOOD_ARCHIVE, byteSize: cb.MAX_CLOUD_BACKUP_BYTES + 1, checksum: GOOD_CHECKSUM });
+    cb._resetForTests();
+    assert(!r.ok); assertEqual(r.error, 'backup_too_large');
+    assertEqual(f._calls.upload, 0);
+  });
+
+  await testAsync('cloud-backup: createManualCloudBackup — bad checksum → checksum_failed, no upload', async function() {
+    var f = setupManual();
+    var r = await cb.createManualCloudBackup({ workspaceId: WS_ID, archiveStr: GOOD_ARCHIVE, byteSize: 200, checksum: 'tooshort' });
+    cb._resetForTests();
+    assert(!r.ok); assertEqual(r.error, 'checksum_failed');
+    assertEqual(f._calls.upload, 0);
+  });
+
+  await testAsync('cloud-backup: createManualCloudBackup — missing archiveStr → backup_build_failed, no upload', async function() {
+    var f = setupManual();
+    var r = await cb.createManualCloudBackup({ workspaceId: WS_ID, archiveStr: '', byteSize: 200, checksum: GOOD_CHECKSUM });
+    cb._resetForTests();
+    assert(!r.ok); assertEqual(r.error, 'backup_build_failed');
+    assertEqual(f._calls.upload, 0);
+  });
+
+  await testAsync('cloud-backup: createManualCloudBackup — never returns storagePath/checksum/deviceId', async function() {
+    setupManual();
+    var r = await cb.createManualCloudBackup({ workspaceId: WS_ID, archiveStr: GOOD_ARCHIVE, byteSize: 200, checksum: GOOD_CHECKSUM });
+    cb._resetForTests();
+    var json = JSON.stringify(r);
+    assert(!/storage[Pp]ath/i.test(json), 'storagePath must not appear in result');
+    assert(!/checksum/i.test(json),        'raw checksum must not appear in result');
+    assert(!/device/i.test(json),          'device id must not appear in result');
+    assert(!/token/i.test(json),           'token must not appear in result');
+  });
+
+  await testAsync('cloud-backup: createManualCloudBackup — upload uses Content-Type: application/octet-stream (bucket MIME requirement)', async function() {
+    var capturedUploadHeaders = null;
+    var headerCaptureFetch = async function(url, opts) {
+      if (url.includes('/storage/v1/object/') && opts.method !== 'DELETE') {
+        capturedUploadHeaders = opts.headers;
+        return { ok: true };
+      }
+      return { ok: true, json: async function() { return { ok: true, backup_id: 'bkp-x' }; } };
+    };
+    cb._setAuth(makeMockAuth(true));
+    cb._setWorkspace(makeMockWorkspace({ workspaces: [{ workspaceId: WS_ID, memberRole: 'owner' }] }));
+    cb._setFetch(headerCaptureFetch);
+    await cb.createManualCloudBackup({ workspaceId: WS_ID, archiveStr: GOOD_ARCHIVE, byteSize: 200, checksum: GOOD_CHECKSUM });
+    cb._resetForTests();
+    assert(capturedUploadHeaders !== null, 'upload must have been called');
+    assertEqual(capturedUploadHeaders['Content-Type'], 'application/octet-stream',
+      'upload Content-Type must be application/octet-stream to satisfy bucket MIME restriction');
+  });
+
+  await testAsync('cloud-backup: createManualCloudBackup — never calls create_backup_download_url or push_snapshot', async function() {
+    var forbidden = ['create_backup_download_url', 'push_snapshot_with_revision_check'];
+    var seenUrls = [];
+    var fetch = makeFetch();
+    var origFetch = fetch;
+    var wrappedFetch = async function(url, opts) {
+      seenUrls.push(url);
+      return origFetch(url, opts);
+    };
+    wrappedFetch._calls = fetch._calls;
+    cb._setAuth(makeMockAuth(true));
+    cb._setWorkspace(makeMockWorkspace({ workspaces: [{ workspaceId: WS_ID, memberRole: 'owner' }] }));
+    cb._setFetch(wrappedFetch);
+    await cb.createManualCloudBackup({ workspaceId: WS_ID, archiveStr: GOOD_ARCHIVE, byteSize: 200, checksum: GOOD_CHECKSUM });
+    cb._resetForTests();
+    forbidden.forEach(function(name) {
+      assert(!seenUrls.some(function(u) { return u.includes(name); }),
+        'must never call: ' + name);
+    });
   });
 }
 

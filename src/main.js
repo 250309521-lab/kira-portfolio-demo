@@ -706,19 +706,31 @@ function setupIPC() {
   // ── Cloud Workspace (CLOUD-FOUNDATION-1E.3) ───────────────────────────────
   require('./cloud/cloud-workspace-ipc').register(ipcMain, licenseGuard, log);
 
-  // ── Cloud Backup readiness/preflight (CLOUD-FOUNDATION-1F.4A, read-only) ───
-  // buildPreflightArchive builds the full backup IN MEMORY only — it never
-  // writes a file, uploads to storage, or mutates cloud_backups/audit_logs.
+  // ── Cloud Backup readiness/preflight + manual upload (CLOUD-FOUNDATION-1F.4A/1F.4B) ──
+  // _buildBackupDescriptor builds the full backup IN MEMORY only — it never
+  // writes a file. buildPreflightArchive (read-only) discards the archive
+  // string and keeps only size/checksum. buildManualBackupArchive (1F.4B,
+  // guarded write path) additionally returns the archive string so
+  // cloud-backup.js can upload the exact bytes that were checksummed.
+  function _buildBackupDescriptor(rendererStateStr, importProfilesStr) {
+    if (!store) initDatabase();
+    var archive    = buildFullBackup(rendererStateStr || '{}', importProfilesStr || null, 'manual');
+    var archiveStr = JSON.stringify(archive);
+    return {
+      archiveStr: archiveStr,
+      byteSize:   Buffer.byteLength(archiveStr, 'utf8'),
+      checksum:   sha256(archiveStr),
+      appVersion: APP_VER,
+    };
+  }
+
   require('./cloud/cloud-backup-ipc').register(ipcMain, licenseGuard, log, {
     buildPreflightArchive: function(rendererStateStr, importProfilesStr) {
-      if (!store) initDatabase();
-      var archive    = buildFullBackup(rendererStateStr || '{}', importProfilesStr || null, 'manual');
-      var archiveStr = JSON.stringify(archive);
-      return {
-        byteSize:   Buffer.byteLength(archiveStr, 'utf8'),
-        checksum:   sha256(archiveStr),
-        appVersion: APP_VER,
-      };
+      var d = _buildBackupDescriptor(rendererStateStr, importProfilesStr);
+      return { byteSize: d.byteSize, checksum: d.checksum, appVersion: d.appVersion };
+    },
+    buildManualBackupArchive: function(rendererStateStr, importProfilesStr) {
+      return _buildBackupDescriptor(rendererStateStr, importProfilesStr);
     },
     getLastLocalBackupAt: function() {
       try {

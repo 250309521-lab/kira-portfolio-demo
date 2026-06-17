@@ -4107,6 +4107,9 @@ tbody tr[onclick] { cursor: pointer; }
 .ws-sync-summary{font-size:11.5px;color:var(--i2);margin-top:4px}
 .ws-sync-detail{font-size:10.5px;color:var(--i4);margin-top:2px}
 .ws-backup-soon{font-size:10px;color:var(--i4);margin-top:5px;font-style:italic;opacity:.75}
+.ws-backup-confirm{margin-top:6px;padding:8px 10px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:8px}
+.ws-backup-upload-success{font-size:10.5px;color:var(--green,#22c55e);margin-top:4px}
+.ws-backup-upload-error{font-size:10.5px;color:var(--red,#f43f5e);margin-top:4px}
 .ws-empty-state{display:flex;flex-direction:column;align-items:center;text-align:center;padding:18px 16px;background:rgba(99,102,241,.05);border:1px dashed rgba(99,102,241,.2);border-radius:10px;margin-bottom:10px;gap:6px}
 .ws-empty-icon{font-size:24px;line-height:1;opacity:.65}
 .ws-empty-text{font-size:12.5px;font-weight:600;color:var(--i2)}
@@ -5085,7 +5088,19 @@ var STRINGS={
     wsBackupSizeLbl:'Tahmini yedek boyutu',
     wsBackupSizeUnknown:'hesaplanamadı',
     wsBackupLastLocalLbl:'Son yerel yedek',
-    wsBackupComingSoon:'Bulut yedek yükleme bir sonraki sürümde gelecek.',
+    wsBackupComingSoon:'Yedekleme bu rol/durum için kullanılamaz.',
+    wsBackupUploadBtn:'Buluta yedekle',
+    wsBackupUploading:'Yükleniyor…',
+    wsBackupConfirmText:'Yedeklenecek çalışma alanı:',
+    wsBackupNoRestoreWarning:'Bu işlem mevcut verilerin üzerine yazmaz.',
+    wsBackupConfirmBtn:'Yedekle',
+    wsBackupCancelBtn:'İptal',
+    wsBackupUploadSuccess:'Yedek başarıyla yüklendi.',
+    wsBackupBuildFailed:'Yedek dosyası oluşturulamadı.',
+    wsBackupChecksumFailed:'Yedek sağlama toplamı doğrulanamadı.',
+    wsBackupUploadFailed:'Yükleme başarısız oldu.',
+    wsBackupMetadataFailed:'Meta veri yazma başarısız; yedek yüklemesi temizlendi.',
+    wsBackupCleanupFailed:'Meta veri hatası ve nesne temizleme başarısız (yetim yükleme riski).',
     fieldNotFound:'Alan bulunamadı',pasted:'📋 Yapıştırıldı',pasteManual:'Ctrl+V ile yapıştırın',
     // Settings modals
     resetDataTitle:'🗑 Tüm Verileri Sıfırla',restoreTitle:'↩ Yedekten Geri Yükle',
@@ -5608,7 +5623,19 @@ var STRINGS={
     wsBackupSizeLbl:'Estimated backup size',
     wsBackupSizeUnknown:'unavailable',
     wsBackupLastLocalLbl:'Last local backup',
-    wsBackupComingSoon:'Cloud backup upload is coming in the next phase.',
+    wsBackupComingSoon:'Backup unavailable for this role or state.',
+    wsBackupUploadBtn:'Back up to cloud',
+    wsBackupUploading:'Uploading…',
+    wsBackupConfirmText:'Workspace to back up:',
+    wsBackupNoRestoreWarning:'This does not restore or sync data.',
+    wsBackupConfirmBtn:'Back up',
+    wsBackupCancelBtn:'Cancel',
+    wsBackupUploadSuccess:'Backup uploaded successfully.',
+    wsBackupBuildFailed:'Could not build backup file.',
+    wsBackupChecksumFailed:'Backup checksum could not be verified.',
+    wsBackupUploadFailed:'Upload failed.',
+    wsBackupMetadataFailed:'Metadata write failed; uploaded object was cleaned up.',
+    wsBackupCleanupFailed:'Metadata write failed and cleanup also failed (orphaned upload risk).',
     fieldNotFound:'Field not found',pasted:'📋 Pasted',pasteManual:'Use Ctrl+V to paste',
     // Settings modals
     resetDataTitle:'🗑 Reset All Data',restoreTitle:'↩ Restore from Backup',
@@ -8117,6 +8144,11 @@ var BACKUP_UI = {
   error:             null,
   lastCheckedAt:     null,
   checkedForId:      null,   // workspaceId this readiness was last fetched for
+  // ── Manual upload (CLOUD-FOUNDATION-1F.4B) — explicit user action only ──────
+  uploadState:       'idle', // 'idle' | 'confirming' | 'uploading' | 'success' | 'error'
+  uploadError:       null,
+  lastUploadAt:      null,
+  lastUploadBytes:   null,
 };
 
 function _wsRoleLabel(role) {
@@ -8447,6 +8479,78 @@ function _backupReadinessMsg() {
   return t('wsBackupNotChecked');
 }
 
+// ── Manual cloud backup upload (CLOUD-FOUNDATION-1F.4B) ──────────────────────
+// Only ever invoked via an explicit user click (wsShowBackupConfirm then
+// wsConfirmManualBackup) — there is no timer/startup/focus path here. Re-runs
+// preflight server-side immediately before uploading. Calls only the sanitized
+// window.cloudBackup.createManualBackup bridge method; never fetch/Supabase.
+
+function _backupUploadErrorMsg(errCode) {
+  if (errCode === 'not_authenticated')    return t('wsErrorAuth');
+  if (errCode === 'no_active_workspace')  return t('wsNotFound');
+  if (errCode === 'permission_denied')    return t('wsBackupPermissionDenied');
+  if (errCode === 'backup_too_large')     return t('wsBackupTooLarge');
+  if (errCode === 'backup_build_failed')  return t('wsBackupBuildFailed');
+  if (errCode === 'checksum_failed')      return t('wsBackupChecksumFailed');
+  if (errCode === 'upload_failed')        return t('wsBackupUploadFailed');
+  if (errCode === 'metadata_failed')      return t('wsBackupMetadataFailed');
+  if (errCode === 'cleanup_failed')       return t('wsBackupCleanupFailed');
+  if (errCode === 'network_error')        return t('wsErrorNetwork');
+  if (errCode === 'license_required')     return t('wsLicenseRequired');
+  if (errCode === 'not_configured')       return t('wsNotConfigured');
+  return t('wsErrorGeneric');
+}
+
+function wsShowBackupConfirm() {
+  if (BACKUP_UI.state !== 'ready' || BACKUP_UI.canBackup !== true || BACKUP_UI.withinLimit === false) return;
+  BACKUP_UI.uploadState = 'confirming';
+  BACKUP_UI.uploadError = null;
+  renderWorkspaceCard();
+}
+
+function wsCancelBackupConfirm() {
+  if (BACKUP_UI.uploadState === 'uploading') return;
+  BACKUP_UI.uploadState = 'idle';
+  renderWorkspaceCard();
+}
+
+async function wsConfirmManualBackup() {
+  var bridge = _backupBridge();
+  var workspaceId = WS_UI.activeId;
+  if (!bridge || !workspaceId) return;
+  if (BACKUP_UI.uploadState === 'uploading') return;
+
+  BACKUP_UI.uploadState = 'uploading';
+  BACKUP_UI.uploadError = null;
+  renderWorkspaceCard();
+
+  var _res;
+  try {
+    _res = await bridge.createManualBackup({
+      workspaceId:   workspaceId,
+      rendererState: JSON.stringify(DATA),
+    });
+  } catch (_) {
+    BACKUP_UI.uploadState = 'error';
+    BACKUP_UI.uploadError = 'unknown_error';
+    renderWorkspaceCard();
+    return;
+  }
+
+  if (!_res || !_res.ok) {
+    BACKUP_UI.uploadState = 'error';
+    BACKUP_UI.uploadError = _res ? (_res.error || 'unknown_error') : 'unknown_error';
+    renderWorkspaceCard();
+    return;
+  }
+
+  BACKUP_UI.uploadState     = 'success';
+  BACKUP_UI.lastUploadAt    = _res.createdAt || Date.now();
+  BACKUP_UI.lastUploadBytes = typeof _res.byteSize === 'number' ? _res.byteSize : null;
+  toast(t('wsBackupUploadSuccess'), 'green');
+  renderWorkspaceCard();
+}
+
 function renderWorkspaceCard() {
   var card = document.getElementById('cloud-workspace-card');
   if (!card) return;
@@ -8512,7 +8616,20 @@ function renderWorkspaceCard() {
           (BACKUP_UI.state === 'ready' ? '<div id="ws-backup-size" class="ws-sync-detail"></div>' : '') +
           (BACKUP_UI.state === 'ready' && BACKUP_UI.lastLocalBackupAt ? '<div id="ws-backup-lastlocal" class="ws-sync-detail"></div>' : '') +
           (BACKUP_UI.lastCheckedAt ? '<div id="ws-backup-lastchecked" class="ws-sync-detail"></div>' : '') +
-          '<div id="ws-backup-soon" class="ws-backup-soon"></div>' +
+          (BACKUP_UI.uploadState === 'success' ? '<div id="ws-backup-upload-ok" class="ws-backup-upload-success"></div>' : '') +
+          (BACKUP_UI.uploadState === 'error'   ? '<div id="ws-backup-upload-err" class="ws-backup-upload-error"></div>' : '') +
+          (BACKUP_UI.state === 'ready' && BACKUP_UI.canBackup === true && BACKUP_UI.withinLimit !== false
+            ? (BACKUP_UI.uploadState === 'confirming'
+                ? '<div class="ws-backup-confirm" id="ws-backup-confirm-box">' +
+                    '<div id="ws-backup-confirm-text" class="ws-sync-detail"></div>' +
+                    '<div style="display:flex;gap:7px;margin-top:6px">' +
+                      '<button class="btn btn-primary btn-xs" id="ws-backup-confirm-btn" onclick="wsConfirmManualBackup()"></button>' +
+                      '<button class="btn btn-ghost btn-xs"   id="ws-backup-cancel-btn"  onclick="wsCancelBackupConfirm()"></button>' +
+                    '</div></div>'
+                : (BACKUP_UI.uploadState === 'uploading'
+                    ? '<button class="btn btn-primary btn-xs" id="ws-backup-upload-btn" disabled></button>'
+                    : '<button class="btn btn-primary btn-xs" id="ws-backup-upload-btn" onclick="wsShowBackupConfirm()"></button>'))
+            : '<div id="ws-backup-soon" class="ws-backup-soon"></div>') +
         '</div>' +
       '</div>';
     }
@@ -8631,6 +8748,39 @@ function renderWorkspaceCard() {
         _bklc.textContent = t('wsSyncLastChecked') + ': ' + new Date(BACKUP_UI.lastCheckedAt).toLocaleTimeString();
       }
       var _bksoon = document.getElementById('ws-backup-soon'); if (_bksoon) _bksoon.textContent = t('wsBackupComingSoon');
+
+      // ── Manual upload UI (1F.4B) — all values via textContent ─────────────────
+      var _bkupbtn = document.getElementById('ws-backup-upload-btn');
+      if (_bkupbtn) {
+        if (BACKUP_UI.uploadState === 'uploading') {
+          _bkupbtn.textContent = t('wsBackupUploading');
+        } else {
+          _bkupbtn.textContent = t('wsBackupUploadBtn');
+        }
+      }
+      var _bkconfbox = document.getElementById('ws-backup-confirm-box');
+      if (_bkconfbox) {
+        var _bkctxt = document.getElementById('ws-backup-confirm-text');
+        if (_bkctxt) {
+          _bkctxt.textContent = t('wsBackupConfirmText') + ' ' +
+            (WS_UI.activeName ? WS_UI.activeName : '') +
+            (typeof BACKUP_UI.byteSize === 'number' ? ' (' + _fmtBytes(BACKUP_UI.byteSize) + ')' : '') +
+            ' — ' + t('wsBackupNoRestoreWarning');
+        }
+        var _bkcbtn = document.getElementById('ws-backup-confirm-btn');
+        if (_bkcbtn) _bkcbtn.textContent = t('wsBackupConfirmBtn');
+        var _bkcanc = document.getElementById('ws-backup-cancel-btn');
+        if (_bkcanc) _bkcanc.textContent = t('wsBackupCancelBtn');
+      }
+      var _bkupok = document.getElementById('ws-backup-upload-ok');
+      if (_bkupok) {
+        var _okTxt = t('wsBackupUploadSuccess');
+        if (BACKUP_UI.lastUploadAt) _okTxt += ' ' + new Date(BACKUP_UI.lastUploadAt).toLocaleString();
+        if (typeof BACKUP_UI.lastUploadBytes === 'number') _okTxt += ' (' + _fmtBytes(BACKUP_UI.lastUploadBytes) + ')';
+        _bkupok.textContent = _okTxt;
+      }
+      var _bkuperr = document.getElementById('ws-backup-upload-err');
+      if (_bkuperr) _bkuperr.textContent = _backupUploadErrorMsg(BACKUP_UI.uploadError);
 
       if (BACKUP_UI.checkedForId !== WS_UI.activeId && BACKUP_UI.state !== 'loading') {
         wsRefreshBackupReadiness();
