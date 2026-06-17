@@ -8568,8 +8568,14 @@ function renderWorkspaceCard() {
     html += '<div class="ws-loading"><span class="ws-spinner"></span><span id="ws-loading-txt"></span></div>';
 
   } else if (view === 'error') {
+    var _canTryCreate = WS_UI.error !== 'not_authenticated' &&
+                        WS_UI.error !== 'not_configured'    &&
+                        WS_UI.error !== 'license_required';
     html += '<div class="ws-error-card"><div id="ws-err-txt" class="ws-err-text"></div>' +
-      '<button class="btn btn-ghost btn-sm" onclick="wsLoadWorkspaces()" id="ws-retry-btn"></button></div>';
+      '<div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:6px">' +
+        '<button class="btn btn-ghost btn-sm" onclick="wsLoadWorkspaces()" id="ws-retry-btn"></button>' +
+        (_canTryCreate ? '<button class="btn btn-secondary btn-sm" onclick="wsShowCreate()" id="ws-create-from-err"></button>' : '') +
+      '</div></div>';
 
   } else if (view === 'create') {
     html += '<div class="ws-create-form">' +
@@ -8692,6 +8698,7 @@ function renderWorkspaceCard() {
   if (view === 'error') {
     var _et = document.getElementById('ws-err-txt'); if (_et) _et.textContent = _wsErrorMsg(WS_UI.error);
     var _rb = document.getElementById('ws-retry-btn'); if (_rb) _rb.textContent = t('wsRefresh');
+    var _cfe = document.getElementById('ws-create-from-err'); if (_cfe) _cfe.textContent = t('wsCreate');
   }
   if (view === 'create') {
     var _cl = document.getElementById('ws-cname-lbl'); if (_cl) _cl.textContent = t('wsCreateName');

@@ -158,8 +158,14 @@ function makeWsUI(opts) {
     if (view === 'loading') {
       html += '<div class="ws-loading"><span class="ws-spinner"></span><span id="ws-loading-txt"></span></div>';
     } else if (view === 'error') {
+      var _canTryCreate = _state.error !== 'not_authenticated' &&
+                          _state.error !== 'not_configured'    &&
+                          _state.error !== 'license_required';
       html += '<div class="ws-error-card"><div id="ws-err-txt" class="ws-err-text"></div>' +
-        '<button id="ws-retry-btn"></button></div>';
+        '<div style="display:flex;gap:7px">' +
+          '<button id="ws-retry-btn"></button>' +
+          (_canTryCreate ? '<button id="ws-create-from-err"></button>' : '') +
+        '</div></div>';
     } else if (view === 'create') {
       html += '<div class="ws-create-form">' +
         '<label id="ws-cname-lbl"></label>' +
@@ -215,6 +221,7 @@ function makeWsUI(opts) {
     if (view === 'error') {
       var _et = _dom.getElementById('ws-err-txt'); if (_et) _et.textContent = _errMsg(_state.error);
       var _rb = _dom.getElementById('ws-retry-btn'); if (_rb) _rb.textContent = _t('wsRefresh');
+      var _cfe = _dom.getElementById('ws-create-from-err'); if (_cfe) _cfe.textContent = _t('wsCreate');
     }
     if (view === 'create') {
       var _cl = _dom.getElementById('ws-cname-lbl'); if (_cl) _cl.textContent = _t('wsCreateName');
@@ -869,6 +876,76 @@ function register(test, assert, assertEqual) {
   test('backup readiness: no raw ipcRenderer usage anywhere in renderer.html', function() {
     assert(!/ipcRenderer/.test(_rendererSrc), 'renderer.html must never reference ipcRenderer directly');
   });
+
+  // ── Error-state recovery UI (CLOUD-FOUNDATION-1F.4B-REMOTE-GATE-C1) ──────────
+
+  test('error state: unknown_error shows ws-create-from-err button', function() {
+    var u = makeWsUI({ cloudUI: { state: 'authenticated' } });
+    u.state.view = 'error'; u.state.error = 'unknown_error';
+    u.fns.renderWorkspaceCard();
+    assert(u.dom._cardHtml.includes('id="ws-create-from-err"'),
+      'ws-create-from-err must appear for unknown_error');
+  });
+
+  test('error state: workspace_not_found shows ws-create-from-err button', function() {
+    var u = makeWsUI({ cloudUI: { state: 'authenticated' } });
+    u.state.view = 'error'; u.state.error = 'workspace_not_found';
+    u.fns.renderWorkspaceCard();
+    assert(u.dom._cardHtml.includes('id="ws-create-from-err"'),
+      'ws-create-from-err must appear for workspace_not_found');
+  });
+
+  test('error state: network_error shows ws-create-from-err button', function() {
+    var u = makeWsUI({ cloudUI: { state: 'authenticated' } });
+    u.state.view = 'error'; u.state.error = 'network_error';
+    u.fns.renderWorkspaceCard();
+    assert(u.dom._cardHtml.includes('id="ws-create-from-err"'),
+      'ws-create-from-err must appear for network_error');
+  });
+
+  test('error state: not_authenticated hides ws-create-from-err (must re-auth first)', function() {
+    var u = makeWsUI({ cloudUI: { state: 'authenticated' } });
+    u.state.view = 'error'; u.state.error = 'not_authenticated';
+    u.fns.renderWorkspaceCard();
+    assert(!u.dom._cardHtml.includes('id="ws-create-from-err"'),
+      'ws-create-from-err must NOT appear when not authenticated');
+  });
+
+  test('error state: not_configured hides ws-create-from-err (admin config issue)', function() {
+    var u = makeWsUI({ cloudUI: { state: 'authenticated' } });
+    u.state.view = 'error'; u.state.error = 'not_configured';
+    u.fns.renderWorkspaceCard();
+    assert(!u.dom._cardHtml.includes('id="ws-create-from-err"'),
+      'ws-create-from-err must NOT appear when not configured');
+  });
+
+  test('error state: license_required hides ws-create-from-err', function() {
+    var u = makeWsUI({ cloudUI: { state: 'authenticated' } });
+    u.state.view = 'error'; u.state.error = 'license_required';
+    u.fns.renderWorkspaceCard();
+    assert(!u.dom._cardHtml.includes('id="ws-create-from-err"'),
+      'ws-create-from-err must NOT appear when license required');
+  });
+
+  test('error state: ws-create-from-err text is set via textContent not innerHTML', function() {
+    var u = makeWsUI({ cloudUI: { state: 'authenticated' } });
+    u.state.view = 'error'; u.state.error = 'unknown_error';
+    u.fns.renderWorkspaceCard();
+    var btn = u.dom._els['ws-create-from-err'];
+    assert(btn, 'ws-create-from-err element must exist');
+    assertEqual(btn.textContent, 'Create Workspace', 'text must be set via textContent');
+    assertEqual(btn.innerHTML, '', 'innerHTML must be empty — text set via textContent only');
+  });
+
+  test('error state: no sensitive fields in error view HTML', function() {
+    var u = makeWsUI({ cloudUI: { state: 'authenticated' } });
+    u.state.view = 'error'; u.state.error = 'unknown_error';
+    u.fns.renderWorkspaceCard();
+    var html = u.dom._cardHtml;
+    FORBIDDEN_FIELDS.forEach(function(f) {
+      assert(!html.includes(f), 'error view HTML must not contain: ' + f);
+    });
+  });
 }
 
 async function registerAsync(testAsync, assert, assertEqual) {
@@ -1429,6 +1506,43 @@ async function registerAsync(testAsync, assert, assertEqual) {
     assert(!html.includes('ipcRenderer'),    'ipcRenderer not in HTML');
     assert(!html.includes('cloudWorkspace'), 'cloudWorkspace not in HTML');
     assert(!html.includes('invoke('),        'ipc invoke not in HTML');
+  });
+
+  // ── Error-state recovery (CLOUD-FOUNDATION-1F.4B-REMOTE-GATE-C1) ─────────────
+
+  await testAsync('error state: loadWorkspaces failure with unknown_error shows create button', async function() {
+    var u = makeWsUI({
+      bridge: makeMockBridge({
+        listWorkspaces: async function() { return { ok: false, error: 'unknown_error' }; },
+      }),
+      cloudUI: { state: 'authenticated' },
+    });
+    await u.fns.loadWorkspaces();
+    assertEqual(u.state.view, 'error');
+    assertEqual(u.state.error, 'unknown_error');
+    u.fns.renderWorkspaceCard();
+    assert(u.dom._cardHtml.includes('id="ws-create-from-err"'),
+      'ws-create-from-err must be present after unknown_error from loadWorkspaces');
+  });
+
+  await testAsync('error state: create from error view transitions to create view', async function() {
+    var u = makeWsUI({ cloudUI: { state: 'authenticated' } });
+    u.state.view = 'error'; u.state.error = 'unknown_error';
+    u.fns.renderWorkspaceCard();
+    assert(u.dom._cardHtml.includes('id="ws-create-from-err"'), 'create button must exist in error view');
+    u.fns.showCreate();
+    assertEqual(u.state.view, 'create', 'showCreate must transition to create view');
+    assert(u.dom._cardHtml.includes('id="ws-create-btn"'), 'create form must be rendered');
+  });
+
+  await testAsync('error state: not_authenticated error does not offer create path', async function() {
+    var u = makeWsUI({ cloudUI: { state: 'authenticated' } });
+    u.state.view = 'error'; u.state.error = 'not_authenticated';
+    u.fns.renderWorkspaceCard();
+    assert(!u.dom._cardHtml.includes('id="ws-create-from-err"'),
+      'create button must NOT appear for not_authenticated error');
+    assert(u.dom._cardHtml.includes('id="ws-retry-btn"'),
+      'retry button must always be present in error view');
   });
 }
 

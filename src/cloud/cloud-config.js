@@ -23,12 +23,28 @@ if (fs.existsSync(_envLocalPath)) {
   } catch (_) {}
 }
 
+// Production fallback — used when .env.local is absent (packaged asar builds).
+// The publishable key is not a secret; it is designed to be shipped in client code.
+// Local dev: .env.local overrides via process.env (line 21 above).
+// CI/CD: OS env vars override (process.env takes precedence per line 21).
+var _PROD_URL = 'https://xhyfbkhddcosapkhtoyb.supabase.co';
+var _PROD_KEY = 'sb_publishable_o9wp0R_kw36ceoIX1Om6HA_q607ZQV3';
+
+// Test seam — undefined means inactive; any other value (including '') overrides all sources.
+var _testUrl = undefined;
+var _testKey = undefined;
+
+function _setConfigForTests(url, key) { _testUrl = url; _testKey = key; }
+function _resetConfigForTests()       { _testUrl = undefined; _testKey = undefined; }
+
 function getSupabaseUrl() {
-  return process.env.SUPABASE_URL || '';
+  if (_testUrl !== undefined) return _testUrl;
+  return process.env.SUPABASE_URL || _PROD_URL;
 }
 
 function getSupabaseAnonKey() {
-  return process.env.SUPABASE_PUBLISHABLE_KEY || '';
+  if (_testKey !== undefined) return _testKey;
+  return process.env.SUPABASE_PUBLISHABLE_KEY || _PROD_KEY;
 }
 
 // Lazy — must only be called after app.ready (inside IPC handlers, not at module load).
@@ -60,4 +76,6 @@ module.exports = {
   getCloudDevicePath,
   isConfigured,
   getBaseHeaders,
+  _setConfigForTests,
+  _resetConfigForTests,
 };

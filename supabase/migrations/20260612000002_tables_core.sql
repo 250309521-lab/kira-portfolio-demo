@@ -1,6 +1,10 @@
 -- Migration 2: core tables — accounts, workspaces, workspace_members, invite_tokens.
 -- Tables must be created before migration 6 (helper functions), which references workspace_members.
 
+-- On Supabase cloud, pgcrypto is pre-installed in the extensions schema.
+-- SET search_path ensures gen_random_bytes() resolves at CREATE TABLE time.
+SET search_path TO extensions, public;
+
 -- ktp.accounts mirrors auth.users (populated by trigger in migration 7)
 CREATE TABLE ktp.accounts (
   id            uuid        PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,

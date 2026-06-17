@@ -1,6 +1,10 @@
 -- Migration 4: operational tables — workspace_snapshots, workspace_locks.
 -- (Moved from migration 5; reordered so all tables precede helper functions.)
 
+-- On Supabase cloud, pgcrypto is pre-installed in the extensions schema.
+-- SET search_path ensures gen_random_bytes() resolves at CREATE TABLE time.
+SET search_path TO extensions, public;
+
 -- workspace_snapshots: immutable append-only log of sync revisions.
 -- Revision is 1-based; CAS enforced by push_snapshot_with_revision_check RPC.
 CREATE TABLE ktp.workspace_snapshots (

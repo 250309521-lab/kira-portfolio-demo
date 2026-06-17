@@ -3,8 +3,8 @@
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- pg_cron is optional; used only for future scheduled lock cleanup.
--- Remove this line if your Supabase project does not have pg_cron enabled.
-CREATE EXTENSION IF NOT EXISTS "pg_cron" WITH SCHEMA cron;
+-- Enable via Supabase dashboard (Settings → Database → Extensions → pg_cron) when needed.
+-- CREATE EXTENSION IF NOT EXISTS "pg_cron" WITH SCHEMA cron;
 
 CREATE SCHEMA IF NOT EXISTS ktp;
 COMMENT ON SCHEMA ktp IS 'KiraTakipPro cloud application schema';

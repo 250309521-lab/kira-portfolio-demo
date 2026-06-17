@@ -1,6 +1,7 @@
 'use strict';
 
-const ws = require('../cloud/cloud-workspace');
+const ws     = require('../cloud/cloud-workspace');
+const config = require('../cloud/cloud-config');
 
 // Ensure isConfigured() returns true for all tests.
 // In local dev the .env.local file sets these; in CI we provide test defaults.
@@ -335,15 +336,14 @@ async function registerAsync(testAsync, assert, assertEqual) {
 
   await testAsync('cloud-workspace: getSyncStatus — not_configured when cloud not configured', async function() {
     ws._resetForTests();
-    var prevUrl = process.env.SUPABASE_URL;
-    var prevKey = process.env.SUPABASE_PUBLISHABLE_KEY;
-    delete process.env.SUPABASE_URL;
-    delete process.env.SUPABASE_PUBLISHABLE_KEY;
-    var r = await ws.getSyncStatus('ws-1');
-    assertEqual(r.error, 'not_configured');
-    process.env.SUPABASE_URL = prevUrl;
-    process.env.SUPABASE_PUBLISHABLE_KEY = prevKey;
-    ws._resetForTests();
+    config._setConfigForTests('', '');
+    try {
+      var r = await ws.getSyncStatus('ws-1');
+      assertEqual(r.error, 'not_configured');
+    } finally {
+      config._resetConfigForTests();
+      ws._resetForTests();
+    }
   });
 
   await testAsync('cloud-workspace: getSyncStatus — empty workspaceId → invalid_input', async function() {

@@ -1,6 +1,7 @@
 'use strict';
 
-const auth = require('../cloud/cloud-auth');
+const auth   = require('../cloud/cloud-auth');
+const config = require('../cloud/cloud-config');
 
 // Set env vars required by cloud-config.isConfigured() for all tests.
 // Only sets them if not already present — CI env takes precedence.
@@ -327,17 +328,13 @@ async function registerAsync(testAsync, assert, assertEqual) {
 
   await testAsync('cloud-auth: not_configured when SUPABASE_URL missing', async function() {
     auth._resetForTests();
-    var origUrl = process.env.SUPABASE_URL;
-    var origKey = process.env.SUPABASE_PUBLISHABLE_KEY;
-    delete process.env.SUPABASE_URL;
-    delete process.env.SUPABASE_PUBLISHABLE_KEY;
+    config._setConfigForTests('', '');
     try {
       var r = await auth.login('test@example.com', 'pass');
       assert(r.ok === false,                  'must return ok:false when not configured');
       assertEqual(r.error, 'not_configured',  'error code must be not_configured');
     } finally {
-      process.env.SUPABASE_URL            = origUrl;
-      process.env.SUPABASE_PUBLISHABLE_KEY = origKey;
+      config._resetConfigForTests();
     }
   });
 }
