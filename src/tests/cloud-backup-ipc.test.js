@@ -50,6 +50,14 @@ function makeMockBackup(overrides) {
       _track('getBackupDownloadPreflight', [workspaceId, backupId]);
       return Promise.resolve({ ok: true, backupId: backupId, byteSize: 1024 });
     },
+    downloadBackupToFile: function(input) {
+      _track('downloadBackupToFile', [input]);
+      return Promise.resolve({
+        ok: true, backupId: input.backupId, byteSize: 1024,
+        savedName: 'ktp-backup-test.ktpbackup', downloadedAt: '2026-06-18T00:00:00.000Z',
+        // storage_path and checksum deliberately absent
+      });
+    },
   };
   var b = Object.assign({}, base, overrides || {});
   b._calls = _calls;
@@ -469,6 +477,79 @@ async function registerAsync(testAsync, assert, assertEqual) {
     var r = await ipc._invoke('cloud:createBackupDownloadPreflight', {},
       { workspaceId: WS_ID, backupId: 'b-uuid-1' });
     assert(!r.ok); assertEqual(r.error, 'license_required');
+  });
+
+  // ── cloud:downloadBackupToFile (CLOUD-FOUNDATION-1F.4D) ──────────────────
+
+  await testAsync('cloud-backup-ipc: downloadBackupToFile — success whitelists and strips storage/checksum', async function() {
+    var ipc = makeMockIpcMain();
+    var backup = makeMockBackup();
+    var savedDialog = null;
+    ipc_module.register(ipc, makeGuard(true), makeLog(), makeDeps(backup, {
+      showSaveDialog: function(opts) { savedDialog = opts; return Promise.resolve('/tmp/test.ktpbackup'); },
+    }));
+    var r = await ipc._invoke('cloud:downloadBackupToFile', {}, { workspaceId: WS_ID, backupId: 'b-uuid-1' });
+    assert(r.ok, 'must return ok');
+    assertEqual(r.backupId,  'b-uuid-1');
+    assertEqual(r.savedName, 'ktp-backup-test.ktpbackup');
+    assert(typeof r.byteSize === 'number', 'byteSize must be a number');
+    assert(typeof r.downloadedAt === 'string', 'downloadedAt must be a string');
+    assert(!('storage_path' in r), 'storage_path must be stripped');
+    assert(!('checksum'     in r), 'checksum must be stripped');
+    assert(!('savePath'     in r), 'full savePath must be stripped');
+    assert(savedDialog !== null, 'save dialog must have been shown');
+  });
+
+  await testAsync('cloud-backup-ipc: downloadBackupToFile — dialog cancel returns cancelled', async function() {
+    var ipc = makeMockIpcMain();
+    ipc_module.register(ipc, makeGuard(true), makeLog(), makeDeps(makeMockBackup(), {
+      showSaveDialog: function() { return Promise.resolve(null); },
+    }));
+    var r = await ipc._invoke('cloud:downloadBackupToFile', {}, { workspaceId: WS_ID, backupId: 'b-uuid-1' });
+    assert(!r.ok); assertEqual(r.error, 'cancelled');
+  });
+
+  await testAsync('cloud-backup-ipc: downloadBackupToFile — license guard blocks', async function() {
+    var ipc = makeMockIpcMain();
+    ipc_module.register(ipc, makeGuard(false), makeLog(), makeDeps(makeMockBackup()));
+    var r = await ipc._invoke('cloud:downloadBackupToFile', {}, { workspaceId: WS_ID, backupId: 'b-uuid-1' });
+    assert(!r.ok); assertEqual(r.error, 'license_required');
+  });
+
+  await testAsync('cloud-backup-ipc: downloadBackupToFile — missing backupId returns invalid_input', async function() {
+    var ipc = makeMockIpcMain();
+    ipc_module.register(ipc, makeGuard(true), makeLog(), makeDeps(makeMockBackup()));
+    var r = await ipc._invoke('cloud:downloadBackupToFile', {}, { workspaceId: WS_ID });
+    assert(!r.ok); assertEqual(r.error, 'invalid_input');
+  });
+
+  await testAsync('cloud-backup-ipc: downloadBackupToFile — never calls restore/apply methods', async function() {
+    var ipc = makeMockIpcMain();
+    var backup = makeMockBackup();
+    var forbidden = ['restoreBackup', 'applyBackup', 'syncApply', 'pushSnapshot'];
+    forbidden.forEach(function(name) {
+      backup[name] = function() { throw new Error('forbidden: ' + name); };
+    });
+    ipc_module.register(ipc, makeGuard(true), makeLog(), makeDeps(backup, {
+      showSaveDialog: function() { return Promise.resolve('/tmp/f.ktpbackup'); },
+    }));
+    var r = await ipc._invoke('cloud:downloadBackupToFile', {}, { workspaceId: WS_ID, backupId: 'b-uuid-1' });
+    assert(r.ok, 'must succeed without calling forbidden methods');
+  });
+
+  await testAsync('cloud-backup-ipc: _pickDownloadResult — strips storage_path/checksum/savePath', async function() {
+    var result = {
+      ok: true, backupId: 'b-1', byteSize: 1024,
+      savedName: 'test.ktpbackup', downloadedAt: '2026-06-18T00:00:00Z',
+      storage_path: 'LEAK', checksum: 'LEAK', savePath: 'LEAK', device_id: 'LEAK',
+    };
+    var r = ipc_module._pickDownloadResult(result);
+    assert(r.ok);
+    assertEqual(r.savedName, 'test.ktpbackup');
+    assert(!('storage_path' in r), 'storage_path stripped');
+    assert(!('checksum'     in r), 'checksum stripped');
+    assert(!('savePath'     in r), 'savePath stripped');
+    assert(!('device_id'    in r), 'device_id stripped');
   });
 }
 

@@ -18,6 +18,8 @@
 // checksum to its caller.
 
 const crypto = require('crypto');
+const fs     = require('fs');
+const path   = require('path');
 const { isConfigured, getSupabaseUrl, getBaseHeaders } = require('./cloud-config');
 const _defaultAuth      = require('./cloud-auth');
 const _defaultWorkspace = require('./cloud-workspace');
@@ -36,16 +38,24 @@ const BACKUP_BUCKET  = 'ktp-backups';
 // ── Test seams ───────────────────────────────────────────────────────────────
 let _authImpl      = null;
 let _workspaceImpl = null;
-let _fetchImpl      = null;
+let _fetchImpl     = null;
+let _writeFileImpl = null;  // test seam for fs.promises.writeFile
 
-function _setAuth(a)      { _authImpl      = a || null; }
-function _setWorkspace(w) { _workspaceImpl = w || null; }
-function _setFetch(fn)    { _fetchImpl      = fn || null; }
-function _resetForTests() { _authImpl = null; _workspaceImpl = null; _fetchImpl = null; }
+function _setAuth(a)       { _authImpl      = a  || null; }
+function _setWorkspace(w)  { _workspaceImpl = w  || null; }
+function _setFetch(fn)     { _fetchImpl     = fn || null; }
+function _setWriteFile(fn) { _writeFileImpl = fn || null; }
+function _resetForTests()  {
+  _authImpl = null; _workspaceImpl = null;
+  _fetchImpl = null; _writeFileImpl = null;
+}
 
 function _auth()      { return _authImpl      || _defaultAuth; }
 function _workspace() { return _workspaceImpl || _defaultWorkspace; }
 function _doFetch(url, opts) { return (_fetchImpl || global.fetch)(url, opts); }
+function _doWriteFile(filePath, data) {
+  return _writeFileImpl ? _writeFileImpl(filePath, data) : fs.promises.writeFile(filePath, data);
+}
 
 // ── Validation helpers ───────────────────────────────────────────────────────
 
@@ -371,21 +381,15 @@ async function listCloudBackups(workspaceId, options) {
   };
 }
 
-// ── getBackupDownloadPreflight (1F.4C, read-only) ────────────────────────────
-// Validates that the caller has access to a specific backup via the existing
-// create_backup_download_url RPC. Returns only safe metadata.
-// Does NOT return storage_path, checksum, or a signed URL (download is 1F.4D+).
-// Does NOT restore or apply.
+// ── _callDownloadRpc (internal shared helper) ─────────────────────────────────
+// Calls create_backup_download_url RPC and returns the FULL internal result
+// including storage_path. This result MUST NEVER be returned directly to the
+// renderer — callers are responsible for stripping sensitive fields.
 
-async function getBackupDownloadPreflight(workspaceId, backupId) {
-  if (!isConfigured()) return { ok: false, error: 'not_configured' };
-  if (!_validateWorkspaceId(workspaceId)) return { ok: false, error: 'invalid_input' };
-  if (typeof backupId !== 'string' || !backupId.trim()) return { ok: false, error: 'invalid_input' };
-
+async function _callDownloadRpc(workspaceId, backupId) {
   var headers = await _buildAuthHeaders(true);
   if (!headers) return { ok: false, error: 'not_authenticated' };
-
-  var res, body;
+  var res;
   try {
     res = await _doFetch(getSupabaseUrl() + '/rest/v1/rpc/create_backup_download_url', {
       method:  'POST',
@@ -398,15 +402,13 @@ async function getBackupDownloadPreflight(workspaceId, backupId) {
   } catch (_) {
     return { ok: false, error: 'network_error' };
   }
-
-  // Parse body defensively — empty body (204, or failed RPC) must not throw.
+  var body;
   try {
     var raw = await res.text();
     body = raw && raw.trim() ? JSON.parse(raw) : null;
   } catch (_) {
     return { ok: false, error: 'download_preflight_failed' };
   }
-
   if (!res.ok || !body || body.ok !== true) {
     var errCode = (body && typeof body.error === 'string') ? body.error : '';
     if (errCode === 'backup_not_found')  return { ok: false, error: 'backup_not_found' };
@@ -415,13 +417,97 @@ async function getBackupDownloadPreflight(workspaceId, backupId) {
     if (!body)                           return { ok: false, error: 'download_preflight_failed' };
     return { ok: false, error: 'unknown_error' };
   }
+  // Internal only — storagePath never leaves this module.
+  return {
+    ok:          true,
+    storagePath: typeof body.storage_path === 'string' ? body.storage_path : null,
+    byteSize:    typeof body.byte_size    === 'number' ? body.byte_size    : null,
+  };
+}
 
-  // Strip storage_path and checksum — never returned to renderer.
+// ── getBackupDownloadPreflight (1F.4C, read-only) ────────────────────────────
+// Validates access via _callDownloadRpc. Returns only safe metadata to caller.
+// Does NOT return storage_path, checksum, or bytes. Does NOT restore or apply.
+
+async function getBackupDownloadPreflight(workspaceId, backupId) {
+  if (!isConfigured()) return { ok: false, error: 'not_configured' };
+  if (!_validateWorkspaceId(workspaceId)) return { ok: false, error: 'invalid_input' };
+  if (typeof backupId !== 'string' || !backupId.trim()) return { ok: false, error: 'invalid_input' };
+
+  var rpc = await _callDownloadRpc(workspaceId, backupId);
+  if (!rpc.ok) return rpc;
+
+  // Strip storage_path — never returned to renderer.
   return {
     ok:       true,
     backupId: backupId.trim(),
-    byteSize: typeof body.byte_size === 'number' ? body.byte_size : null,
-    // No signed URL in 1F.4C — download not yet implemented.
+    byteSize: rpc.byteSize,
+  };
+}
+
+// ── downloadBackupToFile (1F.4D) ─────────────────────────────────────────────
+// Downloads a .ktpbackup archive from Supabase Storage to a user-selected file.
+// Does NOT restore, apply, import, or modify local DATA in any way.
+//
+// input: { workspaceId, backupId, savePath }
+//   savePath is chosen by the user via Electron save dialog in the IPC layer —
+//   never derived from storage_path or any server-side value.
+
+async function downloadBackupToFile(input) {
+  input = input || {};
+  if (!isConfigured()) return { ok: false, error: 'not_configured' };
+
+  var workspaceId = typeof input.workspaceId === 'string' ? input.workspaceId.trim() : '';
+  if (!_validateWorkspaceId(workspaceId)) return { ok: false, error: 'invalid_input' };
+
+  var backupId = typeof input.backupId === 'string' ? input.backupId.trim() : '';
+  if (!backupId) return { ok: false, error: 'invalid_input' };
+
+  var savePath = typeof input.savePath === 'string' ? input.savePath.trim() : '';
+  if (!savePath) return { ok: false, error: 'cancelled' };
+
+  // Step 1 — validate membership + get internal storage_path.
+  var rpc = await _callDownloadRpc(workspaceId, backupId);
+  if (!rpc.ok) return { ok: false, error: rpc.error };
+  if (!rpc.storagePath) return { ok: false, error: 'download_failed' };
+
+  // Step 2 — download bytes from Storage using authenticated REST endpoint.
+  // The storage_path stays in main process — never reaches the renderer.
+  var dlHeaders = await _buildAuthHeaders(false);
+  if (!dlHeaders) return { ok: false, error: 'not_authenticated' };
+
+  var dlRes, fileContent;
+  try {
+    dlRes = await _doFetch(
+      getSupabaseUrl() + '/storage/v1/object/authenticated/' + BACKUP_BUCKET + '/' + rpc.storagePath,
+      { method: 'GET', headers: dlHeaders }
+    );
+    fileContent = await dlRes.text();
+  } catch (_) {
+    return { ok: false, error: 'download_failed' };
+  }
+  if (!dlRes.ok || !fileContent) return { ok: false, error: 'download_failed' };
+
+  // Step 3 — validate byte size before writing to disk.
+  var actualBytes = Buffer.byteLength(fileContent, 'utf8');
+  if (rpc.byteSize !== null && actualBytes !== rpc.byteSize) {
+    return { ok: false, error: 'download_size_mismatch' };
+  }
+
+  // Step 4 — write to user-selected path.
+  try {
+    await _doWriteFile(savePath, fileContent);
+  } catch (_) {
+    return { ok: false, error: 'save_failed' };
+  }
+
+  // Safe response — full savePath never returned; only the basename.
+  return {
+    ok:           true,
+    backupId:     backupId,
+    byteSize:     actualBytes,
+    savedName:    path.basename(savePath),
+    downloadedAt: new Date().toISOString(),
   };
 }
 
@@ -433,6 +519,7 @@ module.exports = {
   createManualCloudBackup,
   listCloudBackups,
   getBackupDownloadPreflight,
+  downloadBackupToFile,
   MAX_CLOUD_BACKUP_BYTES,
   BACKUP_ROLES,
   VALID_TRIGGERS,
@@ -440,6 +527,7 @@ module.exports = {
   _setAuth,
   _setWorkspace,
   _setFetch,
+  _setWriteFile,
   _resetForTests,
   // Exported for unit tests
   _validateWorkspaceId,

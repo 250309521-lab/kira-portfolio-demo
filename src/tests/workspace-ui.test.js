@@ -899,6 +899,22 @@ function register(test, assert, assertEqual) {
       'wsStartDownloadPreflight must not download bytes');
   });
 
+  test('backup list: wsDownloadBackup never calls restore/apply/import (1F.4D)', function() {
+    assert(!/wsDownloadBackup[\s\S]{0,600}restoreBackup/.test(_rendererSrc),
+      'wsDownloadBackup must not call restoreBackup');
+    assert(!/wsDownloadBackup[\s\S]{0,600}applyBackup/.test(_rendererSrc),
+      'wsDownloadBackup must not call applyBackup');
+    assert(!/wsDownloadBackup[\s\S]{0,600}DATA\s*=/.test(_rendererSrc),
+      'wsDownloadBackup must not overwrite DATA');
+    assert(/wsDownloadBackup[\s\S]{0,800}downloadBackupToFile/.test(_rendererSrc),
+      'wsDownloadBackup must call bridge.downloadBackupToFile');
+  });
+
+  test('backup list: download UI note uses textContent not innerHTML', function() {
+    assert(/getElementById\('ws-bkpl-dlst-[\s\S]{0,200}\.textContent\s*=/.test(_rendererSrc),
+      'download status must be set via textContent');
+  });
+
   // ── Error-state recovery UI (CLOUD-FOUNDATION-1F.4B-REMOTE-GATE-C1) ──────────
 
   test('error state: unknown_error shows ws-create-from-err button', function() {

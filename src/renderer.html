@@ -4119,6 +4119,8 @@ tbody tr[onclick] { cursor: pointer; }
 .ws-bkpl-trigger{color:var(--i4);font-size:10px;text-transform:uppercase;letter-spacing:.04em}
 .ws-bkpl-pf-ok{font-size:10px;color:var(--green,#22c55e)}
 .ws-bkpl-pf-err{font-size:10px;color:var(--red,#f43f5e)}
+.ws-bkpl-dlst-ok{font-size:10px;color:var(--green,#22c55e);margin-top:2px}
+.ws-bkpl-dlst-err{font-size:10px;color:var(--red,#f43f5e);margin-top:2px}
 .ws-empty-state{display:flex;flex-direction:column;align-items:center;text-align:center;padding:18px 16px;background:rgba(99,102,241,.05);border:1px dashed rgba(99,102,241,.2);border-radius:10px;margin-bottom:10px;gap:6px}
 .ws-empty-icon{font-size:24px;line-height:1;opacity:.65}
 .ws-empty-text{font-size:12.5px;font-weight:600;color:var(--i2)}
@@ -5113,10 +5115,14 @@ var STRINGS={
     wsBackupListHdr:'Bulut Yedek Geçmişi',wsBackupListLoading:'Yedekler yükleniyor…',
     wsBackupListEmpty:'Henüz bulut yedeği yok.',wsBackupListError:'Yedek listesi yüklenemedi.',
     wsBackupListRefresh:'Listeyi yenile',wsBackupListTrigger_manual:'Manuel',
-    wsBackupPrepDownload:'İndirme hazırlığı',
-    wsBackupPreflightOk:'Yedek doğrulandı — indirme gelecek güncellemede kullanılabilir.',
-    wsBackupPreflightErr:'Yedek doğrulaması başarısız.',
-    wsBackupDownloadNote:'İndirme/geri yükleme bu sürümde uygulanmaz.',
+    wsBackupPrepDownload:'Doğrula',
+    wsBackupPreflightOk:'Doğrulandı — indirebilirsiniz.',
+    wsBackupPreflightErr:'Doğrulama başarısız.',
+    wsBackupDownloadNote:'Yalnızca dosyayı kaydeder. Verilerinizi geri yüklemez veya değiştirmez.',
+    wsBackupDownloadBtn:'Yedek dosyasını indir',wsBackupDownloading:'İndiriliyor…',
+    wsBackupSaved:'Yedek dosyası kaydedildi.',
+    wsBackupDownloadFailed:'İndirme başarısız.',wsBackupDownloadCancelled:'İndirme iptal edildi.',
+    wsBackupSizeMismatch:'İndirilen dosya beklenen boyutla eşleşmiyor.',
     fieldNotFound:'Alan bulunamadı',pasted:'📋 Yapıştırıldı',pasteManual:'Ctrl+V ile yapıştırın',
     // Settings modals
     resetDataTitle:'🗑 Tüm Verileri Sıfırla',restoreTitle:'↩ Yedekten Geri Yükle',
@@ -5655,10 +5661,14 @@ var STRINGS={
     wsBackupListHdr:'Cloud Backup History',wsBackupListLoading:'Loading backups…',
     wsBackupListEmpty:'No cloud backups yet.',wsBackupListError:'Failed to load backup list.',
     wsBackupListRefresh:'Refresh list',wsBackupListTrigger_manual:'Manual',
-    wsBackupPrepDownload:'Prepare download',
-    wsBackupPreflightOk:'Backup verified — download will be available in a future update.',
-    wsBackupPreflightErr:'Backup verification failed.',
-    wsBackupDownloadNote:'Download/restore is not applied in this version.',
+    wsBackupPrepDownload:'Verify',
+    wsBackupPreflightOk:'Verified — ready to download.',
+    wsBackupPreflightErr:'Verification failed.',
+    wsBackupDownloadNote:'This only saves the backup file. It does not restore or change your data.',
+    wsBackupDownloadBtn:'Download backup file',wsBackupDownloading:'Downloading…',
+    wsBackupSaved:'Backup file saved.',
+    wsBackupDownloadFailed:'Download failed.',wsBackupDownloadCancelled:'Download cancelled.',
+    wsBackupSizeMismatch:'Downloaded file size does not match expected size.',
     fieldNotFound:'Field not found',pasted:'📋 Pasted',pasteManual:'Use Ctrl+V to paste',
     // Settings modals
     resetDataTitle:'🗑 Reset All Data',restoreTitle:'↩ Restore from Backup',
@@ -8174,18 +8184,23 @@ var BACKUP_UI = {
   lastUploadBytes:   null,
 };
 
-// ── Cloud backup list + download preflight (CLOUD-FOUNDATION-1F.4C, read-only) ──
-// Never restores. Never writes. Never applies sync.
+// ── Cloud backup list + download (CLOUD-FOUNDATION-1F.4C/D, read-only/file-only) ──
+// Never restores. Never applies. Never overwrites local DATA.
 var BACKUP_LIST_UI = {
   state:          'idle',  // 'idle' | 'loading' | 'ready' | 'error'
   backups:        [],
   error:          null,
   checkedForId:   null,
-  // Per-row download preflight (explicit user action only)
+  // Per-row preflight (1F.4C)
   preflightId:    null,    // backupId currently being preflighted
   preflightState: 'idle',  // 'idle' | 'loading' | 'ready' | 'error'
   preflightResult: null,   // {backupId, byteSize} | null
   preflightError: null,
+  // Per-row file download (1F.4D — explicit user action only, no restore/apply)
+  downloadId:     null,    // backupId currently being downloaded
+  downloadState:  'idle',  // 'idle' | 'downloading' | 'saved' | 'error'
+  downloadResult: null,    // {savedName, byteSize, downloadedAt} | null
+  downloadError:  null,
 };
 
 function _wsRoleLabel(role) {
@@ -8646,6 +8661,52 @@ async function wsStartDownloadPreflight(idx) {
   renderWorkspaceCard();
 }
 
+function _backupDownloadErrMsg(errCode) {
+  if (errCode === 'cancelled')             return t('wsBackupDownloadCancelled');
+  if (errCode === 'download_failed')       return t('wsBackupDownloadFailed');
+  if (errCode === 'download_size_mismatch') return t('wsBackupSizeMismatch');
+  if (errCode === 'save_failed')           return t('wsBackupDownloadFailed');
+  if (errCode === 'backup_not_found')      return t('wsNotFound');
+  if (errCode === 'not_authenticated')     return t('wsErrorAuth');
+  if (errCode === 'network_error')         return t('wsErrorNetwork');
+  if (errCode === 'license_required')      return t('wsLicenseRequired');
+  return t('wsBackupDownloadFailed');
+}
+
+// Download a cloud backup to a user-selected file (1F.4D).
+// NEVER restores. NEVER applies. NEVER modifies local DATA.
+// Only saves the .ktpbackup file to disk.
+async function wsDownloadBackup(idx) {
+  var backup = BACKUP_LIST_UI.backups[idx];
+  if (!backup || typeof backup.backupId !== 'string' || !backup.backupId) return;
+  var backupId = backup.backupId;
+  var bridge = _backupBridge();
+  var workspaceId = WS_UI.activeId;
+  if (!bridge || !workspaceId) return;
+  if (BACKUP_LIST_UI.downloadState === 'downloading') return; // re-entry guard
+  BACKUP_LIST_UI.downloadId     = backupId;
+  BACKUP_LIST_UI.downloadState  = 'downloading';
+  BACKUP_LIST_UI.downloadResult = null;
+  BACKUP_LIST_UI.downloadError  = null;
+  renderWorkspaceCard();
+  var _r;
+  try {
+    _r = await bridge.downloadBackupToFile({ workspaceId: workspaceId, backupId: backupId });
+  } catch (_) {
+    BACKUP_LIST_UI.downloadState = 'error'; BACKUP_LIST_UI.downloadError = 'download_failed';
+    renderWorkspaceCard(); return;
+  }
+  if (!_r || !_r.ok) {
+    BACKUP_LIST_UI.downloadState = 'error';
+    BACKUP_LIST_UI.downloadError = _r ? (_r.error || 'download_failed') : 'download_failed';
+    renderWorkspaceCard(); return;
+  }
+  BACKUP_LIST_UI.downloadState  = 'saved';
+  BACKUP_LIST_UI.downloadResult = { savedName: _r.savedName, byteSize: _r.byteSize, downloadedAt: _r.downloadedAt };
+  toast(t('wsBackupSaved'), 'green');
+  renderWorkspaceCard();
+}
+
 function renderWorkspaceCard() {
   var card = document.getElementById('cloud-workspace-card');
   if (!card) return;
@@ -8770,9 +8831,22 @@ function renderWorkspaceCard() {
                 (_isPf && BACKUP_LIST_UI.preflightState === 'error'
                   ? '<div class="ws-bkpl-pf-err ws-sync-detail" id="ws-bkpl-pf-' + _bi + '"></div>'
                   : '') +
-                '<button class="btn btn-ghost btn-xs" id="ws-bkpl-prep-' + _bi + '"' +
-                  (BACKUP_LIST_UI.preflightState === 'loading' ? ' disabled' : '') +
-                  ' onclick="wsStartDownloadPreflight(' + _bi + ')"></button>' +
+                '<div style="display:flex;gap:5px;flex-wrap:wrap">' +
+                  '<button class="btn btn-ghost btn-xs" id="ws-bkpl-prep-' + _bi + '"' +
+                    (BACKUP_LIST_UI.preflightState === 'loading' ? ' disabled' : '') +
+                    ' onclick="wsStartDownloadPreflight(' + _bi + ')"></button>' +
+                  (_isPf && BACKUP_LIST_UI.preflightState === 'ready'
+                    ? '<button class="btn btn-secondary btn-xs" id="ws-bkpl-dl-' + _bi + '"' +
+                        (BACKUP_LIST_UI.downloadState === 'downloading' ? ' disabled' : '') +
+                        ' onclick="wsDownloadBackup(' + _bi + ')"></button>'
+                    : '') +
+                '</div>' +
+                (BACKUP_LIST_UI.downloadId === b.backupId && BACKUP_LIST_UI.downloadState === 'downloading'
+                  ? '<div class="ws-sync-summary" id="ws-bkpl-dlst-' + _bi + '"></div>' : '') +
+                (BACKUP_LIST_UI.downloadId === b.backupId && BACKUP_LIST_UI.downloadState === 'saved'
+                  ? '<div class="ws-bkpl-pf-ok ws-sync-detail" id="ws-bkpl-dlst-' + _bi + '"></div>' : '') +
+                (BACKUP_LIST_UI.downloadId === b.backupId && BACKUP_LIST_UI.downloadState === 'error'
+                  ? '<div class="ws-bkpl-pf-err ws-sync-detail" id="ws-bkpl-dlst-' + _bi + '"></div>' : '') +
               '</div>';
             }).join('') +
           '</div>'
@@ -8957,12 +9031,24 @@ function renderWorkspaceCard() {
           if (_ltrig) _ltrig.textContent = _lb.trigger === 'manual' ? t('wsBackupListTrigger_manual') : (_lb.trigger || '');
           var _lprep = document.getElementById('ws-bkpl-prep-' + _li);
           if (_lprep) _lprep.textContent = t('wsBackupPrepDownload');
+          var _ldl = document.getElementById('ws-bkpl-dl-' + _li);
+          if (_ldl) _ldl.textContent = BACKUP_LIST_UI.downloadState === 'downloading' ? t('wsBackupDownloading') : t('wsBackupDownloadBtn');
           var _lpf = document.getElementById('ws-bkpl-pf-' + _li);
           if (_lpf) {
             if (BACKUP_LIST_UI.preflightId === _lb.backupId) {
               if (BACKUP_LIST_UI.preflightState === 'loading')  _lpf.textContent = t('wsBackupListLoading');
               else if (BACKUP_LIST_UI.preflightState === 'ready')  _lpf.textContent = t('wsBackupPreflightOk');
               else if (BACKUP_LIST_UI.preflightState === 'error')  _lpf.textContent = t('wsBackupPreflightErr');
+            }
+          }
+          var _ldst = document.getElementById('ws-bkpl-dlst-' + _li);
+          if (_ldst) {
+            if (BACKUP_LIST_UI.downloadId === _lb.backupId) {
+              if (BACKUP_LIST_UI.downloadState === 'downloading') _ldst.textContent = t('wsBackupDownloading');
+              else if (BACKUP_LIST_UI.downloadState === 'saved' && BACKUP_LIST_UI.downloadResult) {
+                _ldst.textContent = t('wsBackupSaved') + (BACKUP_LIST_UI.downloadResult.savedName ? ' ' + BACKUP_LIST_UI.downloadResult.savedName : '');
+              }
+              else if (BACKUP_LIST_UI.downloadState === 'error') _ldst.textContent = _backupDownloadErrMsg(BACKUP_LIST_UI.downloadError);
             }
           }
         }

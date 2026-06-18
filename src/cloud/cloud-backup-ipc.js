@@ -99,6 +99,28 @@ function _pickDownloadPreflight(result) {
   };
 }
 
+// Whitelist the file-download result: safe confirmation fields only.
+// Full savePath, storage_path, and checksum never reach the renderer.
+function _pickDownloadResult(result) {
+  if (!result || result.ok !== true) return _sanitize(result);
+  return {
+    ok:           true,
+    backupId:     typeof result.backupId     === 'string' ? result.backupId     : null,
+    byteSize:     typeof result.byteSize     === 'number' ? result.byteSize     : null,
+    savedName:    typeof result.savedName    === 'string' ? result.savedName    : null,
+    downloadedAt: typeof result.downloadedAt === 'string' ? result.downloadedAt : null,
+  };
+}
+
+// Default save dialog — uses Electron's dialog in main process.
+// Deps can override this for tests.
+function _defaultShowSaveDialog(opts) {
+  var dialog = require('electron').dialog;
+  return dialog.showSaveDialog(opts).then(function(res) {
+    return res.canceled ? null : (res.filePath || null);
+  });
+}
+
 // register(ipcMain, licenseGuard, log, deps)
 //   deps.cloudBackup              — defaults to require('./cloud-backup')
 //   deps.buildPreflightArchive    — (rendererState, importProfiles) => { byteSize, checksum }
@@ -106,12 +128,14 @@ function _pickDownloadPreflight(result) {
 //   deps.buildManualBackupArchive — (rendererState, importProfiles) => { archiveStr, byteSize, checksum, appVersion }
 //                                   builds the FULL archive string IN MEMORY (no disk write)
 //   deps.getLastLocalBackupAt     — () => ISO string | null
+//   deps.showSaveDialog           — (opts) => Promise<string|null> — test seam for Electron save dialog
 function register(ipcMain, licenseGuard, log, deps) {
   deps = deps || {};
   var cloudBackup = deps.cloudBackup || require('./cloud-backup');
   var buildPreflightArchive    = deps.buildPreflightArchive;
   var buildManualBackupArchive = deps.buildManualBackupArchive;
   var getLastLocalBackupAt     = deps.getLastLocalBackupAt || function() { return null; };
+  var showSaveDialog           = deps.showSaveDialog || _defaultShowSaveDialog;
 
   // ── cloud:getCloudBackupReadiness ──────────────────────────────────────────
   ipcMain.handle('cloud:getCloudBackupReadiness', async function(_event, payload) {
@@ -246,6 +270,40 @@ function register(ipcMain, licenseGuard, log, deps) {
       return { ok: false, error: 'unknown_error' };
     }
   });
+
+  // ── cloud:downloadBackupToFile (1F.4D) — saves .ktpbackup file to disk ──────
+  // Does NOT restore. Does NOT apply. Does NOT modify local DATA.
+  // Save path is chosen by the user via Electron dialog in this handler —
+  // the renderer never provides or receives a storage path.
+  ipcMain.handle('cloud:downloadBackupToFile', async function(_event, payload) {
+    try {
+      var guard = await licenseGuard();
+      if (!guard.ok) return { ok: false, error: 'license_required' };
+      if (!_validateWorkspaceIdPayload(payload)) return { ok: false, error: 'invalid_input' };
+      if (typeof payload.backupId !== 'string' || !payload.backupId.trim()) {
+        return { ok: false, error: 'invalid_input' };
+      }
+
+      // Show save dialog in main process — renderer never sees the chosen path.
+      var defaultName = 'ktp-backup-' + new Date().toISOString().slice(0, 10) + '.ktpbackup';
+      var savePath = await showSaveDialog({
+        title:       'Save Cloud Backup File',
+        defaultPath: defaultName,
+        filters:     [{ name: 'KTP Backup', extensions: ['ktpbackup'] }],
+      });
+      if (!savePath) return { ok: false, error: 'cancelled' };
+
+      var result = await cloudBackup.downloadBackupToFile({
+        workspaceId: payload.workspaceId,
+        backupId:    payload.backupId,
+        savePath:    savePath,
+      });
+      return _pickDownloadResult(result);
+    } catch (e) {
+      log('cloud:downloadBackupToFile error: ' + ((e && e.code) || 'unknown_error'));
+      return { ok: false, error: 'unknown_error' };
+    }
+  });
 }
 
 module.exports = {
@@ -255,6 +313,7 @@ module.exports = {
   _pickManualBackupResult,
   _pickBackupList,
   _pickDownloadPreflight,
+  _pickDownloadResult,
   _validateWorkspaceIdPayload,
   _STRIP_KEYS,
 };

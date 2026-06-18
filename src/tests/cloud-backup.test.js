@@ -584,6 +584,126 @@ async function registerAsync(testAsync, assert, assertEqual) {
     assert(!r.ok, 'must return ok:false for malformed JSON');
     assertEqual(r.error, 'download_preflight_failed', 'malformed JSON → download_preflight_failed');
   });
+
+  // ── downloadBackupToFile (CLOUD-FOUNDATION-1F.4D) ────────────────────────
+
+  // Helper: sets up fetch mock for the two sequential calls in downloadBackupToFile
+  // (1) POST /rpc/create_backup_download_url  (2) GET /storage/.../authenticated/...
+  function makeDownloadFetch(fileContent, rpcPayload, opts) {
+    opts = opts || {};
+    return function(url) {
+      if (url.includes('rpc/create_backup_download_url')) {
+        if (opts.rpcFail) return Promise.resolve({
+          ok: false, text: function() { return Promise.resolve(JSON.stringify({ ok: false, error: opts.rpcErr || 'backup_not_found' })); },
+        });
+        return Promise.resolve({
+          ok: true, text: function() {
+            return Promise.resolve(JSON.stringify(rpcPayload || {
+              ok: true, bucket: 'ktp-backups',
+              storage_path: 'workspaces/ws-1/2026-file.ktpbackup',
+              checksum: 'a'.repeat(64),
+              byte_size: Buffer.byteLength(fileContent, 'utf8'),
+            }));
+          },
+        });
+      }
+      // Storage download call
+      if (opts.dlFail) return Promise.resolve({ ok: false, text: function() { return Promise.resolve(''); } });
+      return Promise.resolve({
+        ok: true, text: function() { return Promise.resolve(fileContent); },
+      });
+    };
+  }
+
+  var GOOD_FILE = '{"manifest":{"version":1},"rendererState":"{}","mainStore":{}}';
+
+  await testAsync('cloud-backup: downloadBackupToFile — success writes file and returns safe result', async function() {
+    var writtenPath = null, writtenData = null;
+    cb._setAuth(makeMockAuth(true));
+    cb._setFetch(makeDownloadFetch(GOOD_FILE));
+    cb._setWriteFile(function(p, d) { writtenPath = p; writtenData = d; return Promise.resolve(); });
+    var r = await cb.downloadBackupToFile({ workspaceId: WS_ID, backupId: 'b-uuid-1', savePath: '/tmp/backup.ktpbackup' });
+    cb._resetForTests();
+    assert(r.ok, 'must return ok');
+    assertEqual(r.backupId,  'b-uuid-1');
+    assert(typeof r.byteSize === 'number' && r.byteSize > 0, 'byteSize must be positive');
+    assertEqual(r.savedName, 'backup.ktpbackup', 'savedName must be basename only');
+    assert(typeof r.downloadedAt === 'string', 'downloadedAt must be ISO string');
+    assert(!('storage_path' in r), 'storage_path must never appear in result');
+    assert(!('checksum'     in r), 'checksum must never appear in result');
+    assert(!('savePath'     in r), 'full savePath must never appear in result');
+    assert(writtenPath === '/tmp/backup.ktpbackup', 'must write to correct path');
+    assert(writtenData === GOOD_FILE, 'must write correct content');
+  });
+
+  await testAsync('cloud-backup: downloadBackupToFile — cancelled when savePath empty', async function() {
+    cb._setAuth(makeMockAuth(true));
+    var r = await cb.downloadBackupToFile({ workspaceId: WS_ID, backupId: 'b-uuid-1', savePath: '' });
+    cb._resetForTests();
+    assertEqual(r.error, 'cancelled');
+  });
+
+  await testAsync('cloud-backup: downloadBackupToFile — not_configured error propagated', async function() {
+    config._setConfigForTests('', '');
+    try {
+      var r = await cb.downloadBackupToFile({ workspaceId: WS_ID, backupId: 'b-uuid-1', savePath: '/tmp/f.ktpbackup' });
+      assertEqual(r.error, 'not_configured');
+    } finally { config._resetConfigForTests(); cb._resetForTests(); }
+  });
+
+  await testAsync('cloud-backup: downloadBackupToFile — RPC backup_not_found propagated', async function() {
+    cb._setAuth(makeMockAuth(true));
+    cb._setFetch(makeDownloadFetch(GOOD_FILE, null, { rpcFail: true, rpcErr: 'backup_not_found' }));
+    var r = await cb.downloadBackupToFile({ workspaceId: WS_ID, backupId: 'b-missing', savePath: '/tmp/f.ktpbackup' });
+    cb._resetForTests();
+    assertEqual(r.error, 'backup_not_found');
+  });
+
+  await testAsync('cloud-backup: downloadBackupToFile — download_failed when storage GET fails', async function() {
+    cb._setAuth(makeMockAuth(true));
+    cb._setFetch(makeDownloadFetch(GOOD_FILE, null, { dlFail: true }));
+    cb._setWriteFile(function() { return Promise.resolve(); });
+    var r = await cb.downloadBackupToFile({ workspaceId: WS_ID, backupId: 'b-uuid-1', savePath: '/tmp/f.ktpbackup' });
+    cb._resetForTests();
+    assertEqual(r.error, 'download_failed');
+  });
+
+  await testAsync('cloud-backup: downloadBackupToFile — download_size_mismatch when bytes differ', async function() {
+    var wrongSize = Buffer.byteLength(GOOD_FILE, 'utf8') + 100;
+    cb._setAuth(makeMockAuth(true));
+    cb._setFetch(makeDownloadFetch(GOOD_FILE, {
+      ok: true, bucket: 'ktp-backups',
+      storage_path: 'workspaces/ws-1/f.ktpbackup',
+      checksum: 'a'.repeat(64), byte_size: wrongSize,
+    }));
+    cb._setWriteFile(function() { return Promise.resolve(); });
+    var r = await cb.downloadBackupToFile({ workspaceId: WS_ID, backupId: 'b-uuid-1', savePath: '/tmp/f.ktpbackup' });
+    cb._resetForTests();
+    assertEqual(r.error, 'download_size_mismatch');
+  });
+
+  await testAsync('cloud-backup: downloadBackupToFile — save_failed when writeFile throws', async function() {
+    cb._setAuth(makeMockAuth(true));
+    cb._setFetch(makeDownloadFetch(GOOD_FILE));
+    cb._setWriteFile(function() { return Promise.reject(new Error('EACCES')); });
+    var r = await cb.downloadBackupToFile({ workspaceId: WS_ID, backupId: 'b-uuid-1', savePath: '/tmp/f.ktpbackup' });
+    cb._resetForTests();
+    assertEqual(r.error, 'save_failed');
+  });
+
+  await testAsync('cloud-backup: downloadBackupToFile — never calls restore/apply/import functions', async function() {
+    var forbidden = ['restoreBackup', 'applyBackup', 'syncApply', 'push_snapshot'];
+    var called = [];
+    var origFetch = makeDownloadFetch(GOOD_FILE);
+    cb._setAuth(makeMockAuth(true));
+    cb._setFetch(origFetch);
+    cb._setWriteFile(function() { return Promise.resolve(); });
+    forbidden.forEach(function(name) { global[name] = function() { called.push(name); }; });
+    await cb.downloadBackupToFile({ workspaceId: WS_ID, backupId: 'b-uuid-1', savePath: '/tmp/f.ktpbackup' });
+    cb._resetForTests();
+    forbidden.forEach(function(name) { delete global[name]; });
+    assertEqual(called.length, 0, 'no forbidden function must be called');
+  });
 }
 
 module.exports = { register, registerAsync };
