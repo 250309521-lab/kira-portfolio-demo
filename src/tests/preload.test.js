@@ -167,16 +167,24 @@ function register(test, assert, assertEqual) {
     });
   });
 
-  test('preload: cloudBackup exposes exactly the six expected methods and nothing else (CLOUD-FOUNDATION-1F.4D)', function() {
+  test('preload: cloudBackup exposes exactly the seven expected methods and nothing else (CLOUD-FOUNDATION-1F.4F)', function() {
     var mock = makeElectronMock();
     loadPreload(mock);
     var keys = Object.keys(mock._worlds.cloudBackup).sort();
     var expected = [
       'buildCloudBackupPreflight', 'createManualBackup', 'getCloudBackupReadiness',
       'listBackups', 'createBackupDownloadPreflight', 'downloadBackupToFile',
+      'createAutoBackup',
     ].sort();
     assertEqual(keys.join(','), expected.join(','),
-      'cloudBackup must expose exactly the six approved backup methods');
+      'cloudBackup must expose exactly the seven approved backup methods');
+  });
+
+  test('preload: cloudBackup.createAutoBackup is a function (CLOUD-FOUNDATION-1F.4F)', function() {
+    var mock = makeElectronMock();
+    loadPreload(mock);
+    assert(typeof mock._worlds.cloudBackup.createAutoBackup === 'function',
+      'createAutoBackup must be a function');
   });
 
   test('preload: cloudBackup.downloadBackupToFile is a function (CLOUD-FOUNDATION-1F.4D)', function() {
@@ -308,6 +316,17 @@ async function registerAsync(testAsync, assert, assertEqual) {
     assert(entry !== undefined, 'cloud:createManualBackup must be invoked');
     assertEqual(entry.payload.workspaceId, 'ws-uuid-test-001', 'payload.workspaceId must be forwarded');
     assertEqual(entry.payload.rendererState, '{"a":1}', 'payload.rendererState must be forwarded');
+  });
+
+  await testAsync('preload: createAutoBackup(payload) invokes cloud:createAutoBackup with payload forwarded (CLOUD-FOUNDATION-1F.4F)', async function() {
+    var mock = makeElectronMock();
+    loadPreload(mock);
+    var payload = { workspaceId: 'ws-uuid-test-001', rendererState: '{"x":2}' };
+    await mock._worlds.cloudBackup.createAutoBackup(payload);
+    var entry = mock._invokeLog.find(function(e) { return e.channel === 'cloud:createAutoBackup'; });
+    assert(entry !== undefined, 'cloud:createAutoBackup must be invoked');
+    assertEqual(entry.payload.workspaceId, 'ws-uuid-test-001', 'payload.workspaceId must be forwarded');
+    assertEqual(entry.payload.rendererState, '{"x":2}', 'payload.rendererState must be forwarded');
   });
 
   await testAsync('preload: downloadBackupToFile(payload) invokes cloud:downloadBackupToFile with payload forwarded (CLOUD-FOUNDATION-1F.4D)', async function() {

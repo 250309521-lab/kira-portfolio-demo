@@ -4706,6 +4706,8 @@ function saveLocal(){
     const t=new Date();
     const lbl=document.getElementById('save-lbl');
     if(lbl) lbl.textContent=`Kaydedildi ${t.getHours().toString().padStart(2,'0')}:${t.getMinutes().toString().padStart(2,'0')}`;
+    // NOTE: this saveLocal definition is overridden by the HOTFIX block (search
+    // "window.saveLocal = saveLocal = function"). The 1F.4F hook lives there.
   }catch(e){console.error('saveLocal',e);}
 }
 
@@ -5118,6 +5120,9 @@ var STRINGS={
     wsBackupCleanupFailed:'Meta veri hatası ve nesne temizleme başarısız (yetim yükleme riski).',
     wsBackupStatusActive:'Bulut koruması aktif.',
     wsBackupStatusNoBackup:'Otomatik yedekleme yakında geliyor. Manuel yedek Gelişmiş seçenekler altında mevcut.',
+    wsBackupAutoPending:'Bulut yedek bekliyor — otomatik yeniden deneyecek.',
+    wsBackupAutoBacking:'Yedekleniyor…',
+    wsBackupAutoFailed:'Bulut yedek dikkat gerektiriyor',
     wsBackupLastBackup:'Son bulut yedek:',
     wsBackupAdvToggle:'Gelişmiş yedek seçenekleri',
     wsBackupExportBtn:'Yedek dosyasını dışa aktar',
@@ -5669,6 +5674,9 @@ var STRINGS={
     wsBackupCleanupFailed:'Metadata write failed and cleanup also failed (orphaned upload risk).',
     wsBackupStatusActive:'Cloud protection is active.',
     wsBackupStatusNoBackup:'Automatic backup is coming. Manual backup is available under Advanced.',
+    wsBackupAutoPending:'Cloud backup pending — will retry automatically.',
+    wsBackupAutoBacking:'Backing up…',
+    wsBackupAutoFailed:'Cloud backup needs attention',
     wsBackupLastBackup:'Last cloud backup:',
     wsBackupAdvToggle:'Advanced backup options',
     wsBackupExportBtn:'Export backup file',
@@ -8221,6 +8229,201 @@ var BACKUP_LIST_UI = {
   downloadError:  null,
 };
 
+// ── Automatic cloud backup state (CLOUD-FOUNDATION-1F.4F) ───────────────────
+// Fingerprint-gated debounced background upload.
+// Never restores. Never modifies local DATA.
+//
+// Key design invariants:
+//   • saveLocal() calls every 30s (auto-save) do NOT reset the debounce timer
+//     unless the renderer state actually changed (fingerprint check).
+//   • Retry fires automatically after network failure — no user edit required.
+//   • Only one upload in flight at a time.
+//   • Successful upload records the hash so identical state is never re-uploaded.
+
+var AUTO_BACKUP_UI = {
+  state:            'idle', // 'idle' | 'pending' | 'uploading' | 'ok' | 'error'
+  lastSuccessAt:    null,   // ISO string, set on success
+  lastErrorCode:    null,   // error code on failure; null when ok/idle
+  lastUploadedHash: null,   // fingerprint of last successfully uploaded state
+  pendingHash:      null,   // fingerprint of state that needs uploading
+  inFlight:         false,  // true while createAutoBackup IPC call is awaited
+  nextRetryAt:      null,   // Date.now() + retryMs, for display only
+};
+var _autoBackupDebounceTimer = null; // fires after debounce period (data-change gate)
+var _autoBackupRetryTimer    = null; // fires after failure retry period
+var AUTO_BACKUP_DEBOUNCE_MS  = 3 * 60 * 1000; // 3 min quiet period before upload
+var AUTO_BACKUP_RETRY_MS     = 5 * 60 * 1000; // 5 min backoff after network failure
+
+// Lightweight djb2-style fingerprint — not cryptographic, just change detection.
+function _djb2Hash(str) {
+  var h = 5381;
+  for (var i = 0; i < str.length; i++) { h = ((h << 5) + h) + str.charCodeAt(i); h = h & h; }
+  return h.toString(36);
+}
+
+// Dev-mode diagnostic logger for the auto-backup scheduler.
+// SILENT BY DEFAULT — enable with:  window.__KTP_AUTO_BACKUP_DEBUG = true
+// Never logs DATA contents, tokens, hashes, or secrets.
+var _abDevMode = (typeof window !== 'undefined') && window.location &&
+  window.location.href.indexOf('renderer.min.html') === -1;
+function _abLog(msg, extra) {
+  // Requires BOTH dev mode (not min.html) AND explicit debug flag.
+  if (!_abDevMode || !window.__KTP_AUTO_BACKUP_DEBUG) return;
+  if (extra !== undefined) console.log('[auto-backup]', msg, extra);
+  else console.log('[auto-backup]', msg);
+}
+
+// Called from saveLocal() — fingerprints the current state and schedules a
+// debounced backup ONLY when the fingerprint differs from the last uploaded hash.
+//
+// ROOT CAUSE FIX (1F.4F-SCHEDULER-NOT-TRIGGERING-FIX):
+//   Previous version required cloud auth state === 'authenticated' here, which
+//   silently blocked every saveLocal() call before cloud init completed.
+//   Auth/workspace checks now happen only at wsAutoBackupTick() time, not here.
+//
+//   The 30-second auto-save timer does NOT reset the debounce while DATA is unchanged
+//   (hash === pendingHash guard).
+function _scheduleAutoCloudBackup() {
+  // Only skip if the cloud bridge doesn't exist at all (cloud not configured).
+  // Auth and workspace checks are deferred to wsAutoBackupTick() so state
+  // transitions that occur after app startup are handled correctly.
+  if (!_backupBridge()) { _abLog('skip: no bridge'); return; }
+
+  var hash = _djb2Hash(JSON.stringify(DATA));
+  _abLog('schedule called', { hash: hash, pendingHash: AUTO_BACKUP_UI.pendingHash, lastUploadedHash: AUTO_BACKUP_UI.lastUploadedHash, state: AUTO_BACKUP_UI.state });
+
+  // Already uploaded this exact state — nothing to do.
+  if (hash === AUTO_BACKUP_UI.lastUploadedHash) { _abLog('skip: already uploaded'); return; }
+
+  // Same hash as the one already pending AND debounce timer running —
+  // the 30-second auto-save must NOT reset the 3-minute timer.
+  if (hash === AUTO_BACKUP_UI.pendingHash && _autoBackupDebounceTimer !== null) {
+    _abLog('skip: same hash, timer running'); return;
+  }
+
+  // New or changed fingerprint — record it.
+  AUTO_BACKUP_UI.pendingHash = hash;
+
+  // If an upload is in flight, the post-upload handler checks pendingHash
+  // and starts a new debounce if needed. Don't start a timer now.
+  if (AUTO_BACKUP_UI.inFlight) { _abLog('skip timer: inFlight'); return; }
+
+  // Start (or restart) the debounce timer.
+  if (_autoBackupDebounceTimer) clearTimeout(_autoBackupDebounceTimer);
+  _autoBackupDebounceTimer = setTimeout(wsAutoBackupTick, AUTO_BACKUP_DEBOUNCE_MS);
+  _abLog('debounce started', { debounceMs: AUTO_BACKUP_DEBOUNCE_MS });
+
+  if (AUTO_BACKUP_UI.state !== 'pending' && AUTO_BACKUP_UI.state !== 'uploading') {
+    AUTO_BACKUP_UI.state = 'pending';
+    renderWorkspaceCard();
+  }
+}
+
+// Fires after debounce or retry timer — performs the background cloud upload.
+// Auth/workspace/role checks happen here, NOT in _scheduleAutoCloudBackup.
+async function wsAutoBackupTick() {
+  _autoBackupDebounceTimer = null;
+  _autoBackupRetryTimer    = null;
+  AUTO_BACKUP_UI.nextRetryAt = null;
+
+  _abLog('tick fired', { pendingHash: AUTO_BACKUP_UI.pendingHash, cloudState: CLOUD_UI.state, wsId: !!WS_UI.activeId, inFlight: AUTO_BACKUP_UI.inFlight });
+
+  if (AUTO_BACKUP_UI.inFlight) { _abLog('tick: already inFlight'); return; }
+  if (!AUTO_BACKUP_UI.pendingHash) { _abLog('tick: no pendingHash'); return; }
+
+  // Auth/workspace checks at upload time — not at schedule time.
+  if (!WS_UI.activeId) {
+    // Workspace not yet restored (cloud init still in progress) — retry later.
+    _abLog('tick: no activeId, will retry');
+    _scheduleAutoRetry(); return;
+  }
+  var _cs = CLOUD_UI.state;
+  if (_cs !== 'authenticated') {
+    if (_cs === 'loading' || _cs === 'reconnecting' || _cs === 'offline_cached') {
+      // Transient — retry after backoff.
+      _abLog('tick: not yet authenticated, state=' + _cs + ', will retry');
+      _scheduleAutoRetry(); return;
+    }
+    // Permanent non-auth state (signed_out, not_configured, error_*) — surface error.
+    _abLog('tick: permanent non-auth state=' + _cs);
+    AUTO_BACKUP_UI.state = 'error'; AUTO_BACKUP_UI.lastErrorCode = 'not_authenticated';
+    renderWorkspaceCard(); return;
+  }
+
+  var bridge = _backupBridge();
+  if (!bridge) {
+    AUTO_BACKUP_UI.state = 'error'; AUTO_BACKUP_UI.lastErrorCode = 'not_authenticated';
+    renderWorkspaceCard(); return;
+  }
+
+  AUTO_BACKUP_UI.inFlight = true;
+  AUTO_BACKUP_UI.state = 'uploading';
+  renderWorkspaceCard();
+
+  var _r;
+  try {
+    _r = await bridge.createAutoBackup({ workspaceId: WS_UI.activeId, rendererState: JSON.stringify(DATA) });
+  } catch (_) {
+    AUTO_BACKUP_UI.inFlight = false;
+    AUTO_BACKUP_UI.state = 'pending';
+    AUTO_BACKUP_UI.lastErrorCode = 'unknown_error';
+    _abLog('tick: createAutoBackup threw');
+    _scheduleAutoRetry(); renderWorkspaceCard(); return;
+  }
+
+  AUTO_BACKUP_UI.inFlight = false;
+
+  if (!_r || !_r.ok) {
+    var _ec = _r ? (_r.error || 'unknown_error') : 'unknown_error';
+    AUTO_BACKUP_UI.lastErrorCode = _ec;
+    _abLog('tick: upload failed', { error: _ec });
+    if (_ec === 'not_authenticated' || _ec === 'permission_denied' || _ec === 'not_configured') {
+      AUTO_BACKUP_UI.state = 'error'; renderWorkspaceCard(); return;
+    }
+    AUTO_BACKUP_UI.state = 'pending';
+    _scheduleAutoRetry(); renderWorkspaceCard(); return;
+  }
+
+  _abLog('tick: upload success');
+
+  // Success.
+  var uploadedHash = AUTO_BACKUP_UI.pendingHash;
+  AUTO_BACKUP_UI.lastUploadedHash = uploadedHash;
+  AUTO_BACKUP_UI.lastSuccessAt = _r.createdAt || new Date().toISOString();
+  AUTO_BACKUP_UI.lastErrorCode = null;
+
+  // Check if new data arrived while uploading.
+  var currentHash = _djb2Hash(JSON.stringify(DATA));
+  if (currentHash !== uploadedHash && currentHash !== AUTO_BACKUP_UI.lastUploadedHash) {
+    // Data changed during upload — schedule another backup without resetting pendingHash.
+    AUTO_BACKUP_UI.pendingHash = currentHash;
+    AUTO_BACKUP_UI.state = 'pending';
+    if (_autoBackupDebounceTimer) clearTimeout(_autoBackupDebounceTimer);
+    _autoBackupDebounceTimer = setTimeout(wsAutoBackupTick, AUTO_BACKUP_DEBOUNCE_MS);
+  } else {
+    AUTO_BACKUP_UI.pendingHash = null;
+    AUTO_BACKUP_UI.state = 'ok';
+  }
+
+  // No toast — silent background operation.
+  wsRefreshBackupList();
+  renderWorkspaceCard();
+}
+
+// Schedules an automatic retry after a transient upload failure.
+// Fires independently of DATA changes — no user edit required.
+function _scheduleAutoRetry() {
+  if (_autoBackupRetryTimer) clearTimeout(_autoBackupRetryTimer);
+  AUTO_BACKUP_UI.nextRetryAt = Date.now() + AUTO_BACKUP_RETRY_MS;
+  _autoBackupRetryTimer = setTimeout(function() {
+    _autoBackupRetryTimer = null;
+    AUTO_BACKUP_UI.nextRetryAt = null;
+    if (AUTO_BACKUP_UI.pendingHash && !AUTO_BACKUP_UI.inFlight) {
+      wsAutoBackupTick();
+    }
+  }, AUTO_BACKUP_RETRY_MS);
+}
+
 function _wsRoleLabel(role) {
   if (role === 'owner')  return t('wsRole_owner');
   if (role === 'admin')  return t('wsRole_admin');
@@ -8790,10 +8993,13 @@ function renderWorkspaceCard() {
           '<div class="ws-sync-status-hdr"><span id="ws-backup-hdr" class="ws-sync-hdr-lbl"></span></div>' +
           // Simple status: show protection state; details move to Advanced
           '<div class="ws-bk-simple-status">' +
-            '<div class="ws-status-dot ' + (BACKUP_LIST_UI.state === 'ready' && BACKUP_LIST_UI.backups.length > 0 ? 'ok' : '') + '"></div>' +
+            '<div class="ws-status-dot ' + (
+              AUTO_BACKUP_UI.state === 'uploading' || AUTO_BACKUP_UI.state === 'pending' ? 'ok' :
+              (BACKUP_LIST_UI.state === 'ready' && BACKUP_LIST_UI.backups.length > 0) || AUTO_BACKUP_UI.state === 'ok' ? 'ok' : ''
+            ) + '"></div>' +
             '<span id="ws-bk-status-txt" class="ws-sync-summary"></span>' +
           '</div>' +
-          (BACKUP_LIST_UI.state === 'ready' && BACKUP_LIST_UI.backups.length > 0
+          ((BACKUP_LIST_UI.state === 'ready' && BACKUP_LIST_UI.backups.length > 0) || AUTO_BACKUP_UI.lastSuccessAt
             ? '<div id="ws-bk-last-txt" class="ws-sync-detail"></div>' : '') +
           // Advanced toggle
           '<button class="btn btn-ghost btn-xs ws-bk-adv-toggle" id="ws-bk-adv-btn" onclick="wsToggleBackupAdvanced()"></button>' +
@@ -8954,15 +9160,33 @@ function renderWorkspaceCard() {
 
       // ── Cloud Backup — simplified + Advanced text (1F.4E) ─────────────────────
       var _bkh = document.getElementById('ws-backup-hdr'); if (_bkh) _bkh.textContent = t('wsBackupHdr');
-      // Simple status text (always visible)
+      // Simple status text — reflects auto-backup state (1F.4F)
       var _bkst = document.getElementById('ws-bk-status-txt');
       if (_bkst) {
-        _bkst.textContent = (BACKUP_LIST_UI.state === 'ready' && BACKUP_LIST_UI.backups.length > 0)
-          ? t('wsBackupStatusActive') : t('wsBackupStatusNoBackup');
+        if (AUTO_BACKUP_UI.state === 'uploading') {
+          _bkst.textContent = t('wsBackupAutoBacking');
+        } else if (AUTO_BACKUP_UI.state === 'pending') {
+          _bkst.textContent = t('wsBackupAutoPending');
+        } else if (AUTO_BACKUP_UI.state === 'error' && !AUTO_BACKUP_UI.lastSuccessAt &&
+                   BACKUP_LIST_UI.backups.length === 0) {
+          _bkst.textContent = t('wsBackupAutoFailed');
+        } else if (BACKUP_LIST_UI.state === 'ready' && BACKUP_LIST_UI.backups.length > 0) {
+          _bkst.textContent = t('wsBackupStatusActive');
+        } else {
+          _bkst.textContent = t('wsBackupStatusNoBackup');
+        }
       }
+      // Last backup timestamp — prefer most recent from list or auto-backup success
       var _bklt = document.getElementById('ws-bk-last-txt');
-      if (_bklt && BACKUP_LIST_UI.backups.length > 0 && BACKUP_LIST_UI.backups[0].createdAt) {
-        _bklt.textContent = t('wsBackupLastBackup') + ' ' + new Date(BACKUP_LIST_UI.backups[0].createdAt).toLocaleString();
+      if (_bklt) {
+        var _lastTs = null;
+        if (BACKUP_LIST_UI.backups.length > 0 && BACKUP_LIST_UI.backups[0].createdAt) {
+          _lastTs = BACKUP_LIST_UI.backups[0].createdAt;
+        }
+        if (AUTO_BACKUP_UI.lastSuccessAt && (!_lastTs || AUTO_BACKUP_UI.lastSuccessAt > _lastTs)) {
+          _lastTs = AUTO_BACKUP_UI.lastSuccessAt;
+        }
+        if (_lastTs) _bklt.textContent = t('wsBackupLastBackup') + ' ' + new Date(_lastTs).toLocaleString();
       }
       // Advanced toggle button text
       var _bkadv = document.getElementById('ws-bk-adv-btn');
@@ -13029,6 +13253,11 @@ try{(function(){
       const isQuota=e && (e.name==='QuotaExceededError'||e.code===22||e.code===1014);
       toast(isQuota?window.t('saveQuotaErr'):window.t('saveErrPrefix')+e.message,'red');
     }
+    // 1F.4F: auto cloud backup hook — isolated try/catch, never breaks local save.
+    // Runs unconditionally so the scheduler sees data changes regardless of
+    // CLOUD_UI state, WS_UI.activeId, or whether the cloud/Advanced UI is open.
+    try { _abLog('saveLocal hook'); _scheduleAutoCloudBackup(); }
+    catch(_abHookErr) { console.warn('[auto-backup] hook error', _abHookErr && _abHookErr.message); }
   };
 
   window.addHist = addHist = function(desc){

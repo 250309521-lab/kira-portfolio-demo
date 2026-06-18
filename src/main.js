@@ -732,6 +732,9 @@ function setupIPC() {
     buildManualBackupArchive: function(rendererStateStr, importProfilesStr) {
       return _buildBackupDescriptor(rendererStateStr, importProfilesStr);
     },
+    buildAutoBackupArchive: function(rendererStateStr, importProfilesStr) {
+      return _buildBackupDescriptor(rendererStateStr, importProfilesStr);
+    },
     getLastLocalBackupAt: function() {
       try {
         if (!store || !Array.isArray(store.backup_records) || !store.backup_records.length) return null;

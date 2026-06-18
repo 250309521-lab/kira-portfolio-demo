@@ -87,4 +87,5 @@ contextBridge.exposeInMainWorld('cloudBackup', {
   listBackups:                      (payload) => ipcRenderer.invoke('cloud:listBackups', payload),
   createBackupDownloadPreflight:    (payload) => ipcRenderer.invoke('cloud:createBackupDownloadPreflight', payload),
   downloadBackupToFile:             (payload) => ipcRenderer.invoke('cloud:downloadBackupToFile', payload),
+  createAutoBackup:                 (payload) => ipcRenderer.invoke('cloud:createAutoBackup', payload),
 });

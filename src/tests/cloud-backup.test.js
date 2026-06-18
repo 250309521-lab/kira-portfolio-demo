@@ -704,6 +704,70 @@ async function registerAsync(testAsync, assert, assertEqual) {
     forbidden.forEach(function(name) { delete global[name]; });
     assertEqual(called.length, 0, 'no forbidden function must be called');
   });
+
+  // ── createAutoCloudBackup (CLOUD-FOUNDATION-1F.4F) ───────────────────────
+
+  await testAsync('cloud-backup: createAutoCloudBackup — success uses trigger=auto in metadata', async function() {
+    var capturedPayload = null;
+    cb._setAuth(makeMockAuth(true));
+    cb._setWorkspace(makeMockWorkspace({ workspaces: [{ workspaceId: WS_ID, memberRole: 'owner' }] }));
+    cb._setFetch(function(url, opts) {
+      if (url.includes('rpc/create_cloud_backup_metadata')) {
+        capturedPayload = opts && opts.body ? JSON.parse(opts.body) : null;
+        return Promise.resolve({ ok: true, json: function() { return Promise.resolve({ ok: true, backup_id: 'auto-bk-1' }); } });
+      }
+      return Promise.resolve({ ok: true, json: function() { return Promise.resolve({}); } });
+    });
+    var r = await cb.createAutoCloudBackup({ workspaceId: WS_ID, archiveStr: GOOD_ARCHIVE, byteSize: 200, checksum: GOOD_CHECKSUM });
+    cb._resetForTests();
+    assert(r.ok, 'must return ok');
+    assertEqual(r.trigger, 'auto', 'trigger must be auto');
+    assert(capturedPayload !== null, 'metadata RPC must be called');
+    assertEqual(capturedPayload.p_backup_trigger, 'auto', 'RPC must receive trigger=auto');
+  });
+
+  await testAsync('cloud-backup: createAutoCloudBackup — viewer role returns permission_denied', async function() {
+    cb._setAuth(makeMockAuth(true));
+    cb._setWorkspace(makeMockWorkspace({ workspaces: [{ workspaceId: WS_ID, memberRole: 'viewer' }] }));
+    var r = await cb.createAutoCloudBackup({ workspaceId: WS_ID, archiveStr: GOOD_ARCHIVE, byteSize: 200, checksum: GOOD_CHECKSUM });
+    cb._resetForTests();
+    assertEqual(r.error, 'permission_denied');
+  });
+
+  await testAsync('cloud-backup: createAutoCloudBackup — not_authenticated when no token', async function() {
+    cb._setAuth(makeMockAuth(false));
+    var r = await cb.createAutoCloudBackup({ workspaceId: WS_ID, archiveStr: GOOD_ARCHIVE, byteSize: 200, checksum: GOOD_CHECKSUM });
+    cb._resetForTests();
+    assertEqual(r.error, 'not_authenticated');
+  });
+
+  await testAsync('cloud-backup: createAutoCloudBackup — network failure returns upload_failed', async function() {
+    cb._setAuth(makeMockAuth(true));
+    cb._setWorkspace(makeMockWorkspace({ workspaces: [{ workspaceId: WS_ID, memberRole: 'owner' }] }));
+    cb._setFetch(function(url) {
+      if (url.includes('/storage/')) return Promise.reject(new Error('net'));
+      return Promise.resolve({ ok: true, json: function() { return Promise.resolve({}); } });
+    });
+    var r = await cb.createAutoCloudBackup({ workspaceId: WS_ID, archiveStr: GOOD_ARCHIVE, byteSize: 200, checksum: GOOD_CHECKSUM });
+    cb._resetForTests();
+    assert(!r.ok, 'must fail on network error');
+    assert(r.error === 'upload_failed' || r.error === 'network_error', 'error must indicate upload failure');
+  });
+
+  await testAsync('cloud-backup: createAutoCloudBackup — never calls restore/apply/downloadUrl', async function() {
+    var seenUrls = [];
+    cb._setAuth(makeMockAuth(true));
+    cb._setWorkspace(makeMockWorkspace({ workspaces: [{ workspaceId: WS_ID, memberRole: 'owner' }] }));
+    cb._setFetch(makeFetch());
+    var origFetch = function(url) { seenUrls.push(url); return Promise.resolve({ ok: true, json: function() { return Promise.resolve({ ok: true, backup_id: 'x' }); } }); };
+    cb._setFetch(origFetch);
+    await cb.createAutoCloudBackup({ workspaceId: WS_ID, archiveStr: GOOD_ARCHIVE, byteSize: 200, checksum: GOOD_CHECKSUM });
+    cb._resetForTests();
+    var forbidden = ['restore', 'apply', 'create_backup_download_url', 'push_snapshot'];
+    forbidden.forEach(function(f) {
+      assert(!seenUrls.some(function(u) { return u.includes(f); }), 'must not call: ' + f);
+    });
+  });
 }
 
 module.exports = { register, registerAsync };

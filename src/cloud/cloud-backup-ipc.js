@@ -129,11 +129,13 @@ function _defaultShowSaveDialog(opts) {
 //                                   builds the FULL archive string IN MEMORY (no disk write)
 //   deps.getLastLocalBackupAt     — () => ISO string | null
 //   deps.showSaveDialog           — (opts) => Promise<string|null> — test seam for Electron save dialog
+//   deps.buildAutoBackupArchive   — same signature as buildManualBackupArchive, used for trigger='auto'
 function register(ipcMain, licenseGuard, log, deps) {
   deps = deps || {};
   var cloudBackup = deps.cloudBackup || require('./cloud-backup');
   var buildPreflightArchive    = deps.buildPreflightArchive;
   var buildManualBackupArchive = deps.buildManualBackupArchive;
+  var buildAutoBackupArchive   = deps.buildAutoBackupArchive || deps.buildManualBackupArchive;
   var getLastLocalBackupAt     = deps.getLastLocalBackupAt || function() { return null; };
   var showSaveDialog           = deps.showSaveDialog || _defaultShowSaveDialog;
 
@@ -267,6 +269,45 @@ function register(ipcMain, licenseGuard, log, deps) {
       return _pickManualBackupResult(result);
     } catch (e) {
       log('cloud:createManualBackup error: ' + ((e && e.code) || 'unknown_error'));
+      return { ok: false, error: 'unknown_error' };
+    }
+  });
+
+  // ── cloud:createAutoBackup (1F.4F, debounced background upload) ──────────────
+  // Triggered by the renderer's debounced auto-backup scheduler after data changes.
+  // Uses trigger='auto'. Identical archive format to manual; trigger differs only
+  // in the metadata RPC call. Never restores. Never applies. Never modifies DATA.
+  ipcMain.handle('cloud:createAutoBackup', async function(_event, payload) {
+    try {
+      var guard = await licenseGuard();
+      if (!guard.ok) return { ok: false, error: 'license_required' };
+      if (!_validateWorkspaceIdPayload(payload)) return { ok: false, error: 'invalid_input' };
+      if (typeof buildAutoBackupArchive !== 'function') {
+        return { ok: false, error: 'backup_build_failed' };
+      }
+      var built;
+      try {
+        built = buildAutoBackupArchive(
+          typeof payload.rendererState  === 'string' ? payload.rendererState  : '{}',
+          typeof payload.importProfiles === 'string' ? payload.importProfiles : null
+        );
+      } catch (_) {
+        return { ok: false, error: 'backup_build_failed' };
+      }
+      if (!built || typeof built.archiveStr !== 'string' ||
+          typeof built.byteSize !== 'number' || typeof built.checksum !== 'string') {
+        return { ok: false, error: 'backup_build_failed' };
+      }
+      var result = await cloudBackup.createAutoCloudBackup({
+        workspaceId: payload.workspaceId,
+        archiveStr:  built.archiveStr,
+        byteSize:    built.byteSize,
+        checksum:    built.checksum,
+        appVersion:  typeof built.appVersion === 'string' ? built.appVersion : undefined,
+      });
+      return _pickManualBackupResult(result); // same whitelist; trigger field is preserved
+    } catch (e) {
+      log('cloud:createAutoBackup error: ' + ((e && e.code) || 'unknown_error'));
       return { ok: false, error: 'unknown_error' };
     }
   });

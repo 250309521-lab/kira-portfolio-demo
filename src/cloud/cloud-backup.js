@@ -243,20 +243,13 @@ async function _writeBackupMetadata(metadataPayload, headers) {
   return { ok: true, backupId: body.backup_id };
 }
 
-// ── createManualCloudBackup (1F.4B, guarded write path) ──────────────────────
-// Caller (cloud-backup-ipc.js) only invokes this in direct response to an
-// explicit user click — never on a timer, startup, or focus event.
-//
-// input: { workspaceId, archiveStr, byteSize, checksum, appVersion }
-//   archiveStr/byteSize/checksum are produced by main.js from the EXISTING
-//   local .ktpbackup builder (buildFullBackup); this module never builds or
-//   reads local files itself.
-//
+// ── _doCloudBackupCore (shared internal helper) ───────────────────────────────
+// Called by createManualCloudBackup and createAutoCloudBackup.
+// trigger: 'manual' | 'auto'  (schema also allows 'pre_restore', 'migration')
 // Never restores, never calls create_backup_download_url, never calls a
-// snapshot/lock RPC, and never returns a token/device id/storage path/raw
-// checksum.
+// snapshot/lock RPC, and never returns a token/device id/storage path/raw checksum.
 
-async function createManualCloudBackup(input) {
+async function _doCloudBackupCore(input, trigger) {
   input = input || {};
   if (!isConfigured()) return { ok: false, error: 'not_configured' };
 
@@ -278,7 +271,7 @@ async function createManualCloudBackup(input) {
     workspaceId: workspaceId,
     byteSize:    input.byteSize,
     checksum:    input.checksum,
-    trigger:     'manual',
+    trigger:     trigger,
     appVersion:  input.appVersion,
   });
   if (!derived.ok) return { ok: false, error: _mapDerivedError(derived.error) };
@@ -304,7 +297,7 @@ async function createManualCloudBackup(input) {
     p_storage_path:   storagePath,
     p_byte_size:      derived.byteSize,
     p_checksum:       input.checksum,
-    p_backup_trigger: 'manual',
+    p_backup_trigger: trigger,
     p_format_version: derived.formatVersion,
   };
   if (typeof input.appVersion === 'string' && input.appVersion) {
@@ -325,8 +318,21 @@ async function createManualCloudBackup(input) {
     backupId:  typeof metaResult.backupId === 'string' ? metaResult.backupId : null,
     createdAt: new Date().toISOString(),
     byteSize:  derived.byteSize,
-    trigger:   'manual',
+    trigger:   trigger,
   };
+}
+
+// ── createManualCloudBackup (1F.4B, explicit user action only) ───────────────
+async function createManualCloudBackup(input) {
+  return _doCloudBackupCore(input, 'manual');
+}
+
+// ── createAutoCloudBackup (1F.4F, debounced background upload) ───────────────
+// Called from the renderer's auto-backup scheduler after a debounce period.
+// Uses trigger='auto' so ktp.cloud_backups records the origin correctly.
+// Never restores, never applies, never modifies local DATA.
+async function createAutoCloudBackup(input) {
+  return _doCloudBackupCore(input, 'auto');
 }
 
 // ── listCloudBackups (1F.4C, read-only) ──────────────────────────────────────
@@ -517,6 +523,7 @@ module.exports = {
   getCloudBackupReadiness,
   derivePreflightMetadata,
   createManualCloudBackup,
+  createAutoCloudBackup,
   listCloudBackups,
   getBackupDownloadPreflight,
   downloadBackupToFile,

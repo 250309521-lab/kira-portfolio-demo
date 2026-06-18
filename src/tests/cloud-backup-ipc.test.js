@@ -55,8 +55,11 @@ function makeMockBackup(overrides) {
       return Promise.resolve({
         ok: true, backupId: input.backupId, byteSize: 1024,
         savedName: 'ktp-backup-test.ktpbackup', downloadedAt: '2026-06-18T00:00:00.000Z',
-        // storage_path and checksum deliberately absent
       });
+    },
+    createAutoCloudBackup: function(input) {
+      _track('createAutoCloudBackup', [input]);
+      return Promise.resolve({ ok: true, backupId: 'auto-bk-1', createdAt: '2026-06-18T00:00:00.000Z', byteSize: 4096, trigger: 'auto' });
     },
   };
   var b = Object.assign({}, base, overrides || {});
@@ -94,7 +97,7 @@ function register(test, assert, assertEqual) {
 
   console.log('\nCloud Backup IPC — Channel Registration (CLOUD-FOUNDATION-1F.4A):');
 
-  test('cloud-backup-ipc: register creates all five channels (CLOUD-FOUNDATION-1F.4C)', function() {
+  test('cloud-backup-ipc: register creates all six channels (CLOUD-FOUNDATION-1F.4F)', function() {
     var ipc = makeMockIpcMain();
     ipc_module.register(ipc, makeGuard(true), makeLog(), makeDeps(makeMockBackup()));
     assert(ipc._hasChannel('cloud:getCloudBackupReadiness'),          'readiness channel must exist');
@@ -102,6 +105,7 @@ function register(test, assert, assertEqual) {
     assert(ipc._hasChannel('cloud:createManualBackup'),               'manual backup channel must exist');
     assert(ipc._hasChannel('cloud:listBackups'),                      'listBackups channel must exist');
     assert(ipc._hasChannel('cloud:createBackupDownloadPreflight'),    'downloadPreflight channel must exist');
+    assert(ipc._hasChannel('cloud:createAutoBackup'),                 'auto backup channel must exist');
   });
 
   test('cloud-backup-ipc: _pickManualBackupResult whitelists safe fields only', function() {
@@ -550,6 +554,53 @@ async function registerAsync(testAsync, assert, assertEqual) {
     assert(!('checksum'     in r), 'checksum stripped');
     assert(!('savePath'     in r), 'savePath stripped');
     assert(!('device_id'    in r), 'device_id stripped');
+  });
+
+  // ── cloud:createAutoBackup (CLOUD-FOUNDATION-1F.4F) ──────────────────────
+
+  await testAsync('cloud-backup-ipc: createAutoBackup — success returns trigger=auto and strips secrets', async function() {
+    var ipc = makeMockIpcMain();
+    ipc_module.register(ipc, makeGuard(true), makeLog(), makeDeps(makeMockBackup(), {
+      buildAutoBackupArchive: function() {
+        return { archiveStr: '{"manifest":1}', byteSize: 4096, checksum: GOOD_CHECKSUM, appVersion: '6.0.0' };
+      },
+    }));
+    var r = await ipc._invoke('cloud:createAutoBackup', {}, { workspaceId: WS_ID });
+    assert(r.ok, 'must return ok');
+    assertEqual(r.trigger, 'auto', 'trigger must be auto');
+    assert(!('storage_path' in r), 'storage_path stripped');
+    assert(!('checksum'     in r), 'checksum stripped');
+    assert(!('archiveStr'   in r), 'archiveStr stripped');
+  });
+
+  await testAsync('cloud-backup-ipc: createAutoBackup — license guard blocks', async function() {
+    var ipc = makeMockIpcMain();
+    ipc_module.register(ipc, makeGuard(false), makeLog(), makeDeps(makeMockBackup()));
+    var r = await ipc._invoke('cloud:createAutoBackup', {}, { workspaceId: WS_ID });
+    assert(!r.ok); assertEqual(r.error, 'license_required');
+  });
+
+  await testAsync('cloud-backup-ipc: createAutoBackup — missing workspaceId returns invalid_input', async function() {
+    var ipc = makeMockIpcMain();
+    ipc_module.register(ipc, makeGuard(true), makeLog(), makeDeps(makeMockBackup()));
+    var r = await ipc._invoke('cloud:createAutoBackup', {}, {});
+    assert(!r.ok); assertEqual(r.error, 'invalid_input');
+  });
+
+  await testAsync('cloud-backup-ipc: createAutoBackup — never calls restore/apply/downloadUrl', async function() {
+    var ipc = makeMockIpcMain();
+    var backup = makeMockBackup();
+    var forbidden = ['restoreBackup', 'applyBackup', 'syncApply', 'getBackupDownloadPreflight'];
+    forbidden.forEach(function(name) {
+      backup[name] = function() { throw new Error('forbidden: ' + name); };
+    });
+    ipc_module.register(ipc, makeGuard(true), makeLog(), makeDeps(backup, {
+      buildAutoBackupArchive: function() {
+        return { archiveStr: '{"manifest":1}', byteSize: 4096, checksum: GOOD_CHECKSUM, appVersion: '6.0.0' };
+      },
+    }));
+    var r = await ipc._invoke('cloud:createAutoBackup', {}, { workspaceId: WS_ID });
+    assert(r.ok, 'must succeed without calling forbidden methods');
   });
 }
 

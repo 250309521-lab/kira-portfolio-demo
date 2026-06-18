@@ -1034,6 +1034,120 @@ function register(test, assert, assertEqual) {
     assert(!/onclick="wsImport\(/.test(_rendererSrc),        'no import button allowed');
   });
 
+  // ── 1F.4F: Automatic cloud backup checks ───────────────────────────────────
+
+  test('1F.4F: _scheduleAutoCloudBackup is called from the active saveLocal (HOTFIX version)', function() {
+    assert(/_scheduleAutoCloudBackup\(\)/.test(_rendererSrc),
+      '_scheduleAutoCloudBackup must be defined');
+    // The active saveLocal HOTFIX uses setSetting('selected_month') — unique to it.
+    // The 1F.4F hook must appear within a small window after that call.
+    assert(/setSetting\('selected_month'[\s\S]{0,800}_scheduleAutoCloudBackup\(\)/.test(_rendererSrc),
+      '_scheduleAutoCloudBackup hook must be present after setSetting in the active saveLocal');
+  });
+
+  test('1F.4F: AUTO_BACKUP_UI state is defined with fingerprint fields', function() {
+    assert(/var AUTO_BACKUP_UI\s*=/.test(_rendererSrc), 'AUTO_BACKUP_UI state must exist');
+    assert(/AUTO_BACKUP_UI\.state/.test(_rendererSrc), 'AUTO_BACKUP_UI.state must be referenced');
+    assert(/AUTO_BACKUP_UI\.lastSuccessAt/.test(_rendererSrc), 'AUTO_BACKUP_UI.lastSuccessAt must exist');
+    assert(/AUTO_BACKUP_UI\.lastUploadedHash/.test(_rendererSrc), 'lastUploadedHash must exist');
+    assert(/AUTO_BACKUP_UI\.pendingHash/.test(_rendererSrc), 'pendingHash must exist');
+    assert(/AUTO_BACKUP_UI\.inFlight/.test(_rendererSrc), 'inFlight must exist');
+  });
+
+  test('1F.4F: _scheduleAutoCloudBackup checks fingerprint before resetting timer', function() {
+    assert(/_djb2Hash/.test(_rendererSrc), '_djb2Hash function must exist');
+    assert(/lastUploadedHash/.test(_rendererSrc), 'lastUploadedHash check must exist');
+    assert(/pendingHash/.test(_rendererSrc), 'pendingHash comparison must exist');
+    assert(/hash === AUTO_BACKUP_UI\.lastUploadedHash/.test(_rendererSrc),
+      'must short-circuit when hash matches lastUploadedHash');
+    assert(/hash === AUTO_BACKUP_UI\.pendingHash/.test(_rendererSrc),
+      'must short-circuit when hash matches pendingHash and timer running');
+  });
+
+  test('1F.4F: scheduler does not check CLOUD_UI.state — auth deferred to tick time', function() {
+    // ROOT CAUSE FIX: the scheduler must NOT require cloud auth state.
+    // Auth checks happen in wsAutoBackupTick(), not in _scheduleAutoCloudBackup().
+    // Extract scheduler body by stopping at the async tick function that follows it.
+    var schedFn = _rendererSrc.match(/function _scheduleAutoCloudBackup\(\)([\s\S]*?)async function wsAutoBackupTick/);
+    assert(schedFn, '_scheduleAutoCloudBackup must be extractable before wsAutoBackupTick');
+    var body = schedFn[1];
+    // The scheduler body must not contain any CLOUD_UI reference
+    assert(!/CLOUD_UI/.test(body),
+      '_scheduleAutoCloudBackup body must NOT reference CLOUD_UI (auth deferred to tick)');
+  });
+
+  test('1F.4F: wsAutoBackupTick handles non-authenticated states by retrying not erroring', function() {
+    // Transient states (loading, reconnecting, offline_cached) must trigger retry
+    assert(/loading.*retry|reconnecting.*retry|offline_cached.*retry|_scheduleAutoRetry.*loading|_scheduleAutoRetry.*reconnecting/.test(
+      _rendererSrc.replace(/\s+/g, ' ')),
+      'wsAutoBackupTick must retry on transient non-authenticated states');
+  });
+
+  test('1F.4F: dev diagnostics use _abLog and never log DATA contents or secrets', function() {
+    assert(/_abLog/.test(_rendererSrc), '_abLog diagnostic function must exist');
+    assert(/_abDevMode/.test(_rendererSrc), '_abDevMode guard must exist');
+    // Silent by default — explicit debug flag required (1F.4F-DEBUG-LOG-CLEANUP)
+    assert(/__KTP_AUTO_BACKUP_DEBUG/.test(_rendererSrc),
+      '__KTP_AUTO_BACKUP_DEBUG gate must exist in _abLog');
+    // Extract _abLog body and confirm it contains the debug flag check
+    var abLogBody = _rendererSrc.match(/function _abLog\(msg,\s*extra\)\s*\{([\s\S]*?)\n\}/);
+    assert(abLogBody, '_abLog function body must be extractable');
+    assert(/__KTP_AUTO_BACKUP_DEBUG/.test(abLogBody[1]),
+      '_abLog body must check __KTP_AUTO_BACKUP_DEBUG — silent by default');
+    // Confirm log calls contain no sensitive field references
+    assert(!/abLog.*password|abLog.*token|abLog.*checksum|abLog.*storage_path/.test(_rendererSrc),
+      '_abLog must never reference passwords, tokens, checksums, or storage paths');
+    assert(!/abLog.*JSON\.stringify\(DATA\)/.test(_rendererSrc),
+      '_abLog must never log full DATA contents');
+  });
+
+  test('1F.4F: _scheduleAutoRetry exists for automatic retry after failure', function() {
+    assert(/function _scheduleAutoRetry/.test(_rendererSrc),
+      '_scheduleAutoRetry must be defined');
+    assert(/_autoBackupRetryTimer/.test(_rendererSrc),
+      'separate retry timer must exist');
+    // Retry fires wsAutoBackupTick without requiring a DATA change
+    assert(/_scheduleAutoRetry[\s\S]{0,400}wsAutoBackupTick/.test(_rendererSrc),
+      '_scheduleAutoRetry must call wsAutoBackupTick');
+  });
+
+  test('1F.4F: inFlight guard prevents concurrent uploads', function() {
+    assert(/AUTO_BACKUP_UI\.inFlight\s*=\s*true/.test(_rendererSrc), 'inFlight must be set to true');
+    assert(/AUTO_BACKUP_UI\.inFlight\s*=\s*false/.test(_rendererSrc), 'inFlight must be reset to false');
+    assert(/if.*inFlight.*return/.test(_rendererSrc), 'must return early when inFlight');
+  });
+
+  test('1F.4F: wsAutoBackupTick calls createAutoBackup not createManualBackup', function() {
+    assert(/wsAutoBackupTick[\s\S]{0,4500}createAutoBackup/.test(_rendererSrc),
+      'wsAutoBackupTick must call bridge.createAutoBackup');
+    assert(!/wsAutoBackupTick[\s\S]{0,4500}createManualBackup/.test(_rendererSrc),
+      'wsAutoBackupTick must NOT call createManualBackup');
+  });
+
+  test('1F.4F: wsAutoBackupTick never calls restore/apply/import', function() {
+    assert(!/wsAutoBackupTick[\s\S]{0,4500}restoreBackup/.test(_rendererSrc),
+      'auto backup must not call restoreBackup');
+    assert(!/wsAutoBackupTick[\s\S]{0,4500}DATA\s*=[^=]/.test(_rendererSrc),
+      'auto backup must not overwrite DATA');
+  });
+
+  test('1F.4F: auto backup does not trigger a toast on success', function() {
+    // Extract just the wsAutoBackupTick function body (up to _scheduleAutoRetry def)
+    var tickMatch = _rendererSrc.match(/async function wsAutoBackupTick\(\)([\s\S]*?)function _scheduleAutoRetry/);
+    assert(tickMatch, 'wsAutoBackupTick function body must be extractable');
+    assert(!/toast\(/.test(tickMatch[1]),
+      'wsAutoBackupTick body must not call toast() — silent background operation');
+  });
+
+  test('1F.4F: debounce timer uses setTimeout not setInterval (renamed variable)', function() {
+    assert(/_autoBackupDebounceTimer\s*=\s*setTimeout/.test(_rendererSrc),
+      'auto-backup debounce must use setTimeout (not setInterval)');
+    assert(/_autoBackupRetryTimer\s*=\s*setTimeout/.test(_rendererSrc),
+      'retry timer must also use setTimeout');
+    assert(!/setInterval[\s\S]{0,80}wsAutoBackupTick/.test(_rendererSrc),
+      'wsAutoBackupTick must not be used with setInterval');
+  });
+
   test('1F.4E: Advanced section safety note uses textContent', function() {
     assert(/getElementById\('ws-bk-export-note'\)[\s\S]{0,200}\.textContent\s*=/.test(_rendererSrc),
       'export note must be set via textContent, not innerHTML');
