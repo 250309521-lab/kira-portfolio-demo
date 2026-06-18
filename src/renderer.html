@@ -4121,6 +4121,10 @@ tbody tr[onclick] { cursor: pointer; }
 .ws-bkpl-pf-err{font-size:10px;color:var(--red,#f43f5e)}
 .ws-bkpl-dlst-ok{font-size:10px;color:var(--green,#22c55e);margin-top:2px}
 .ws-bkpl-dlst-err{font-size:10px;color:var(--red,#f43f5e);margin-top:2px}
+.ws-bk-simple-status{display:flex;align-items:center;gap:6px;margin-top:4px}
+.ws-bk-adv-toggle{margin-top:6px;font-size:10px;opacity:.75}
+.ws-bk-adv-content{margin-top:8px;border-top:1px solid var(--bd-1);padding-top:8px}
+.ws-bk-export-note-txt{font-size:10px;color:var(--i4);font-style:italic;margin-top:6px;opacity:.8}
 .ws-empty-state{display:flex;flex-direction:column;align-items:center;text-align:center;padding:18px 16px;background:rgba(99,102,241,.05);border:1px dashed rgba(99,102,241,.2);border-radius:10px;margin-bottom:10px;gap:6px}
 .ws-empty-icon{font-size:24px;line-height:1;opacity:.65}
 .ws-empty-text{font-size:12.5px;font-weight:600;color:var(--i2)}
@@ -5112,6 +5116,11 @@ var STRINGS={
     wsBackupUploadFailed:'Yükleme başarısız oldu.',
     wsBackupMetadataFailed:'Meta veri yazma başarısız; yedek yüklemesi temizlendi.',
     wsBackupCleanupFailed:'Meta veri hatası ve nesne temizleme başarısız (yetim yükleme riski).',
+    wsBackupStatusActive:'Bulut koruması aktif.',
+    wsBackupStatusNoBackup:'Otomatik yedekleme yakında geliyor. Manuel yedek Gelişmiş seçenekler altında mevcut.',
+    wsBackupLastBackup:'Son bulut yedek:',
+    wsBackupAdvToggle:'Gelişmiş yedek seçenekleri',
+    wsBackupExportBtn:'Yedek dosyasını dışa aktar',
     wsBackupListHdr:'Bulut Yedek Geçmişi',wsBackupListLoading:'Yedekler yükleniyor…',
     wsBackupListEmpty:'Henüz bulut yedeği yok.',wsBackupListError:'Yedek listesi yüklenemedi.',
     wsBackupListRefresh:'Listeyi yenile',wsBackupListTrigger_manual:'Manuel',
@@ -5658,6 +5667,11 @@ var STRINGS={
     wsBackupUploadFailed:'Upload failed.',
     wsBackupMetadataFailed:'Metadata write failed; uploaded object was cleaned up.',
     wsBackupCleanupFailed:'Metadata write failed and cleanup also failed (orphaned upload risk).',
+    wsBackupStatusActive:'Cloud protection is active.',
+    wsBackupStatusNoBackup:'Automatic backup is coming. Manual backup is available under Advanced.',
+    wsBackupLastBackup:'Last cloud backup:',
+    wsBackupAdvToggle:'Advanced backup options',
+    wsBackupExportBtn:'Export backup file',
     wsBackupListHdr:'Cloud Backup History',wsBackupListLoading:'Loading backups…',
     wsBackupListEmpty:'No cloud backups yet.',wsBackupListError:'Failed to load backup list.',
     wsBackupListRefresh:'Refresh list',wsBackupListTrigger_manual:'Manual',
@@ -8182,7 +8196,11 @@ var BACKUP_UI = {
   uploadError:       null,
   lastUploadAt:      null,
   lastUploadBytes:   null,
+  // ── Advanced section toggle (1F.4E UX) ─────────────────────────────────────
+  advExpanded:       false,  // true shows manual/history controls; false shows simple status only
 };
+
+function wsToggleBackupAdvanced() { BACKUP_UI.advExpanded = !BACKUP_UI.advExpanded; renderWorkspaceCard(); }
 
 // ── Cloud backup list + download (CLOUD-FOUNDATION-1F.4C/D, read-only/file-only) ──
 // Never restores. Never applies. Never overwrites local DATA.
@@ -8767,90 +8785,76 @@ function renderWorkspaceCard() {
           (SYNC_UI.state === 'ready' ? '<div id="ws-sync-local-note" class="ws-sync-detail"></div>' : '') +
           (SYNC_UI.lastCheckedAt ? '<div id="ws-sync-lastchecked" class="ws-sync-detail"></div>' : '') +
         '</div>' +
+        // ── Cloud Backup — simplified main view + Advanced section (1F.4E) ──────
         '<div class="ws-sync-status-section ws-backup-section">' +
-          '<div class="ws-sync-status-hdr">' +
-            '<span id="ws-backup-hdr" class="ws-sync-hdr-lbl"></span>' +
-            '<button class="btn btn-ghost btn-xs" id="ws-backup-refresh-btn" onclick="wsRefreshBackupReadiness()"' +
-              (BACKUP_UI.state === 'loading' ? ' disabled' : '') + '></button>' +
+          '<div class="ws-sync-status-hdr"><span id="ws-backup-hdr" class="ws-sync-hdr-lbl"></span></div>' +
+          // Simple status: show protection state; details move to Advanced
+          '<div class="ws-bk-simple-status">' +
+            '<div class="ws-status-dot ' + (BACKUP_LIST_UI.state === 'ready' && BACKUP_LIST_UI.backups.length > 0 ? 'ok' : '') + '"></div>' +
+            '<span id="ws-bk-status-txt" class="ws-sync-summary"></span>' +
           '</div>' +
-          '<div id="ws-backup-summary" class="ws-sync-summary"></div>' +
-          (BACKUP_UI.state === 'ready' ? '<div id="ws-backup-role" class="ws-sync-detail"></div>' : '') +
-          (BACKUP_UI.state === 'ready' ? '<div id="ws-backup-size" class="ws-sync-detail"></div>' : '') +
-          (BACKUP_UI.state === 'ready' && BACKUP_UI.lastLocalBackupAt ? '<div id="ws-backup-lastlocal" class="ws-sync-detail"></div>' : '') +
-          (BACKUP_UI.lastCheckedAt ? '<div id="ws-backup-lastchecked" class="ws-sync-detail"></div>' : '') +
-          (BACKUP_UI.uploadState === 'success' ? '<div id="ws-backup-upload-ok" class="ws-backup-upload-success"></div>' : '') +
-          (BACKUP_UI.uploadState === 'error'   ? '<div id="ws-backup-upload-err" class="ws-backup-upload-error"></div>' : '') +
-          (BACKUP_UI.state === 'ready' && BACKUP_UI.canBackup === true && BACKUP_UI.withinLimit !== false
-            ? (BACKUP_UI.uploadState === 'confirming'
-                ? '<div class="ws-backup-confirm" id="ws-backup-confirm-box">' +
-                    '<div id="ws-backup-confirm-text" class="ws-sync-detail"></div>' +
-                    '<div style="display:flex;gap:7px;margin-top:6px">' +
-                      '<button class="btn btn-primary btn-xs" id="ws-backup-confirm-btn" onclick="wsConfirmManualBackup()"></button>' +
-                      '<button class="btn btn-ghost btn-xs"   id="ws-backup-cancel-btn"  onclick="wsCancelBackupConfirm()"></button>' +
-                    '</div></div>'
-                : (BACKUP_UI.uploadState === 'uploading'
-                    ? '<button class="btn btn-primary btn-xs" id="ws-backup-upload-btn" disabled></button>'
-                    : '<button class="btn btn-primary btn-xs" id="ws-backup-upload-btn" onclick="wsShowBackupConfirm()"></button>'))
-            : '<div id="ws-backup-soon" class="ws-backup-soon"></div>') +
-        '</div>' +
-      '</div>' +
-      // ── Cloud backup list (1F.4C, read-only) ─────────────────────────────
-      '<div class="ws-sync-status-section ws-backup-list-section">' +
-        '<div class="ws-sync-status-hdr">' +
-          '<span id="ws-bkpl-hdr" class="ws-sync-hdr-lbl"></span>' +
-          '<button class="btn btn-ghost btn-xs" id="ws-bkpl-refresh-btn"' +
-            (BACKUP_LIST_UI.state === 'loading' ? ' disabled' : '') +
-            ' onclick="wsRefreshBackupList()"></button>' +
-        '</div>' +
-        '<div id="ws-bkpl-note" class="ws-sync-detail" style="margin-bottom:4px"></div>' +
-        (BACKUP_LIST_UI.state === 'loading'
-          ? '<div id="ws-bkpl-loading" class="ws-sync-summary"></div>'
-          : '') +
-        (BACKUP_LIST_UI.state === 'error'
-          ? '<div id="ws-bkpl-err" class="ws-sync-summary"></div>'
-          : '') +
-        (BACKUP_LIST_UI.state === 'ready' && BACKUP_LIST_UI.backups.length === 0
-          ? '<div id="ws-bkpl-empty" class="ws-sync-summary"></div>'
-          : '') +
-        (BACKUP_LIST_UI.state === 'ready' && BACKUP_LIST_UI.backups.length > 0
-          ? '<div class="ws-bkpl-list">' +
-            BACKUP_LIST_UI.backups.map(function(b, _bi) {
-              var _isPf = BACKUP_LIST_UI.preflightId === b.backupId;
-              return '<div class="ws-bkpl-row">' +
-                '<div class="ws-bkpl-meta">' +
-                  '<span class="ws-bkpl-date" id="ws-bkpl-date-' + _bi + '"></span>' +
-                  '<span class="ws-bkpl-size" id="ws-bkpl-size-' + _bi + '"></span>' +
-                  '<span class="ws-bkpl-trigger" id="ws-bkpl-trig-' + _bi + '"></span>' +
+          (BACKUP_LIST_UI.state === 'ready' && BACKUP_LIST_UI.backups.length > 0
+            ? '<div id="ws-bk-last-txt" class="ws-sync-detail"></div>' : '') +
+          // Advanced toggle
+          '<button class="btn btn-ghost btn-xs ws-bk-adv-toggle" id="ws-bk-adv-btn" onclick="wsToggleBackupAdvanced()"></button>' +
+          // Advanced content — all manual/history controls live here
+          (BACKUP_UI.advExpanded ?
+            '<div class="ws-bk-adv-content">' +
+              // Back up now (manual upload) — only when canBackup
+              (BACKUP_UI.uploadState === 'success' ? '<div id="ws-backup-upload-ok" class="ws-backup-upload-success"></div>' : '') +
+              (BACKUP_UI.uploadState === 'error'   ? '<div id="ws-backup-upload-err" class="ws-backup-upload-error"></div>' : '') +
+              (BACKUP_UI.state === 'ready' && BACKUP_UI.canBackup === true && BACKUP_UI.withinLimit !== false
+                ? (BACKUP_UI.uploadState === 'confirming'
+                    ? '<div class="ws-backup-confirm" id="ws-backup-confirm-box">' +
+                        '<div id="ws-backup-confirm-text" class="ws-sync-detail"></div>' +
+                        '<div style="display:flex;gap:7px;margin-top:6px">' +
+                          '<button class="btn btn-primary btn-xs" id="ws-backup-confirm-btn" onclick="wsConfirmManualBackup()"></button>' +
+                          '<button class="btn btn-ghost btn-xs"   id="ws-backup-cancel-btn"  onclick="wsCancelBackupConfirm()"></button>' +
+                        '</div></div>'
+                    : (BACKUP_UI.uploadState === 'uploading'
+                        ? '<button class="btn btn-primary btn-xs" id="ws-backup-upload-btn" disabled></button>'
+                        : '<button class="btn btn-primary btn-xs" id="ws-backup-upload-btn" onclick="wsShowBackupConfirm()"></button>'))
+                : (BACKUP_UI.state !== 'idle' && BACKUP_UI.state !== 'loading'
+                    ? '<div id="ws-backup-soon" class="ws-backup-soon"></div>' : '')) +
+              // Backup history with Export button (no separate Verify step)
+              '<div class="ws-backup-list-section">' +
+                '<div class="ws-sync-status-hdr">' +
+                  '<span id="ws-bkpl-hdr" class="ws-sync-hdr-lbl"></span>' +
+                  '<button class="btn btn-ghost btn-xs" id="ws-bkpl-refresh-btn"' +
+                    (BACKUP_LIST_UI.state === 'loading' ? ' disabled' : '') +
+                    ' onclick="wsRefreshBackupList()"></button>' +
                 '</div>' +
-                (_isPf && BACKUP_LIST_UI.preflightState === 'loading'
-                  ? '<span class="ws-sync-summary" id="ws-bkpl-pf-' + _bi + '"></span>'
-                  : '') +
-                (_isPf && BACKUP_LIST_UI.preflightState === 'ready'
-                  ? '<div class="ws-bkpl-pf-ok ws-sync-detail" id="ws-bkpl-pf-' + _bi + '"></div>'
-                  : '') +
-                (_isPf && BACKUP_LIST_UI.preflightState === 'error'
-                  ? '<div class="ws-bkpl-pf-err ws-sync-detail" id="ws-bkpl-pf-' + _bi + '"></div>'
-                  : '') +
-                '<div style="display:flex;gap:5px;flex-wrap:wrap">' +
-                  '<button class="btn btn-ghost btn-xs" id="ws-bkpl-prep-' + _bi + '"' +
-                    (BACKUP_LIST_UI.preflightState === 'loading' ? ' disabled' : '') +
-                    ' onclick="wsStartDownloadPreflight(' + _bi + ')"></button>' +
-                  (_isPf && BACKUP_LIST_UI.preflightState === 'ready'
-                    ? '<button class="btn btn-secondary btn-xs" id="ws-bkpl-dl-' + _bi + '"' +
-                        (BACKUP_LIST_UI.downloadState === 'downloading' ? ' disabled' : '') +
-                        ' onclick="wsDownloadBackup(' + _bi + ')"></button>'
-                    : '') +
-                '</div>' +
-                (BACKUP_LIST_UI.downloadId === b.backupId && BACKUP_LIST_UI.downloadState === 'downloading'
-                  ? '<div class="ws-sync-summary" id="ws-bkpl-dlst-' + _bi + '"></div>' : '') +
-                (BACKUP_LIST_UI.downloadId === b.backupId && BACKUP_LIST_UI.downloadState === 'saved'
-                  ? '<div class="ws-bkpl-pf-ok ws-sync-detail" id="ws-bkpl-dlst-' + _bi + '"></div>' : '') +
-                (BACKUP_LIST_UI.downloadId === b.backupId && BACKUP_LIST_UI.downloadState === 'error'
-                  ? '<div class="ws-bkpl-pf-err ws-sync-detail" id="ws-bkpl-dlst-' + _bi + '"></div>' : '') +
-              '</div>';
-            }).join('') +
-          '</div>'
+                (BACKUP_LIST_UI.state === 'loading' ? '<div id="ws-bkpl-loading" class="ws-sync-summary"></div>' : '') +
+                (BACKUP_LIST_UI.state === 'error' ? '<div id="ws-bkpl-err" class="ws-sync-summary"></div>' : '') +
+                (BACKUP_LIST_UI.state === 'ready' && BACKUP_LIST_UI.backups.length === 0
+                  ? '<div id="ws-bkpl-empty" class="ws-sync-summary"></div>' : '') +
+                (BACKUP_LIST_UI.state === 'ready' && BACKUP_LIST_UI.backups.length > 0
+                  ? '<div class="ws-bkpl-list">' +
+                    BACKUP_LIST_UI.backups.map(function(b, _bi) {
+                      return '<div class="ws-bkpl-row">' +
+                        '<div class="ws-bkpl-meta">' +
+                          '<span class="ws-bkpl-date" id="ws-bkpl-date-' + _bi + '"></span>' +
+                          '<span class="ws-bkpl-size" id="ws-bkpl-size-' + _bi + '"></span>' +
+                          '<span class="ws-bkpl-trigger" id="ws-bkpl-trig-' + _bi + '"></span>' +
+                        '</div>' +
+                        '<button class="btn btn-secondary btn-xs" id="ws-bkpl-dl-' + _bi + '"' +
+                          (BACKUP_LIST_UI.downloadState === 'downloading' && BACKUP_LIST_UI.downloadId === b.backupId ? ' disabled' : '') +
+                          ' onclick="wsDownloadBackup(' + _bi + ')"></button>' +
+                        (BACKUP_LIST_UI.downloadId === b.backupId && BACKUP_LIST_UI.downloadState === 'downloading'
+                          ? '<div class="ws-sync-summary" id="ws-bkpl-dlst-' + _bi + '"></div>' : '') +
+                        (BACKUP_LIST_UI.downloadId === b.backupId && BACKUP_LIST_UI.downloadState === 'saved'
+                          ? '<div class="ws-bkpl-pf-ok ws-sync-detail" id="ws-bkpl-dlst-' + _bi + '"></div>' : '') +
+                        (BACKUP_LIST_UI.downloadId === b.backupId && BACKUP_LIST_UI.downloadState === 'error'
+                          ? '<div class="ws-bkpl-pf-err ws-sync-detail" id="ws-bkpl-dlst-' + _bi + '"></div>' : '') +
+                      '</div>';
+                    }).join('') +
+                  '</div>' : '') +
+              '</div>' +
+              // Safety note inside Advanced
+              '<div id="ws-bk-export-note" class="ws-sync-detail ws-bk-export-note-txt"></div>' +
+            '</div>'
           : '') +
+        '</div>' +
       '</div>';
     }
     // Workspace list or empty state
@@ -8948,37 +8952,25 @@ function renderWorkspaceCard() {
         wsRefreshSyncStatus();
       }
 
-      // ── Cloud backup readiness (read-only) — all values via textContent ───────
+      // ── Cloud Backup — simplified + Advanced text (1F.4E) ─────────────────────
       var _bkh = document.getElementById('ws-backup-hdr'); if (_bkh) _bkh.textContent = t('wsBackupHdr');
-      var _bkrb = document.getElementById('ws-backup-refresh-btn');
-      if (_bkrb) _bkrb.textContent = BACKUP_UI.state === 'loading' ? t('wsBackupChecking') : t('wsSyncRefreshBtn');
-      var _bksum = document.getElementById('ws-backup-summary'); if (_bksum) _bksum.textContent = _backupReadinessMsg();
-      var _bkrole = document.getElementById('ws-backup-role');
-      if (_bkrole) _bkrole.textContent = t('wsBackupRoleLbl') + ': ' + _wsRoleLabel(BACKUP_UI.role);
-      var _bksize = document.getElementById('ws-backup-size');
-      if (_bksize) {
-        _bksize.textContent = t('wsBackupSizeLbl') + ': ' +
-          (typeof BACKUP_UI.byteSize === 'number' ? _fmtBytes(BACKUP_UI.byteSize) : t('wsBackupSizeUnknown'));
+      // Simple status text (always visible)
+      var _bkst = document.getElementById('ws-bk-status-txt');
+      if (_bkst) {
+        _bkst.textContent = (BACKUP_LIST_UI.state === 'ready' && BACKUP_LIST_UI.backups.length > 0)
+          ? t('wsBackupStatusActive') : t('wsBackupStatusNoBackup');
       }
-      var _bkll = document.getElementById('ws-backup-lastlocal');
-      if (_bkll && BACKUP_UI.lastLocalBackupAt) {
-        _bkll.textContent = t('wsBackupLastLocalLbl') + ': ' + new Date(BACKUP_UI.lastLocalBackupAt).toLocaleString();
+      var _bklt = document.getElementById('ws-bk-last-txt');
+      if (_bklt && BACKUP_LIST_UI.backups.length > 0 && BACKUP_LIST_UI.backups[0].createdAt) {
+        _bklt.textContent = t('wsBackupLastBackup') + ' ' + new Date(BACKUP_LIST_UI.backups[0].createdAt).toLocaleString();
       }
-      var _bklc = document.getElementById('ws-backup-lastchecked');
-      if (_bklc && BACKUP_UI.lastCheckedAt) {
-        _bklc.textContent = t('wsSyncLastChecked') + ': ' + new Date(BACKUP_UI.lastCheckedAt).toLocaleTimeString();
-      }
+      // Advanced toggle button text
+      var _bkadv = document.getElementById('ws-bk-adv-btn');
+      if (_bkadv) _bkadv.textContent = t('wsBackupAdvToggle') + (BACKUP_UI.advExpanded ? ' ▲' : ' ▾');
+      // Inside Advanced — manual upload UI (all via textContent)
       var _bksoon = document.getElementById('ws-backup-soon'); if (_bksoon) _bksoon.textContent = t('wsBackupComingSoon');
-
-      // ── Manual upload UI (1F.4B) — all values via textContent ─────────────────
       var _bkupbtn = document.getElementById('ws-backup-upload-btn');
-      if (_bkupbtn) {
-        if (BACKUP_UI.uploadState === 'uploading') {
-          _bkupbtn.textContent = t('wsBackupUploading');
-        } else {
-          _bkupbtn.textContent = t('wsBackupUploadBtn');
-        }
-      }
+      if (_bkupbtn) _bkupbtn.textContent = BACKUP_UI.uploadState === 'uploading' ? t('wsBackupUploading') : t('wsBackupUploadBtn');
       var _bkconfbox = document.getElementById('ws-backup-confirm-box');
       if (_bkconfbox) {
         var _bkctxt = document.getElementById('ws-backup-confirm-text');
@@ -9002,24 +8994,24 @@ function renderWorkspaceCard() {
       }
       var _bkuperr = document.getElementById('ws-backup-upload-err');
       if (_bkuperr) _bkuperr.textContent = _backupUploadErrorMsg(BACKUP_UI.uploadError);
-
-      if (BACKUP_UI.checkedForId !== WS_UI.activeId && BACKUP_UI.state !== 'loading') {
-        wsRefreshBackupReadiness();
-      }
-
-      // ── Backup list text-setting (CLOUD-FOUNDATION-1F.4C) ─────────────────
+      // History inside Advanced
       var _bkplhdr = document.getElementById('ws-bkpl-hdr');
       if (_bkplhdr) _bkplhdr.textContent = t('wsBackupListHdr');
       var _bkplrfr = document.getElementById('ws-bkpl-refresh-btn');
       if (_bkplrfr) _bkplrfr.textContent = t('wsBackupListRefresh');
-      var _bkplnote = document.getElementById('ws-bkpl-note');
-      if (_bkplnote) _bkplnote.textContent = t('wsBackupDownloadNote');
       var _bkpll = document.getElementById('ws-bkpl-loading');
       if (_bkpll) _bkpll.textContent = t('wsBackupListLoading');
       var _bkple = document.getElementById('ws-bkpl-err');
       if (_bkple) _bkple.textContent = t('wsBackupListError');
       var _bkplem = document.getElementById('ws-bkpl-empty');
       if (_bkplem) _bkplem.textContent = t('wsBackupListEmpty');
+      // Export note (safety copy inside Advanced)
+      var _bkexnote = document.getElementById('ws-bk-export-note');
+      if (_bkexnote) _bkexnote.textContent = t('wsBackupDownloadNote');
+
+      if (BACKUP_UI.checkedForId !== WS_UI.activeId && BACKUP_UI.state !== 'loading') {
+        wsRefreshBackupReadiness();
+      }
       if (BACKUP_LIST_UI.state === 'ready') {
         for (var _li = 0; _li < BACKUP_LIST_UI.backups.length; _li++) {
           var _lb = BACKUP_LIST_UI.backups[_li];
@@ -9029,10 +9021,8 @@ function renderWorkspaceCard() {
           if (_lsize) _lsize.textContent = typeof _lb.byteSize === 'number' ? _fmtBytes(_lb.byteSize) : '—';
           var _ltrig = document.getElementById('ws-bkpl-trig-' + _li);
           if (_ltrig) _ltrig.textContent = _lb.trigger === 'manual' ? t('wsBackupListTrigger_manual') : (_lb.trigger || '');
-          var _lprep = document.getElementById('ws-bkpl-prep-' + _li);
-          if (_lprep) _lprep.textContent = t('wsBackupPrepDownload');
           var _ldl = document.getElementById('ws-bkpl-dl-' + _li);
-          if (_ldl) _ldl.textContent = BACKUP_LIST_UI.downloadState === 'downloading' ? t('wsBackupDownloading') : t('wsBackupDownloadBtn');
+          if (_ldl) _ldl.textContent = (BACKUP_LIST_UI.downloadState === 'downloading' && BACKUP_LIST_UI.downloadId === _lb.backupId) ? t('wsBackupDownloading') : t('wsBackupExportBtn');
           var _lpf = document.getElementById('ws-bkpl-pf-' + _li);
           if (_lpf) {
             if (BACKUP_LIST_UI.preflightId === _lb.backupId) {

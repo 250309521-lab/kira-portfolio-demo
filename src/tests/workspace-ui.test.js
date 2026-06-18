@@ -782,8 +782,8 @@ function register(test, assert, assertEqual) {
     assert(/onclick="wsShowBackupConfirm\(\)"/.test(_rendererSrc), 'wsShowBackupConfirm must be wired to upload button');
     assert(/onclick="wsConfirmManualBackup\(\)"/.test(_rendererSrc), 'wsConfirmManualBackup must be wired to confirm button');
     assert(/onclick="wsCancelBackupConfirm\(\)"/.test(_rendererSrc), 'wsCancelBackupConfirm must be wired to cancel button');
-    // Refresh button from 1F.4A still present.
-    assert(/onclick="wsRefreshBackupReadiness\(\)"/.test(_rendererSrc), 'refresh button must still be wired');
+    // wsRefreshBackupReadiness is still in the source (called via auto-trigger), no visible button needed.
+    assert(/wsRefreshBackupReadiness\(\)/.test(_rendererSrc), 'wsRefreshBackupReadiness must still exist in source');
     // No legacy/wrong handler names wired.
     assert(!/onclick="wsUploadBackup\(/.test(_rendererSrc),   'no wsUploadBackup handler must be wired');
     assert(!/onclick="wsCloudBackup\(/.test(_rendererSrc),    'no wsCloudBackup handler must be wired');
@@ -862,10 +862,12 @@ function register(test, assert, assertEqual) {
     assert(!/\+\s*BACKUP_UI\.byteSize/.test(body),   'byteSize must not be concatenated into innerHTML');
     assert(!/\+\s*BACKUP_UI\.role/.test(body),       'role must not be concatenated into innerHTML');
     assert(!/\+\s*BACKUP_UI\.lastLocalBackupAt/.test(body), 'lastLocalBackupAt must not be concatenated into innerHTML');
-    assert(/getElementById\('ws-backup-summary'\)[\s\S]{0,80}\.textContent\s*=/.test(_rendererSrc),
-      'ws-backup-summary must be set via textContent');
-    assert(/getElementById\('ws-backup-size'\)[\s\S]{0,200}\.textContent\s*=/.test(_rendererSrc),
-      'ws-backup-size must be set via textContent');
+    // 1F.4E: simplified main UI uses ws-bk-status-txt instead of ws-backup-summary
+    assert(/getElementById\('ws-bk-status-txt'\)[\s\S]{0,200}\.textContent\s*=/.test(_rendererSrc),
+      'ws-bk-status-txt must be set via textContent (1F.4E simplified status)');
+    // Upload size confirmation still uses textContent (inside Advanced section)
+    assert(/getElementById\('ws-backup-confirm-text'\)[\s\S]{0,400}\.textContent\s*=/.test(_rendererSrc),
+      'ws-backup-confirm-text must be set via textContent');
   });
 
   test('backup readiness: renderer never references device id, storage path, or raw checksum', function() {
@@ -879,15 +881,15 @@ function register(test, assert, assertEqual) {
 
   // ── Backup list onclick safety (CLOUD-FOUNDATION-1F.4C-PREFLIGHT-CRASH-FIX) ──
 
-  test('backup list: wsStartDownloadPreflight onclick uses numeric index not JSON.stringify(backupId)', function() {
-    // JSON.stringify of a UUID string produces "uuid" (with double-quotes) which
-    // breaks the onclick="..." HTML attribute and causes SyntaxError on click.
-    // The fix: pass the array index (a safe integer) instead.
+  test('backup list: wsStartDownloadPreflight (if used) must not use JSON.stringify in onclick', function() {
+    // JSON.stringify of a UUID string produces "uuid" (double-quotes) which breaks onclick="..." HTML.
+    // In 1F.4E the Verify button was removed from the UI (wsStartDownloadPreflight is no longer
+    // triggered via onclick). This check remains as a safety guard against regression.
     assert(!/wsStartDownloadPreflight\(JSON\.stringify/.test(_rendererSrc),
-      'onclick must not use JSON.stringify — breaks onclick attribute with double-quoted strings');
-    // Confirm the index pattern is present: wsStartDownloadPreflight(' + _bi + ')
-    assert(/wsStartDownloadPreflight\('\s*\+\s*_bi\s*\+\s*'\)/.test(_rendererSrc),
-      'onclick must use the numeric _bi index pattern');
+      'onclick must never use JSON.stringify with wsStartDownloadPreflight');
+    // wsDownloadBackup (Export) must also use integer index, not string
+    assert(!/wsDownloadBackup\(JSON\.stringify/.test(_rendererSrc),
+      'wsDownloadBackup onclick must not use JSON.stringify');
   });
 
   test('backup list: wsStartDownloadPreflight onclick never calls restore/download bytes/apply', function() {
@@ -983,6 +985,58 @@ function register(test, assert, assertEqual) {
     FORBIDDEN_FIELDS.forEach(function(f) {
       assert(!html.includes(f), 'error view HTML must not contain: ' + f);
     });
+  });
+
+  // ── 1F.4E UX simplification checks ─────────────────────────────────────────
+
+  test('1F.4E: main backup section shows simple status, not raw readiness details', function() {
+    // ws-bk-status-txt is the new simple status element
+    assert(/getElementById\('ws-bk-status-txt'\)/.test(_rendererSrc),
+      'simple status element ws-bk-status-txt must exist');
+    // ws-backup-summary (old detailed readiness) must not be a primary element
+    assert(!/getElementById\('ws-backup-summary'\)[\s\S]{0,100}\.textContent/.test(_rendererSrc),
+      'ws-backup-summary must no longer be set — simplified in 1F.4E');
+  });
+
+  test('1F.4E: Verify button is not a primary user-facing control', function() {
+    // The Verify step is internal; no onclick wired to wsStartDownloadPreflight in the HTML
+    assert(!/onclick="wsStartDownloadPreflight\(/.test(_rendererSrc),
+      'wsStartDownloadPreflight must not have an onclick button in 1F.4E');
+  });
+
+  test('1F.4E: backup history is inside Advanced section (controlled by advExpanded)', function() {
+    // The Advanced toggle uses wsToggleBackupAdvanced
+    assert(/onclick="wsToggleBackupAdvanced\(\)"/.test(_rendererSrc),
+      'wsToggleBackupAdvanced must be wired to Advanced toggle button');
+    // advExpanded controls visibility of the Advanced content block
+    assert(/BACKUP_UI\.advExpanded/.test(_rendererSrc),
+      'BACKUP_UI.advExpanded must be referenced in render logic');
+    // ws-bkpl-hdr (history header) must exist in source (inside Advanced)
+    assert(/ws-bkpl-hdr/.test(_rendererSrc),
+      'ws-bkpl-hdr must exist (inside Advanced section)');
+    // The Advanced content div class is present
+    assert(/ws-bk-adv-content/.test(_rendererSrc),
+      'ws-bk-adv-content must be the Advanced collapsible container');
+  });
+
+  test('1F.4E: Export backup file button replaces Verify+Download two-step flow', function() {
+    // wsDownloadBackup is the Export handler (does preflight internally)
+    assert(/onclick="wsDownloadBackup\(/.test(_rendererSrc),
+      'wsDownloadBackup must be wired as the Export button');
+    // The safety note must appear inside the Advanced section
+    assert(/ws-bk-export-note/.test(_rendererSrc),
+      'ws-bk-export-note must exist inside Advanced section');
+  });
+
+  test('1F.4E: no restore button exists anywhere in backup section', function() {
+    assert(!/onclick="wsRestoreBackup\(/.test(_rendererSrc), 'no restore button allowed');
+    assert(!/onclick="wsApplyBackup\(/.test(_rendererSrc),   'no apply button allowed');
+    assert(!/onclick="wsImport\(/.test(_rendererSrc),        'no import button allowed');
+  });
+
+  test('1F.4E: Advanced section safety note uses textContent', function() {
+    assert(/getElementById\('ws-bk-export-note'\)[\s\S]{0,200}\.textContent\s*=/.test(_rendererSrc),
+      'export note must be set via textContent, not innerHTML');
   });
 }
 
