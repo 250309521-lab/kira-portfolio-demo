@@ -2435,6 +2435,18 @@ body::after {
 .search-input:focus{border-color:var(--bd-focus);width:155px;background:var(--glass-3)}
 .search-input::placeholder{color:var(--i5)}
 .save-indicator{font-size:10.5px;color:var(--i5);white-space:nowrap;font-family:var(--mono)}
+/* ── Cloud backup status indicator (CLOUD-FOUNDATION-1F.4H) ─────────── */
+/* 10px dot + 2.5px ring → effective visual ~15px; clearly visible in both themes */
+.cloud-bk-indicator{
+  display:inline-block;width:10px;height:10px;border-radius:50%;
+  vertical-align:middle;margin-left:5px;flex-shrink:0;
+  transition:background-color .4s,opacity .3s,box-shadow .4s;cursor:default}
+.cloud-bk-hidden{display:none}
+.cloud-bk-ok  {background:var(--green,#22c55e);box-shadow:0 0 0 2.5px rgba(34,197,94,.30)}
+.cloud-bk-warn{background:#f59e0b;             box-shadow:0 0 0 2.5px rgba(245,158,11,.30)}
+.cloud-bk-error{background:#f59e0b;            box-shadow:0 0 0 2.5px rgba(245,158,11,.30)}
+@keyframes cloud-bk-pulse{0%,100%{opacity:1}50%{opacity:.2}}
+.cloud-bk-pulse{animation:cloud-bk-pulse 1.6s ease-in-out infinite}
 .top-controls{display:flex;align-items:center;gap:6px;flex-shrink:0}
 .top-lang-seg{display:flex;align-items:center;background:var(--glass-1);border:1px solid var(--bd-1);border-radius:8px;overflow:hidden}
 .top-lang-btn{background:none;border:none;color:var(--i4);font-size:11px;font-weight:600;font-family:var(--sans);padding:4px 9px;cursor:pointer;transition:background .15s,color .15s;letter-spacing:.5px}
@@ -4393,6 +4405,10 @@ tbody tr[onclick] { cursor: pointer; }
       <button class="btn btn-secondary btn-sm" id="btn-exp" onclick="openModal('exp-add')">+ Gider</button>
       <button class="btn btn-ghost btn-sm" id="btn-ten" onclick="openModal('ten-add','')">+ Kiracı</button>
       <span class="save-indicator" id="save-lbl"></span>
+      <span class="cloud-bk-indicator cloud-bk-hidden"
+            id="cloud-backup-indicator"
+            role="status"
+            aria-live="polite"></span>
       <div class="top-controls">
         <div class="top-lang-seg">
           <button id="top-lang-tr" class="top-lang-btn top-lang-active" onclick="switchLang('tr')">TR</button>
@@ -5120,6 +5136,8 @@ var STRINGS={
     wsBackupCleanupFailed:'Meta veri hatası ve nesne temizleme başarısız (yetim yükleme riski).',
     wsBackupStatusActive:'Bulut koruması aktif.',
     wsBackupStatusNoBackup:'Otomatik yedekleme yakında geliyor. Manuel yedek Gelişmiş seçenekler altında mevcut.',
+    cloudBkOk:'Bulut yedek güncel.',cloudBkPending:'Bulut yedek bekliyor...',
+    cloudBkUploading:'Yedekleniyor...', cloudBkError:'Bulut yedek dikkat gerektiriyor',
     wsBackupAutoPending:'Bulut yedek bekliyor — otomatik yeniden deneyecek.',
     wsBackupAutoBacking:'Yedekleniyor…',
     wsBackupAutoFailed:'Bulut yedek dikkat gerektiriyor',
@@ -5674,6 +5692,8 @@ var STRINGS={
     wsBackupCleanupFailed:'Metadata write failed and cleanup also failed (orphaned upload risk).',
     wsBackupStatusActive:'Cloud protection is active.',
     wsBackupStatusNoBackup:'Automatic backup is coming. Manual backup is available under Advanced.',
+    cloudBkOk:'Cloud backup is up to date.',cloudBkPending:'Cloud backup pending...',
+    cloudBkUploading:'Backing up...', cloudBkError:'Cloud backup needs attention',
     wsBackupAutoPending:'Cloud backup pending — will retry automatically.',
     wsBackupAutoBacking:'Backing up…',
     wsBackupAutoFailed:'Cloud backup needs attention',
@@ -8958,9 +8978,44 @@ async function wsDownloadBackup(idx) {
   renderWorkspaceCard();
 }
 
+// ── Cloud backup status indicator (CLOUD-FOUNDATION-1F.4H) ─────────────────
+// Updates the always-visible topbar dot without exposing any internal state.
+// Shows a simple colored dot with a non-technical tooltip title only.
+// Called from renderWorkspaceCard() so it stays in sync with all state changes.
+
+function renderAutoBackupIndicator() {
+  var el = document.getElementById('cloud-backup-indicator');
+  if (!el) return;
+  // Only show when authenticated with active workspace. Hidden otherwise — not scary.
+  if (CLOUD_UI.state !== 'authenticated' || !WS_UI.activeId) {
+    el.className = 'cloud-bk-indicator cloud-bk-hidden';
+    el.title = ''; el.setAttribute('aria-label', '');
+    return;
+  }
+  var s = AUTO_BACKUP_UI.state;
+  if (s === 'ok') {
+    el.className = 'cloud-bk-indicator cloud-bk-ok';
+    el.title = t('cloudBkOk'); el.setAttribute('aria-label', t('cloudBkOk'));
+  } else if (s === 'uploading') {
+    el.className = 'cloud-bk-indicator cloud-bk-warn cloud-bk-pulse';
+    el.title = t('cloudBkUploading'); el.setAttribute('aria-label', t('cloudBkUploading'));
+  } else if (s === 'pending') {
+    el.className = 'cloud-bk-indicator cloud-bk-warn cloud-bk-pulse';
+    el.title = t('cloudBkPending'); el.setAttribute('aria-label', t('cloudBkPending'));
+  } else if (s === 'error') {
+    el.className = 'cloud-bk-indicator cloud-bk-error';
+    el.title = t('cloudBkError'); el.setAttribute('aria-label', t('cloudBkError'));
+  } else {
+    // 'idle' — authenticated but no backup pending yet
+    el.className = 'cloud-bk-indicator cloud-bk-hidden';
+    el.title = ''; el.setAttribute('aria-label', '');
+  }
+}
+
 function renderWorkspaceCard() {
   var card = document.getElementById('cloud-workspace-card');
   if (!card) return;
+  renderAutoBackupIndicator(); // always sync indicator regardless of card visibility
   if (CLOUD_UI.state !== 'authenticated' && CLOUD_UI.state !== 'offline_cached') { card.style.display = 'none'; return; }
   card.style.display = '';
   var view = WS_UI.view;

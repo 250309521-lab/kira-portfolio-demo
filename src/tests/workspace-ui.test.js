@@ -1220,6 +1220,104 @@ function register(test, assert, assertEqual) {
     assert(!/restoreBackup|applyBackup|syncApply|DATA\s*=/.test(handlers[0]),
       'online/offline handlers must not call restore/apply or overwrite DATA');
   });
+
+  // ── 1F.4H: Persistent cloud backup status indicator ─────────────────────────
+
+  test('1F.4H: cloud-backup-indicator DOM element exists in topbar', function() {
+    assert(/id="cloud-backup-indicator"/.test(_rendererSrc),
+      'cloud-backup-indicator element must be in the HTML');
+    assert(/role="status"/.test(_rendererSrc),
+      'indicator must have role="status" for accessibility');
+  });
+
+  test('1F.4H: renderAutoBackupIndicator function exists and reads safe fields only', function() {
+    assert(/function renderAutoBackupIndicator\(\)/.test(_rendererSrc),
+      'renderAutoBackupIndicator must be defined');
+    // Must read from AUTO_BACKUP_UI.state (the safe state field)
+    assert(/AUTO_BACKUP_UI\.state/.test(_rendererSrc),
+      'renderAutoBackupIndicator must reference AUTO_BACKUP_UI.state');
+  });
+
+  test('1F.4H: indicator does not expose internal fields to the UI', function() {
+    var fnMatch = _rendererSrc.match(/function renderAutoBackupIndicator\(\)([\s\S]*?)function renderWorkspaceCard/);
+    assert(fnMatch, 'renderAutoBackupIndicator body must be extractable');
+    var body = fnMatch[1];
+    // These internal fields must NEVER appear in what is rendered to the DOM
+    var forbidden = ['pendingHash','lastUploadedHash','nextRetryAt','backupId',
+      'storage_path','storagePath','checksum','device_id','archiveStr',
+      'access_token','refresh_token','rendererState'];
+    forbidden.forEach(function(f) {
+      assert(!body.includes(f), 'indicator must not reference: ' + f);
+    });
+  });
+
+  test('1F.4H: indicator state mapping covers ok/pending/uploading/error', function() {
+    var fnMatch = _rendererSrc.match(/function renderAutoBackupIndicator\(\)([\s\S]*?)function renderWorkspaceCard/);
+    assert(fnMatch, 'renderAutoBackupIndicator body must be extractable');
+    var body = fnMatch[1];
+    assert(/cloudBkOk/.test(body),      'ok state must use cloudBkOk i18n key');
+    assert(/cloudBkPending/.test(body),  'pending state must use cloudBkPending i18n key');
+    assert(/cloudBkUploading/.test(body),'uploading state must use cloudBkUploading i18n key');
+    assert(/cloudBkError/.test(body),    'error state must use cloudBkError i18n key');
+  });
+
+  test('1F.4H: indicator uses title/aria-label via property assignment not innerHTML', function() {
+    var fnMatch = _rendererSrc.match(/function renderAutoBackupIndicator\(\)([\s\S]*?)function renderWorkspaceCard/);
+    assert(fnMatch, 'renderAutoBackupIndicator body must be extractable');
+    var body = fnMatch[1];
+    assert(/el\.title\s*=/.test(body),                'title must be set via el.title property');
+    assert(/el\.setAttribute\('aria-label'/.test(body),'aria-label must be set via setAttribute');
+    assert(!/innerHTML/.test(body),                    'must not use innerHTML');
+  });
+
+  test('1F.4H: indicator hidden when not authenticated or no workspace', function() {
+    var fnMatch = _rendererSrc.match(/function renderAutoBackupIndicator\(\)([\s\S]*?)function renderWorkspaceCard/);
+    assert(fnMatch, 'renderAutoBackupIndicator body must be extractable');
+    var body = fnMatch[1];
+    assert(/cloud-bk-hidden/.test(body),
+      'indicator must have hidden class when conditions not met');
+    assert(/CLOUD_UI\.state\s*!==\s*'authenticated'/.test(body),
+      'indicator must check CLOUD_UI.state for visibility');
+    assert(/WS_UI\.activeId/.test(body),
+      'indicator must check WS_UI.activeId for visibility');
+  });
+
+  test('1F.4H: renderAutoBackupIndicator is called from renderWorkspaceCard', function() {
+    // Verify the call is at the top of renderWorkspaceCard (before early return for non-auth)
+    var wcBody = _rendererSrc.match(/function renderWorkspaceCard\(\)([\s\S]{0,200})/);
+    assert(wcBody, 'renderWorkspaceCard must be found');
+    assert(/renderAutoBackupIndicator\(\)/.test(wcBody[1]),
+      'renderAutoBackupIndicator must be called near the start of renderWorkspaceCard');
+  });
+
+  test('1F.4H: CSS animation pulse exists for pending/uploading states', function() {
+    assert(/cloud-bk-pulse/.test(_rendererSrc), 'cloud-bk-pulse CSS class must exist');
+    assert(/cloud-bk-warn/.test(_rendererSrc), 'cloud-bk-warn color class must exist');
+    assert(/cloud-bk-ok/.test(_rendererSrc), 'cloud-bk-ok color class must exist');
+    assert(/@keyframes cloud-bk-pulse/.test(_rendererSrc), 'pulse keyframe animation must exist');
+  });
+
+  test('1F.4H: indicator CSS dot is visually large enough to notice (>=9px) with ring (1F.4H-UI-VISIBILITY-FIX)', function() {
+    // Extract indicator base CSS block and confirm dot size >= 9px
+    var cssBlock = _rendererSrc.match(/\.cloud-bk-indicator\{[^}]+\}/);
+    assert(cssBlock, '.cloud-bk-indicator CSS block must exist');
+    var block = cssBlock[0];
+    // Width must be 10px (or more) — was 7px before the visibility fix
+    assert(/width:\s*(9|10|1[1-9]|[2-9]\d)px/.test(block),
+      'cloud-bk-indicator width must be at least 9px for visibility');
+    assert(/height:\s*(9|10|1[1-9]|[2-9]\d)px/.test(block),
+      'cloud-bk-indicator height must be at least 9px for visibility');
+    // Ring (box-shadow) adds effective visual target > 14px combined
+    assert(/box-shadow/.test(_rendererSrc),
+      'colored ring via box-shadow must exist on cloud-bk-ok/warn/error for contrast on both themes');
+  });
+
+  test('1F.4H: no restore/apply/import in renderAutoBackupIndicator', function() {
+    var fnMatch = _rendererSrc.match(/function renderAutoBackupIndicator\(\)([\s\S]*?)function renderWorkspaceCard/);
+    assert(fnMatch, 'renderAutoBackupIndicator body must be extractable');
+    assert(!/restoreBackup|applyBackup|syncApply|DATA\s*=/.test(fnMatch[1]),
+      'renderAutoBackupIndicator must not call restore/apply or overwrite DATA');
+  });
 }
 
 async function registerAsync(testAsync, assert, assertEqual) {
