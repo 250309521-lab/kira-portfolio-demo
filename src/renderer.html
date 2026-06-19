@@ -5080,7 +5080,7 @@ var STRINGS={
     wsActivate:'Seç',wsActive:'Aktif',
     wsRole_owner:'Sahip',wsRole_admin:'Admin',wsRole_member:'Üye',
     wsRefresh:'Yenile',wsSwitch:'Değiştir',
-    wsSyncNote:'Eşzamlama ve yedekleme henüz aktif değil.',
+    wsSyncNote:'Bulut çalışma alanı bağlandı. Yedekleme aktif.',
     wsRestored:'Önceki oturumdan geri yüklendi',
     wsNotFound:'Çalışma alanı artık erişilebilir değil.',
     wsErrorNetwork:'Ağ bağlantısı hatası.',
@@ -5135,7 +5135,7 @@ var STRINGS={
     wsBackupMetadataFailed:'Meta veri yazma başarısız; yedek yüklemesi temizlendi.',
     wsBackupCleanupFailed:'Meta veri hatası ve nesne temizleme başarısız (yetim yükleme riski).',
     wsBackupStatusActive:'Bulut koruması aktif.',
-    wsBackupStatusNoBackup:'Otomatik yedekleme yakında geliyor. Manuel yedek Gelişmiş seçenekler altında mevcut.',
+    wsBackupStatusNoBackup:'Bulut yedekleme hazır. Değişiklikler otomatik olarak yedeklenecek.',
     cloudBkOk:'Bulut yedek güncel.',cloudBkPending:'Bulut yedek bekliyor...',
     cloudBkUploading:'Yedekleniyor...', cloudBkError:'Bulut yedek dikkat gerektiriyor',
     wsBackupAutoPending:'Bulut yedek bekliyor — otomatik yeniden deneyecek.',
@@ -5147,11 +5147,12 @@ var STRINGS={
     wsBackupListHdr:'Bulut Yedek Geçmişi',wsBackupListLoading:'Yedekler yükleniyor…',
     wsBackupListEmpty:'Henüz bulut yedeği yok.',wsBackupListError:'Yedek listesi yüklenemedi.',
     wsBackupListRefresh:'Listeyi yenile',wsBackupListTrigger_manual:'Manuel',
-    wsBackupPrepDownload:'Doğrula',
+    // wsBackupPrepDownload removed (1F.5B dead key — Verify button removed in 1F.4E)
     wsBackupPreflightOk:'Doğrulandı — indirebilirsiniz.',
     wsBackupPreflightErr:'Doğrulama başarısız.',
     wsBackupDownloadNote:'Yalnızca dosyayı kaydeder. Verilerinizi geri yüklemez veya değiştirmez.',
-    wsBackupDownloadBtn:'Yedek dosyasını indir',wsBackupDownloading:'İndiriliyor…',
+    // wsBackupDownloadBtn removed (1F.5B dead key — superseded by wsBackupExportBtn)
+    wsBackupDownloading:'İndiriliyor…',
     wsBackupSaved:'Yedek dosyası kaydedildi.',
     wsBackupDownloadFailed:'İndirme başarısız.',wsBackupDownloadCancelled:'İndirme iptal edildi.',
     wsBackupSizeMismatch:'İndirilen dosya beklenen boyutla eşleşmiyor.',
@@ -5636,7 +5637,7 @@ var STRINGS={
     wsActivate:'Select',wsActive:'Active',
     wsRole_owner:'Owner',wsRole_admin:'Admin',wsRole_member:'Member',
     wsRefresh:'Refresh',wsSwitch:'Switch',
-    wsSyncNote:'Sync and backup are not active yet.',
+    wsSyncNote:'Cloud workspace connected. Backup is active.',
     wsRestored:'Restored from previous session',
     wsNotFound:'Workspace is no longer accessible.',
     wsErrorNetwork:'Network connection error.',
@@ -5691,7 +5692,7 @@ var STRINGS={
     wsBackupMetadataFailed:'Metadata write failed; uploaded object was cleaned up.',
     wsBackupCleanupFailed:'Metadata write failed and cleanup also failed (orphaned upload risk).',
     wsBackupStatusActive:'Cloud protection is active.',
-    wsBackupStatusNoBackup:'Automatic backup is coming. Manual backup is available under Advanced.',
+    wsBackupStatusNoBackup:'Cloud backup is ready. Changes will be backed up automatically.',
     cloudBkOk:'Cloud backup is up to date.',cloudBkPending:'Cloud backup pending...',
     cloudBkUploading:'Backing up...', cloudBkError:'Cloud backup needs attention',
     wsBackupAutoPending:'Cloud backup pending — will retry automatically.',
@@ -5703,11 +5704,12 @@ var STRINGS={
     wsBackupListHdr:'Cloud Backup History',wsBackupListLoading:'Loading backups…',
     wsBackupListEmpty:'No cloud backups yet.',wsBackupListError:'Failed to load backup list.',
     wsBackupListRefresh:'Refresh list',wsBackupListTrigger_manual:'Manual',
-    wsBackupPrepDownload:'Verify',
+    // wsBackupPrepDownload removed (1F.5B dead key — Verify button removed in 1F.4E)
     wsBackupPreflightOk:'Verified — ready to download.',
     wsBackupPreflightErr:'Verification failed.',
     wsBackupDownloadNote:'This only saves the backup file. It does not restore or change your data.',
-    wsBackupDownloadBtn:'Download backup file',wsBackupDownloading:'Downloading…',
+    // wsBackupDownloadBtn removed (1F.5B dead key — superseded by wsBackupExportBtn)
+    wsBackupDownloading:'Downloading…',
     wsBackupSaved:'Backup file saved.',
     wsBackupDownloadFailed:'Download failed.',wsBackupDownloadCancelled:'Download cancelled.',
     wsBackupSizeMismatch:'Downloaded file size does not match expected size.',
@@ -9061,18 +9063,10 @@ function renderWorkspaceCard() {
         '</div>' +
         (WS_UI.restored ? '<div id="ws-restored-note" class="ws-restored-note"></div>' : '') +
         '<div id="ws-sync-note" class="ws-sync-note"></div>' +
-        '<div class="ws-sync-status-section">' +
-          '<div class="ws-sync-status-hdr">' +
-            '<span id="ws-sync-hdr" class="ws-sync-hdr-lbl"></span>' +
-            '<button class="btn btn-ghost btn-xs" id="ws-sync-refresh-btn" onclick="wsRefreshSyncStatus()"' +
-              (SYNC_UI.state === 'loading' ? ' disabled' : '') + '></button>' +
-          '</div>' +
-          '<div id="ws-sync-summary" class="ws-sync-summary"></div>' +
-          (SYNC_UI.state === 'ready' && SYNC_UI.snapshot ? '<div id="ws-sync-snapshot" class="ws-sync-detail"></div>' : '') +
-          (SYNC_UI.state === 'ready' && SYNC_UI.lockFree === false ? '<div id="ws-sync-lock-note" class="ws-sync-detail"></div>' : '') +
-          (SYNC_UI.state === 'ready' ? '<div id="ws-sync-local-note" class="ws-sync-detail"></div>' : '') +
-          (SYNC_UI.lastCheckedAt ? '<div id="ws-sync-lastchecked" class="ws-sync-detail"></div>' : '') +
-        '</div>' +
+        // Sync Status section is not shown in the main panel (1F.5B).
+        // Real sync/apply is not yet implemented; labels like "not synced yet"
+        // and "local changes not tracked" would confuse normal users.
+        // wsRefreshSyncStatus() and SYNC_UI state remain available for future use.
         // ── Cloud Backup — simplified main view + Advanced section (1F.4E) ──────
         '<div class="ws-sync-status-section ws-backup-section">' +
           '<div class="ws-sync-status-hdr"><span id="ws-backup-hdr" class="ws-sync-hdr-lbl"></span></div>' +
@@ -9222,26 +9216,7 @@ function renderWorkspaceCard() {
       if (_ar) { _ar.textContent = _wsRoleLabel(WS_UI.activeRole); _ar.dataset.role = WS_UI.activeRole || ''; }
       var _sn = document.getElementById('ws-sync-note'); if (_sn) _sn.textContent = t('wsSyncNote');
       if (WS_UI.restored) { var _rn = document.getElementById('ws-restored-note'); if (_rn) _rn.textContent = t('wsRestored'); }
-
-      var _syh = document.getElementById('ws-sync-hdr'); if (_syh) _syh.textContent = t('wsSyncHdr');
-      var _syrb = document.getElementById('ws-sync-refresh-btn');
-      if (_syrb) _syrb.textContent = SYNC_UI.state === 'loading' ? t('wsSyncChecking') : t('wsSyncRefreshBtn');
-      var _sysum = document.getElementById('ws-sync-summary'); if (_sysum) _sysum.textContent = _syncStatusSummaryMsg();
-      var _sysnap = document.getElementById('ws-sync-snapshot');
-      if (_sysnap && SYNC_UI.snapshot) {
-        _sysnap.textContent = t('wsSyncSnapshotLbl') + ': ' +
-          new Date(SYNC_UI.snapshot.createdAt).toLocaleString();
-      }
-      var _sylock = document.getElementById('ws-sync-lock-note'); if (_sylock) _sylock.textContent = t('wsSyncLocked');
-      var _syloc = document.getElementById('ws-sync-local-note'); if (_syloc) _syloc.textContent = t('wsSyncLocalUnknown');
-      var _sylc = document.getElementById('ws-sync-lastchecked');
-      if (_sylc && SYNC_UI.lastCheckedAt) {
-        _sylc.textContent = t('wsSyncLastChecked') + ': ' + new Date(SYNC_UI.lastCheckedAt).toLocaleTimeString();
-      }
-
-      if (SYNC_UI.checkedForId !== WS_UI.activeId && SYNC_UI.state !== 'loading') {
-        wsRefreshSyncStatus();
-      }
+      // Sync Status elements removed in 1F.5B — no auto-trigger, no sync labels in main panel.
 
       // ── Cloud Backup — simplified + Advanced text (1F.4E) ─────────────────────
       var _bkh = document.getElementById('ws-backup-hdr'); if (_bkh) _bkh.textContent = t('wsBackupHdr');

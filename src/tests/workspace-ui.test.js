@@ -69,7 +69,7 @@ var _I18N = {
   wsCreate: 'Create Workspace', wsCreateBtn: 'Create', wsCreateName: 'Workspace name',
   wsActivate: 'Select', wsActive: 'Active', wsSwitch: 'Switch', wsRefresh: 'Refresh',
   wsRole_owner: 'Owner', wsRole_admin: 'Admin', wsRole_member: 'Member',
-  wsSyncNote: 'Sync and backup are not active yet.',
+  wsSyncNote: 'Cloud workspace connected. Backup is active.',
   wsRestored: 'Restored from previous session',
   wsNotFound: 'Workspace is no longer accessible.',
   wsErrorNetwork: 'Network connection error.',
@@ -664,20 +664,75 @@ function register(test, assert, assertEqual) {
     assert(!/\+\s*SYNC_UI\.lockExpiresAt/.test(body), 'lockExpiresAt must not be string-concatenated into innerHTML');
   });
 
-  test('sync status: textContent pass sets ws-sync-summary, ws-sync-snapshot, ws-sync-lock-note, ws-sync-lastchecked via textContent only', function() {
-    assert(/getElementById\('ws-sync-summary'\)[\s\S]{0,80}\.textContent\s*=/.test(_rendererSrc),
-      'ws-sync-summary must be set via textContent');
-    assert(/getElementById\('ws-sync-snapshot'\)[\s\S]{0,200}\.textContent\s*=/.test(_rendererSrc),
-      'ws-sync-snapshot must be set via textContent');
-    assert(/getElementById\('ws-sync-lock-note'\)[\s\S]{0,80}\.textContent\s*=/.test(_rendererSrc),
-      'ws-sync-lock-note must be set via textContent');
-    assert(/getElementById\('ws-sync-lastchecked'\)[\s\S]{0,200}\.textContent\s*=/.test(_rendererSrc),
-      'ws-sync-lastchecked must be set via textContent');
+  test('sync status: 1F.5B — Sync Status section removed from main panel (confusing labels hidden)', function() {
+    // Sync Status UI removed in 1F.5B: "not synced yet" / "local changes not tracked"
+    // would confuse normal users since real sync/apply is not yet implemented.
+    // wsRefreshSyncStatus() and SYNC_UI state remain intact for future use.
+    assert(!/getElementById\('ws-sync-summary'\)[\s\S]{0,80}\.textContent\s*=/.test(_rendererSrc),
+      'ws-sync-summary text-setting must be removed from main panel in 1F.5B');
+    assert(!/getElementById\('ws-sync-refresh-btn'\)[\s\S]{0,80}\.textContent\s*=/.test(_rendererSrc),
+      'ws-sync-refresh-btn text-setting must be removed from main panel in 1F.5B');
+    // Function must still exist for future use
+    assert(/async function wsRefreshSyncStatus/.test(_rendererSrc),
+      'wsRefreshSyncStatus function must still exist in source');
   });
 
   test('sync status: getSyncStatus does not expose lock_held_by / pushed_by anywhere in renderer.html', function() {
     assert(!/lock_held_by/.test(_rendererSrc), 'lock_held_by must never appear in renderer.html');
     assert(!/pushed_by/.test(_rendererSrc),    'pushed_by must never appear in renderer.html');
+  });
+
+  // ── 1F.5B: Cloud UI copy/layout polish ─────────────────────────────────────
+
+  test('1F.5B: misleading sync copy no longer appears in i18n (visible to users)', function() {
+    // Old copy that was outdated/misleading — must not appear in i18n values
+    assert(!/Sync and backup are not active yet/.test(_rendererSrc),
+      '"Sync and backup are not active yet" must be removed from i18n (outdated since 1F.4F)');
+    assert(!/Eşzamlama ve yedekleme henüz aktif değil/.test(_rendererSrc),
+      'TR equivalent of outdated sync note must also be removed');
+  });
+
+  test('1F.5B: transitional "Automatic backup is coming" copy replaced with accurate message', function() {
+    assert(!/Automatic backup is coming\./.test(_rendererSrc),
+      '"Automatic backup is coming" must be replaced — auto-backup is live since 1F.4F');
+    assert(/Cloud backup is ready/.test(_rendererSrc),
+      '"Cloud backup is ready" must appear as the new accurate copy');
+    assert(/backed up automatically/.test(_rendererSrc),
+      '"backed up automatically" must appear in new wsBackupStatusNoBackup copy');
+  });
+
+  test('1F.5B: ws-sync-note shows updated connection status, not old sync warning', function() {
+    // ws-sync-note still exists but with accurate text
+    assert(/ws-sync-note/.test(_rendererSrc), 'ws-sync-note element must still exist');
+    assert(/Cloud workspace connected/.test(_rendererSrc),
+      'Updated wsSyncNote must say "Cloud workspace connected."');
+    assert(/Backup is active/.test(_rendererSrc),
+      'Updated wsSyncNote must say "Backup is active."');
+  });
+
+  test('1F.5B: Sync Status section not rendered in main panel (removed from HTML build)', function() {
+    // The sync status section was removed from the active card HTML render.
+    // Confusing labels ("Not synced yet", "Local changes not tracked") no longer shown.
+    assert(!/ws-sync-refresh-btn/.test(_rendererSrc.match(/ws-sync-status-section[\s\S]{0,300}/)?.[0] || ''),
+      'ws-sync-refresh-btn must not be inside an active ws-sync-status-section render block');
+    // ws-sync-note still exists as a simple connection status
+    assert(/ws-sync-note/.test(_rendererSrc), 'ws-sync-note must still exist for connection status');
+  });
+
+  test('1F.5B: dead i18n keys wsBackupPrepDownload and wsBackupDownloadBtn removed', function() {
+    // These keys were removed in 1F.5B — they had no call sites in render code
+    assert(!/wsBackupPrepDownload\s*:/.test(_rendererSrc),
+      'wsBackupPrepDownload must be removed (dead key since 1F.4E)');
+    assert(!/wsBackupDownloadBtn\s*:/.test(_rendererSrc),
+      'wsBackupDownloadBtn must be removed (dead key since 1F.4E, superseded by wsBackupExportBtn)');
+    // Replacement key must still exist
+    assert(/wsBackupExportBtn/.test(_rendererSrc), 'wsBackupExportBtn must still exist');
+  });
+
+  test('1F.5B: no restore/apply/Settings controls added', function() {
+    assert(!/onclick="wsRestoreBackup\(/.test(_rendererSrc), 'no restore button added');
+    assert(!/onclick="wsApplyBackup\(/.test(_rendererSrc), 'no apply button added');
+    assert(!/Settings > Cloud/.test(_rendererSrc), 'no Settings > Cloud panel added yet');
   });
 
   test('sync status: SYNC_UI never stores deviceId/device_id/snapshot_hash/storage_path', function() {
