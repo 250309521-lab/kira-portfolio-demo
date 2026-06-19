@@ -8250,9 +8250,10 @@ var AUTO_BACKUP_UI = {
   nextRetryAt:      null,   // Date.now() + retryMs, for display only
 };
 var _autoBackupDebounceTimer = null; // fires after debounce period (data-change gate)
-var _autoBackupRetryTimer    = null; // fires after failure retry period
+var _autoBackupRetryTimer    = null; // fires after failure retry period or online fast-retry
 var AUTO_BACKUP_DEBOUNCE_MS  = 3 * 60 * 1000; // 3 min quiet period before upload
 var AUTO_BACKUP_RETRY_MS     = 5 * 60 * 1000; // 5 min backoff after network failure
+var AUTO_BACKUP_ONLINE_MS    =          5000;  // 5 s fast retry when connectivity returns
 
 // Lightweight djb2-style fingerprint — not cryptographic, just change detection.
 function _djb2Hash(str) {
@@ -8412,16 +8413,45 @@ async function wsAutoBackupTick() {
 
 // Schedules an automatic retry after a transient upload failure.
 // Fires independently of DATA changes — no user edit required.
-function _scheduleAutoRetry() {
+// delayMs: optional override (default AUTO_BACKUP_RETRY_MS).
+// Pass AUTO_BACKUP_ONLINE_MS for a fast online-restore retry.
+// Replaces any existing retry timer — no duplicate timers.
+function _scheduleAutoRetry(delayMs) {
+  var delay = (typeof delayMs === 'number' && delayMs > 0) ? delayMs : AUTO_BACKUP_RETRY_MS;
   if (_autoBackupRetryTimer) clearTimeout(_autoBackupRetryTimer);
-  AUTO_BACKUP_UI.nextRetryAt = Date.now() + AUTO_BACKUP_RETRY_MS;
+  AUTO_BACKUP_UI.nextRetryAt = Date.now() + delay;
   _autoBackupRetryTimer = setTimeout(function() {
     _autoBackupRetryTimer = null;
     AUTO_BACKUP_UI.nextRetryAt = null;
     if (AUTO_BACKUP_UI.pendingHash && !AUTO_BACKUP_UI.inFlight) {
+      _abLog('retry timer firing');
       wsAutoBackupTick();
     }
-  }, AUTO_BACKUP_RETRY_MS);
+  }, delay);
+}
+
+// ── Online / offline awareness (CLOUD-FOUNDATION-1F.4G) ─────────────────────
+// Online:  fast-retry any pending backup (connectivity just returned).
+// Offline: no action needed — existing timers will fail gracefully; pending
+//          state is preserved; UI already shows "will retry automatically."
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', function() {
+    _abLog('network online event');
+    // Fast retry only if there is pending data and no upload already in flight.
+    if (AUTO_BACKUP_UI.pendingHash && !AUTO_BACKUP_UI.inFlight) {
+      _abLog('scheduling fast retry after online');
+      _scheduleAutoRetry(AUTO_BACKUP_ONLINE_MS); // replaces any slow retry timer
+    }
+    renderWorkspaceCard();
+  });
+
+  window.addEventListener('offline', function() {
+    _abLog('network offline event');
+    // Uploading calls will fail naturally → wsAutoBackupTick catches → _scheduleAutoRetry.
+    // State already 'pending'/'uploading'; just refresh the card display.
+    renderWorkspaceCard();
+  });
 }
 
 function _wsRoleLabel(role) {

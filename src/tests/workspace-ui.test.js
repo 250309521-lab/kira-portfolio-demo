@@ -1152,6 +1152,74 @@ function register(test, assert, assertEqual) {
     assert(/getElementById\('ws-bk-export-note'\)[\s\S]{0,200}\.textContent\s*=/.test(_rendererSrc),
       'export note must be set via textContent, not innerHTML');
   });
+
+  // ── 1F.4G: Online/offline awareness ─────────────────────────────────────────
+
+  test('1F.4G: online event listener exists and triggers fast retry', function() {
+    assert(/addEventListener\('online'/.test(_rendererSrc),
+      'window must have an online event listener');
+    assert(/addEventListener\('offline'/.test(_rendererSrc),
+      'window must have an offline event listener');
+  });
+
+  test('1F.4G: online handler calls _scheduleAutoRetry with fast delay', function() {
+    var onlineBlock = _rendererSrc.match(/addEventListener\('online'[\s\S]*?addEventListener\('offline'/);
+    assert(onlineBlock, 'online handler must be found before offline handler');
+    var body = onlineBlock[0];
+    assert(/_scheduleAutoRetry/.test(body),
+      'online handler must call _scheduleAutoRetry');
+    assert(/AUTO_BACKUP_ONLINE_MS/.test(body),
+      'online handler must pass AUTO_BACKUP_ONLINE_MS for fast retry');
+  });
+
+  test('1F.4G: online handler has inFlight guard to prevent duplicate uploads', function() {
+    var onlineBlock = _rendererSrc.match(/addEventListener\('online'[\s\S]*?addEventListener\('offline'/);
+    assert(onlineBlock, 'online handler must be found');
+    assert(/inFlight/.test(onlineBlock[0]),
+      'online handler must check inFlight before scheduling retry');
+  });
+
+  test('1F.4G: _scheduleAutoRetry accepts optional delayMs parameter', function() {
+    assert(/function _scheduleAutoRetry\(\s*delayMs\s*\)/.test(_rendererSrc),
+      '_scheduleAutoRetry must accept optional delayMs parameter');
+    assert(/AUTO_BACKUP_ONLINE_MS/.test(_rendererSrc),
+      'AUTO_BACKUP_ONLINE_MS constant must exist for fast online retry');
+  });
+
+  test('1F.4G: online retry uses same _autoBackupRetryTimer — no duplicate timers', function() {
+    // _scheduleAutoRetry always clears existing timer before setting new one.
+    // This prevents a slow 5-min timer from running alongside a fast 5-sec one.
+    var retryFn = _rendererSrc.match(/function _scheduleAutoRetry[\s\S]*?^function /m);
+    assert(retryFn, '_scheduleAutoRetry body must be extractable');
+    var body = retryFn[0];
+    assert(/clearTimeout\(_autoBackupRetryTimer\)/.test(body),
+      '_scheduleAutoRetry must clear existing timer before setting new one');
+  });
+
+  test('1F.4G: offline handler does not block local save or clear pending state', function() {
+    var offlineBlock = _rendererSrc.match(/addEventListener\('offline'[\s\S]{0,400}/);
+    assert(offlineBlock, 'offline handler must exist');
+    var body = offlineBlock[0];
+    assert(!/pendingHash\s*=\s*null/.test(body),
+      'offline handler must NOT clear pendingHash — pending backup is preserved');
+    assert(!/AUTO_BACKUP_UI\.state\s*=\s*['"]\s*idle/.test(body),
+      'offline handler must NOT set state to idle');
+  });
+
+  test('1F.4G: no noisy default logs — debug flag required for online/offline log output', function() {
+    // _abLog requires __KTP_AUTO_BACKUP_DEBUG — online/offline logs are gated
+    var abLogBody = _rendererSrc.match(/function _abLog\(msg,\s*extra\)\s*\{([\s\S]*?)\n\}/);
+    assert(abLogBody, '_abLog must be found');
+    assert(/__KTP_AUTO_BACKUP_DEBUG/.test(abLogBody[1]),
+      'online/offline diagnostic logs must remain gated behind __KTP_AUTO_BACKUP_DEBUG');
+  });
+
+  test('1F.4G: no restore/apply/import in online/offline handlers', function() {
+    var handlers = _rendererSrc.match(/addEventListener\('online'[\s\S]*?addEventListener\('offline'[\s\S]{0,400}/);
+    assert(handlers, 'online/offline handlers must be found');
+    assert(!/restoreBackup|applyBackup|syncApply|DATA\s*=/.test(handlers[0]),
+      'online/offline handlers must not call restore/apply or overwrite DATA');
+  });
 }
 
 async function registerAsync(testAsync, assert, assertEqual) {
