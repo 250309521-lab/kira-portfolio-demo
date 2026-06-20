@@ -1626,6 +1626,77 @@ function register(test, assert, assertEqual) {
     assert(sch && /if \(!_realSyncPushEnabled\(\)\) return;/.test(sch[1]), 'scheduler must be flag-gated');
   });
 
+  // ── 1G.4B snapshot pull PREFLIGHT (read-only; separate flag; no apply) ───────
+
+  function _preflightBody() {
+    var m = _rendererSrc.match(/async function _preflightPullSnapshot\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(m, '_preflightPullSnapshot body must be found');
+    return m[1];
+  }
+
+  test('1G.4B flag: pull uses a SEPARATE flag KTP_REAL_SYNC_PULL_ENABLED (distinct from push)', function() {
+    assert(/function _realSyncPullEnabled\(\)/.test(_rendererSrc), '_realSyncPullEnabled must exist');
+    var fn = _rendererSrc.match(/function _realSyncPullEnabled\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(fn && /KTP_REAL_SYNC_PULL_ENABLED/.test(fn[1]), 'pull gate must read KTP_REAL_SYNC_PULL_ENABLED');
+    // Pull gate must NOT be satisfied by the push flag.
+    assert(!/KTP_REAL_SYNC_PUSH_ENABLED/.test(fn[1]), 'pull gate must not read the push flag');
+  });
+
+  test('1G.4B preflight: gated by pull flag first; blocks dirty and not-newer', function() {
+    var body = _preflightBody();
+    assert(/^\s*if\s*\(!_realSyncPullEnabled\(\)\)\s*return\s*\{ ok: false, error: 'pull_disabled' \};/.test(body),
+      'first statement must be the pull-flag gate');
+    assert(/pendingHash != null\)\s*return \{ ok: false, error: 'blocked_dirty' \}/.test(body),
+      'dirty (pendingHash) must block preflight');
+    assert(/cloudRevision <= SYNC_PUSH_UI\.baseRevision\) return \{ ok: false, error: 'not_newer' \}/.test(body),
+      'must block when not strictly newer');
+    assert(/pushInFlight\)\s*return \{ ok: false, error: 'blocked_push_in_flight' \}/.test(body),
+      'must block while a push is in flight');
+  });
+
+  test('1G.4B preflight: stamps workspace and discards stale result', function() {
+    var body = _preflightBody();
+    assert(/var reqWorkspaceId = WS_UI\.activeId/.test(body), 'must stamp the request workspace');
+    assert(/WS_UI\.activeId !== reqWorkspaceId\) return \{ ok: false, error: 'workspace_changed' \}/.test(body),
+      'must discard a stale-workspace result');
+  });
+
+  test('1G.4B preflight: does NOT apply/write/reload/mutate sync state', function() {
+    var body = _preflightBody();
+    assert(!/localStorage/.test(body), 'preflight must not touch localStorage');
+    assert(!/location\.reload/.test(body), 'preflight must not reload');
+    assert(!/\.innerHTML|renderWorkspaceCard\(|[^_a-zA-Z]render\(|[^_a-zA-Z]saveLocal\(/.test(body),
+      'preflight must do no DOM/render/save work');
+    assert(!/restoreBackupFromCloud|restoreFullBackup|_applyArchive/.test(body), 'preflight must not apply/restore');
+    assert(!/\bDATA\s*=/.test(body), 'preflight must not write DATA');
+    // Must NOT advance baseRevision / lastSyncedHash, must NOT flip state to synced.
+    assert(!/SYNC_PUSH_UI\.baseRevision\s*=[^=]/.test(body), 'preflight must not change baseRevision');
+    assert(!/SYNC_PUSH_UI\.lastSyncedHash\s*=[^=]/.test(body), 'preflight must not change lastSyncedHash');
+    assert(!/SYNC_PUSH_UI\.state\s*=[^=]/.test(body), 'preflight must not change state');
+    // pullInFlight toggling IS expected (the only allowed mutation).
+    assert(/SYNC_PUSH_UI\.pullInFlight = true/.test(body) && /SYNC_PUSH_UI\.pullInFlight = false/.test(body),
+      'preflight must set/clear pullInFlight');
+  });
+
+  test('1G.4B bridge: pull bridge reads window.cloudSyncPull (collision-safe name)', function() {
+    assert(/window\.cloudSyncPull/.test(_rendererSrc), 'renderer must read window.cloudSyncPull');
+    var fs = require('fs'); var path = require('path');
+    var preloadSrc = fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8');
+    assert(/exposeInMainWorld\(\s*'cloudSyncPull'/.test(preloadSrc), 'bridge must be exposed as cloudSyncPull');
+    assert(/preflightPullSnapshot/.test(preloadSrc), 'preload must wire preflightPullSnapshot');
+  });
+
+  test('1G.4B manual helper: __ktpPreflightPull gated; returns no content/secrets', function() {
+    assert(/window\.__ktpPreflightPull = function \(\)/.test(_rendererSrc), 'manual pull helper must exist');
+    var m = _rendererSrc.match(/window\.__ktpPreflightPull = function \(\)\s*\{([\s\S]*?)\n  \};/);
+    assert(m, 'manual pull helper body must be found');
+    var body = m[1];
+    assert(/if \(!_realSyncPullEnabled\(\)\) return Promise\.resolve\(\{ enabled: false \}\);/.test(body),
+      'helper must be gated by the pull flag');
+    assert(!/content|storage|snapshotHash|snapshot_hash|signedUrl|lease|device|token|checksum|JSON\.stringify/i.test(body),
+      'helper must not expose content, storage paths, hashes, signed URLs, device ids, or lease tokens');
+  });
+
   // ── 1F.6C UX polish: render order + reload behavior ─────────────────────────
 
   test('1F.6C render: wsConfirmManualBackup calls renderAutoBackupIndicator before renderWorkspaceCard', function() {

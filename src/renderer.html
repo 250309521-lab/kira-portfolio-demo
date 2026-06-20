@@ -8497,6 +8497,13 @@ function _realSyncPushEnabled() {
   return typeof window !== 'undefined' && !!window.KTP_REAL_SYNC_PUSH_ENABLED;
 }
 
+// 1G.4B: pull is gated by a SEPARATE, stricter flag — independent of push, and
+// OFF by default even when push is enabled (pull is destructive to local DATA;
+// 1G.4B is preflight-only, but the gate is introduced here for the whole pull path).
+function _realSyncPullEnabled() {
+  return typeof window !== 'undefined' && !!window.KTP_REAL_SYNC_PULL_ENABLED;
+}
+
 var SYNC_STATE_KEY = 'ktp_sync_state_v1';
 
 // In-memory sync state. baseRevision/lastSyncedHash also persisted to the marker.
@@ -8506,6 +8513,7 @@ var SYNC_PUSH_UI = {
   lastSyncedHash:   null,    // fingerprint of last successfully pushed state
   pendingHash:      null,    // fingerprint of changed state awaiting push
   pushInFlight:     false,
+  pullInFlight:     false,   // 1G.4B: a pull preflight/operation is running
   lastPushAt:       null,
   lastErrorCategory:null,
   retryAt:          null,
@@ -8776,6 +8784,51 @@ function _stopSyncCloudNewerPolling() {
   if (_syncPollInterval) { clearInterval(_syncPollInterval); _syncPollInterval = null; }
 }
 
+// ── 1G.4B: snapshot pull PREFLIGHT (download + validate; NO apply) ────────────
+// Read-only. Gated by the SEPARATE pull flag. Verifies the clean cloud_newer
+// gate, then asks main to download + validate the latest snapshot and return only
+// safe metadata. It does NOT apply, NOT write DATA/localStorage, NOT reload, NOT
+// change baseRevision/lastSyncedHash, NOT clear cloud_newer, and does NO DOM work.
+function _pullBridge() {
+  return (typeof window !== 'undefined' && window.cloudSyncPull && typeof window.cloudSyncPull.preflightPullSnapshot === 'function')
+    ? window.cloudSyncPull : null;
+}
+
+// Returns { ok:true, revision, byteSize, createdAt } or { ok:false, error:<reason> }.
+// Blocked reasons are typed and non-destructive; dirty state is always blocked.
+async function _preflightPullSnapshot() {
+  if (!_realSyncPullEnabled())                 return { ok: false, error: 'pull_disabled' };
+  if (!WS_UI.activeId)                         return { ok: false, error: 'no_workspace' };
+  if (SYNC_PUSH_UI.pushInFlight)               return { ok: false, error: 'blocked_push_in_flight' };
+  if (SYNC_PUSH_UI.pullInFlight)               return { ok: false, error: 'blocked_pull_in_flight' };
+  if (SYNC_PUSH_UI.pendingHash != null)        return { ok: false, error: 'blocked_dirty' };
+  if (SYNC_PUSH_UI.state === 'local_pending' ||
+      SYNC_PUSH_UI.state === 'syncing')        return { ok: false, error: 'blocked_dirty' };
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return { ok: false, error: 'offline' };
+  if (typeof SYNC_PUSH_UI.baseRevision !== 'number') return { ok: false, error: 'invalid_base_revision' };
+  if (typeof SYNC_PUSH_UI.cloudRevision !== 'number' ||
+      SYNC_PUSH_UI.cloudRevision <= SYNC_PUSH_UI.baseRevision) return { ok: false, error: 'not_newer' };
+  var bridge = _pullBridge();
+  if (!bridge)                                 return { ok: false, error: 'no_bridge' };
+
+  var reqWorkspaceId = WS_UI.activeId;          // stamp the request
+  var reqBaseRevision = SYNC_PUSH_UI.baseRevision;
+  SYNC_PUSH_UI.pullInFlight = true;
+  var res;
+  try {
+    res = await bridge.preflightPullSnapshot({ workspaceId: reqWorkspaceId, baseRevision: reqBaseRevision });
+  } catch (_) {
+    res = { ok: false, error: 'preflight_failed' };
+  }
+  SYNC_PUSH_UI.pullInFlight = false;
+
+  // Discard a stale result if the workspace changed mid-flight.
+  if (WS_UI.activeId !== reqWorkspaceId) return { ok: false, error: 'workspace_changed' };
+
+  // PREFLIGHT ONLY: never apply, never change baseRevision/lastSyncedHash/state.
+  return res || { ok: false, error: 'unknown_error' };
+}
+
 // Event triggers (focus/online) + the periodic interval. Each path is gated by
 // _scheduleDetectCloudNewer/_detectCloudNewer, so this is inert when disabled.
 if (typeof window !== 'undefined') {
@@ -8796,6 +8849,23 @@ if (typeof window !== 'undefined') {
         pushInFlight:      SYNC_PUSH_UI.pushInFlight,
         hasPending:        SYNC_PUSH_UI.pendingHash != null,
         lastErrorCategory: SYNC_PUSH_UI.lastErrorCategory,
+      };
+    });
+  };
+
+  // Gated, read-only manual smoke helper for 1G.4B pull PREFLIGHT. Runs the
+  // preflight (download+validate in main; content discarded) and returns ONLY the
+  // safe preflight result + a couple of safe state booleans. Never applies, never
+  // writes DATA, never exposes content/storage_path/hash/signed URL/device id.
+  window.__ktpPreflightPull = function () {
+    if (!_realSyncPullEnabled()) return Promise.resolve({ enabled: false });
+    return _preflightPullSnapshot().then(function (r) {
+      return {
+        preflight:    r,                               // { ok, revision, byteSize, createdAt } | { ok:false, error }
+        state:        SYNC_PUSH_UI.state,              // must remain unchanged (e.g. cloud_newer)
+        baseRevision: SYNC_PUSH_UI.baseRevision,       // must be unchanged by preflight
+        hasPending:   SYNC_PUSH_UI.pendingHash != null,
+        pullInFlight: SYNC_PUSH_UI.pullInFlight,
       };
     });
   };

@@ -65,6 +65,29 @@ function _pickPushResult(result) {
   return out;
 }
 
+function _validatePullPreflightPayload(payload) {
+  if (!payload || typeof payload !== 'object') return false;
+  if (typeof payload.workspaceId !== 'string' || !payload.workspaceId.trim()) return false;
+  if (typeof payload.baseRevision !== 'number' || !isFinite(payload.baseRevision) ||
+      payload.baseRevision < 0 || Math.floor(payload.baseRevision) !== payload.baseRevision) return false;
+  return true;
+}
+
+// Whitelist the pull-preflight result: ONLY safe metadata reaches the renderer.
+// Never content, storage path, snapshot hash, signed URL, device id, or lease token.
+function _pickPullPreflightResult(result) {
+  if (!result || typeof result !== 'object') return { ok: false, error: 'unknown_error' };
+  if (result.ok === true) {
+    return {
+      ok:        true,
+      revision:  typeof result.revision  === 'number' ? result.revision  : null,
+      byteSize:  typeof result.byteSize  === 'number' ? result.byteSize  : null,
+      createdAt: typeof result.createdAt === 'string' ? result.createdAt : null,
+    };
+  }
+  return { ok: false, error: typeof result.error === 'string' ? result.error : 'unknown_error' };
+}
+
 // register(ipcMain, licenseGuard, log, deps)
 //   deps.cloudSync   — defaults to require('./cloud-sync')
 //   deps.getDeviceId — () => Promise<string|null> | string|null
@@ -105,12 +128,36 @@ function register(ipcMain, licenseGuard, log, deps) {
       return { ok: false, error: 'unknown_error' };
     }
   });
+
+  // ── cloud:preflightPullSnapshot (1G.4B, read-only preflight — NO apply) ──────
+  // Downloads + validates the latest snapshot for the workspace IN MAIN, discards
+  // the content, and returns only safe metadata. Never writes DATA, never applies,
+  // never returns content/storage_path/hash/signed URL.
+  ipcMain.handle('cloud:preflightPullSnapshot', async function(_event, payload) {
+    try {
+      var guard = await licenseGuard();
+      if (!guard.ok) return { ok: false, error: 'license_required' };
+      if (!_validatePullPreflightPayload(payload)) return { ok: false, error: 'invalid_input' };
+
+      var result = await cloudSync.preflightPullSnapshot({
+        workspaceId:  payload.workspaceId,
+        baseRevision: payload.baseRevision,
+      });
+
+      return _pickPullPreflightResult(result);
+    } catch (e) {
+      log('cloud:preflightPullSnapshot error: ' + ((e && e.code) || 'unknown_error'));
+      return { ok: false, error: 'unknown_error' };
+    }
+  });
 }
 
 module.exports = {
   register,
   _sanitize,
   _pickPushResult,
+  _pickPullPreflightResult,
+  _validatePullPreflightPayload,
   _validatePushPayload,
   _STRIP_KEYS,
 };

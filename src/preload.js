@@ -100,3 +100,11 @@ contextBridge.exposeInMainWorld('cloudBackup', {
 contextBridge.exposeInMainWorld('cloudSyncPush', {
   pushWorkspaceSnapshot:            (payload) => ipcRenderer.invoke('cloud:pushWorkspaceSnapshot', payload),
 });
+
+// ── Real Sync PULL preflight (CLOUD-FOUNDATION-1G.4B) ───────────────────────
+// Read-only preflight (download+validate in main, content discarded). No apply.
+// Renderer gating uses a SEPARATE flag window.KTP_REAL_SYNC_PULL_ENABLED (default
+// off, independent of push). Exposed as 'cloudSyncPull' (no legacy collision).
+contextBridge.exposeInMainWorld('cloudSyncPull', {
+  preflightPullSnapshot:            (payload) => ipcRenderer.invoke('cloud:preflightPullSnapshot', payload),
+});

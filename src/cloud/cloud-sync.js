@@ -248,8 +248,115 @@ function computeSnapshotHash(snapshotStr) {
   return crypto.createHash('sha256').update(snapshotStr, 'utf8').digest('hex');
 }
 
+// ── 1G.4B: snapshot pull PREFLIGHT (download + validate; NO apply) ─────────────
+// Internal main-side metadata fetch. get_latest_snapshot_metadata returns
+// storage_path + snapshot_hash (the renderer-facing cloud-workspace variant
+// strips them). This raw result MUST stay in main — never returned to renderer.
+async function _callSnapshotMetaRpc(workspaceId, headers) {
+  var res, body;
+  try {
+    res = await _doFetch(getSupabaseUrl() + '/rest/v1/rpc/get_latest_snapshot_metadata', {
+      method:  'POST',
+      headers: headers,
+      body:    JSON.stringify({ p_workspace_id: workspaceId.trim() }),
+    });
+    var raw = await res.text();
+    body = raw && raw.trim() ? JSON.parse(raw) : null;
+  } catch (_) {
+    return { ok: false, error: 'network_error' };
+  }
+  if (!res.ok || !body || body.ok !== true) {
+    var ec = (body && typeof body.error === 'string') ? body.error : '';
+    if (ec === 'not_member')        return { ok: false, error: 'workspace_not_found' };
+    if (ec === 'not_authenticated') return { ok: false, error: 'not_authenticated' };
+    return { ok: false, error: 'preflight_failed' };
+  }
+  var snap = body.snapshot || null;
+  if (!snap) return { ok: false, error: 'no_snapshot' };
+  return {
+    ok:          true,
+    revision:    typeof snap.revision     === 'number' ? snap.revision     : null,
+    storagePath: typeof snap.storage_path === 'string' ? snap.storage_path : null,
+    snapshotHash:typeof snap.snapshot_hash=== 'string' ? snap.snapshot_hash: null,
+    byteSize:    typeof snap.byte_size    === 'number' ? snap.byte_size    : null,
+    createdAt:   typeof snap.created_at   === 'string' ? snap.created_at   : null,
+  };
+}
+
+// Plausibility check: a sync snapshot is JSON.stringify(DATA) — a non-array
+// object that carries at least one expected business-data key.
+function _looksLikeData(parsed) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+  return ('buildings' in parsed) || ('tenants' in parsed) ||
+         ('payments' in parsed)  || ('expenses' in parsed) || ('settings' in parsed);
+}
+
+// preflightPullSnapshot — downloads the latest snapshot for the workspace IN
+// MEMORY, validates it, then DISCARDS the content. Returns ONLY safe metadata.
+// NEVER applies, NEVER writes DATA, NEVER returns content/storage_path/hash/URL.
+// input: { workspaceId, baseRevision }
+async function preflightPullSnapshot(input) {
+  input = input || {};
+  if (!isConfigured()) return { ok: false, error: 'not_configured' };
+
+  var workspaceId = typeof input.workspaceId === 'string' ? input.workspaceId.trim() : '';
+  if (!_validateWorkspaceId(workspaceId)) return { ok: false, error: 'invalid_input' };
+  if (!_isNonNegInt(input.baseRevision))  return { ok: false, error: 'invalid_base_revision' };
+
+  var meta = _auth().getSessionMeta();
+  if (!meta || !meta.ok) return { ok: false, error: 'not_authenticated' };
+
+  var headers = await _buildAuthHeaders(true);
+  if (!headers) return { ok: false, error: 'not_authenticated' };
+
+  // Step 1 — latest snapshot metadata (main-only: storage_path + hash).
+  var m = await _callSnapshotMetaRpc(workspaceId, headers);
+  if (!m.ok) return { ok: false, error: m.error };
+  if (m.revision === null || m.byteSize === null || !m.storagePath || !m.snapshotHash) {
+    return { ok: false, error: 'preflight_failed' };
+  }
+  // Must be strictly newer than the local base; otherwise nothing to pull.
+  if (m.revision <= input.baseRevision) return { ok: false, error: 'not_newer' };
+  if (m.byteSize <= 0 || m.byteSize > MAX_SNAPSHOT_BYTES) return { ok: false, error: 'invalid_byte_size' };
+
+  // Step 2 — download content IN MEMORY (authenticated storage GET).
+  var dlHeaders = await _buildAuthHeaders(false);
+  if (!dlHeaders) return { ok: false, error: 'not_authenticated' };
+  var dlRes, content;
+  try {
+    dlRes = await _doFetch(
+      getSupabaseUrl() + '/storage/v1/object/authenticated/' + SNAPSHOT_BUCKET + '/' + m.storagePath,
+      { method: 'GET', headers: dlHeaders }
+    );
+    content = await dlRes.text();
+  } catch (_) {
+    return { ok: false, error: 'download_failed' };
+  }
+  if (!dlRes.ok || !content) return { ok: false, error: 'download_failed' };
+
+  // Step 3 — validate: size, integrity hash, JSON parse, plausible DATA shape.
+  var actualBytes = Buffer.byteLength(content, 'utf8');
+  if (actualBytes !== m.byteSize) return { ok: false, error: 'size_mismatch' };
+  if (computeSnapshotHash(content) !== m.snapshotHash) return { ok: false, error: 'hash_mismatch' };
+  var parsed;
+  try { parsed = JSON.parse(content); } catch (_) { return { ok: false, error: 'invalid_json' }; }
+  if (!_looksLikeData(parsed)) return { ok: false, error: 'invalid_shape' };
+
+  // 1G.4B: content validated — DISCARD it. Apply belongs to 1G.4C.
+  content = null; parsed = null;
+
+  // Safe result only — no content, storage_path, hash, signed URL, device id.
+  return {
+    ok:        true,
+    revision:  m.revision,
+    byteSize:  m.byteSize,
+    createdAt: m.createdAt || null,
+  };
+}
+
 module.exports = {
   pushWorkspaceSnapshot,
+  preflightPullSnapshot,
   computeSnapshotHash,
   // Constants exported for tests/wiring
   PUSH_ROLES,
@@ -262,4 +369,5 @@ module.exports = {
   _resetForTests,
   _snapshotPath,
   _validateWorkspaceId,
+  _looksLikeData,
 };

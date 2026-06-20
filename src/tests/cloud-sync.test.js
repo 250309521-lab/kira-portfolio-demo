@@ -150,6 +150,33 @@ function register(test, assert, assertEqual) {
     assert(s.ok === true && s.newRevision === 1);
     assert(!('token' in s) && !('storage_path' in s) && !('checksum' in s));
   });
+
+  // ── 1G.4B pull-preflight IPC sanitization ──────────────────────────────────
+  test('cloud-sync-ipc: _validatePullPreflightPayload requires workspaceId + integer baseRevision', function() {
+    assert(!csIpc._validatePullPreflightPayload(null));
+    assert(!csIpc._validatePullPreflightPayload({ baseRevision: 0 }), 'missing workspaceId');
+    assert(!csIpc._validatePullPreflightPayload({ workspaceId: WS_ID }), 'missing baseRevision');
+    assert(!csIpc._validatePullPreflightPayload({ workspaceId: WS_ID, baseRevision: -1 }), 'negative');
+    assert(!csIpc._validatePullPreflightPayload({ workspaceId: WS_ID, baseRevision: 1.5 }), 'non-integer');
+    assert(csIpc._validatePullPreflightPayload({ workspaceId: WS_ID, baseRevision: 1 }), 'valid');
+  });
+
+  test('cloud-sync-ipc: _pickPullPreflightResult keeps only revision/byteSize/createdAt', function() {
+    var out = csIpc._pickPullPreflightResult({ ok: true, revision: 5, byteSize: 1234, createdAt: '2026-01-01T00:00:00Z',
+      content: 'SECRET-DATA', storagePath: 's', snapshotHash: 'h', signedUrl: 'u', deviceId: 'd' });
+    assertEqual(out.ok, true);
+    assertEqual(out.revision, 5);
+    assertEqual(out.byteSize, 1234);
+    assert(typeof out.createdAt === 'string');
+    assert(!('content' in out) && !('storagePath' in out) && !('snapshotHash' in out) &&
+           !('signedUrl' in out) && !('deviceId' in out), 'forbidden fields must be stripped');
+  });
+
+  test('cloud-sync-ipc: _pickPullPreflightResult preserves typed error', function() {
+    var out = csIpc._pickPullPreflightResult({ ok: false, error: 'not_newer' });
+    assertEqual(out.ok, false);
+    assertEqual(out.error, 'not_newer');
+  });
 }
 
 // ── Async tests ────────────────────────────────────────────────────────────────
@@ -250,6 +277,136 @@ async function registerAsync(testAsync, assert, assertEqual) {
     cs._resetForTests();
     assert(!r.ok && r.error === 'not_authenticated', 'must require auth');
     assertEqual(f._calls.acquire, 0, 'no network when unauthenticated');
+  });
+
+  // ── 1G.4B: snapshot pull PREFLIGHT (download + validate; NO apply) ──────────
+  console.log('\nCloud Sync — pull preflight (CLOUD-FOUNDATION-1G.4B, async):');
+
+  var SNAP_CONTENT = JSON.stringify({ buildings: [], tenants: {}, payments: {}, settings: { autoSave: true } });
+
+  // Fetch mock for preflight: handles get_latest_snapshot_metadata + storage GET.
+  function makePullFetch(o) {
+    o = o || {};
+    var calls = { meta: 0, dl: 0 };
+    var content = (o.content !== undefined) ? o.content : SNAP_CONTENT;
+    var fn = async function(url) {
+      if (url.indexOf('/rest/v1/rpc/get_latest_snapshot_metadata') !== -1) {
+        calls.meta++;
+        if (o.metaNoSnap) return { ok: true, text: async function() { return JSON.stringify({ ok: true, snapshot: null }); } };
+        if (o.metaErr)    return { ok: true, text: async function() { return JSON.stringify({ ok: false, error: o.metaErr }); } };
+        var snap = {
+          revision:      (o.revision != null) ? o.revision : 2,
+          storage_path:  'workspaces/' + WS_ID + '/2_x.ktpsnap',
+          snapshot_hash: (o.hashOverride != null) ? o.hashOverride : cs.computeSnapshotHash(content),
+          byte_size:     (o.byteOverride != null) ? o.byteOverride : Buffer.byteLength(content, 'utf8'),
+          created_at:    '2026-01-01T00:00:00Z',
+        };
+        return { ok: true, text: async function() { return JSON.stringify({ ok: true, snapshot: snap }); } };
+      }
+      if (url.indexOf('/storage/v1/object/authenticated/ktp-snapshots/') !== -1) {
+        calls.dl++;
+        if (o.dlFail) return { ok: false, text: async function() { return ''; } };
+        return { ok: true, text: async function() { return content; } };
+      }
+      return { ok: true, text: async function() { return '{}'; } };
+    };
+    fn._calls = calls;
+    return fn;
+  }
+  function setupPull(o) {
+    o = o || {};
+    cs._setAuth(makeMockAuth(o.authOk !== false));
+    var f = makePullFetch(o);
+    cs._setFetch(f);
+    return f;
+  }
+
+  await testAsync('pull-preflight: valid newer snapshot → ok with safe metadata only (no content)', async function() {
+    var f = setupPull({ revision: 2 });
+    var r = await cs.preflightPullSnapshot({ workspaceId: WS_ID, baseRevision: 1 });
+    cs._resetForTests();
+    assert(r.ok, 'must succeed');
+    assertEqual(r.revision, 2);
+    assert(typeof r.byteSize === 'number' && r.byteSize > 0, 'byteSize present');
+    assert(typeof r.createdAt === 'string', 'createdAt present');
+    assert(!('content' in r) && !('storagePath' in r) && !('snapshotHash' in r) &&
+           !('signedUrl' in r) && !('deviceId' in r), 'no forbidden fields in result');
+    assertEqual(f._calls.meta, 1, 'metadata fetched');
+    assertEqual(f._calls.dl, 1, 'content downloaded for validation');
+  });
+
+  await testAsync('pull-preflight: revision not newer than base → not_newer (no download)', async function() {
+    var f = setupPull({ revision: 2 });
+    var r = await cs.preflightPullSnapshot({ workspaceId: WS_ID, baseRevision: 2 });
+    cs._resetForTests();
+    assert(!r.ok && r.error === 'not_newer', 'must reject non-newer revision');
+    assertEqual(f._calls.dl, 0, 'must not download when not newer');
+  });
+
+  await testAsync('pull-preflight: missing snapshot → no_snapshot', async function() {
+    setupPull({ metaNoSnap: true });
+    var r = await cs.preflightPullSnapshot({ workspaceId: WS_ID, baseRevision: 1 });
+    cs._resetForTests();
+    assert(!r.ok && r.error === 'no_snapshot', 'must report no_snapshot');
+  });
+
+  await testAsync('pull-preflight: hash mismatch fails safely', async function() {
+    setupPull({ revision: 2, hashOverride: 'b'.repeat(64) });
+    var r = await cs.preflightPullSnapshot({ workspaceId: WS_ID, baseRevision: 1 });
+    cs._resetForTests();
+    assert(!r.ok && r.error === 'hash_mismatch', 'integrity mismatch must fail');
+  });
+
+  await testAsync('pull-preflight: size mismatch fails safely', async function() {
+    setupPull({ revision: 2, byteOverride: 999999 });
+    var r = await cs.preflightPullSnapshot({ workspaceId: WS_ID, baseRevision: 1 });
+    cs._resetForTests();
+    assert(!r.ok && r.error === 'size_mismatch', 'size mismatch must fail');
+  });
+
+  await testAsync('pull-preflight: non-JSON content fails as invalid_json', async function() {
+    setupPull({ revision: 2, content: 'this is not json' });
+    var r = await cs.preflightPullSnapshot({ workspaceId: WS_ID, baseRevision: 1 });
+    cs._resetForTests();
+    assert(!r.ok && r.error === 'invalid_json', 'unparseable content must fail');
+  });
+
+  await testAsync('pull-preflight: implausible (non-DATA) shape fails as invalid_shape', async function() {
+    setupPull({ revision: 2, content: JSON.stringify({ foo: 'bar' }) });
+    var r = await cs.preflightPullSnapshot({ workspaceId: WS_ID, baseRevision: 1 });
+    cs._resetForTests();
+    assert(!r.ok && r.error === 'invalid_shape', 'non-DATA shape must fail');
+  });
+
+  await testAsync('pull-preflight: download failure fails safely', async function() {
+    setupPull({ revision: 2, dlFail: true });
+    var r = await cs.preflightPullSnapshot({ workspaceId: WS_ID, baseRevision: 1 });
+    cs._resetForTests();
+    assert(!r.ok && r.error === 'download_failed', 'download failure must be surfaced');
+  });
+
+  await testAsync('pull-preflight: not authenticated → no network', async function() {
+    var f = setupPull({ authOk: false });
+    var r = await cs.preflightPullSnapshot({ workspaceId: WS_ID, baseRevision: 1 });
+    cs._resetForTests();
+    assert(!r.ok && r.error === 'not_authenticated', 'must require auth');
+    assertEqual(f._calls.meta, 0, 'no metadata fetch when unauthenticated');
+  });
+
+  await testAsync('pull-preflight: invalid base revision rejected before network', async function() {
+    var f = setupPull({});
+    var r = await cs.preflightPullSnapshot({ workspaceId: WS_ID, baseRevision: -1 });
+    cs._resetForTests();
+    assert(!r.ok && r.error === 'invalid_base_revision', 'bad base revision rejected');
+    assertEqual(f._calls.meta, 0, 'no network for invalid base revision');
+  });
+
+  await testAsync('pull-preflight: _looksLikeData accepts DATA-shaped, rejects others', async function() {
+    assert(cs._looksLikeData({ tenants: {} }), 'tenants-bearing object is DATA-like');
+    assert(cs._looksLikeData({ settings: {} }), 'settings-bearing object is DATA-like');
+    assert(!cs._looksLikeData({ foo: 1 }), 'unrelated object is not DATA-like');
+    assert(!cs._looksLikeData([]), 'array is not DATA-like');
+    assert(!cs._looksLikeData(null), 'null is not DATA-like');
   });
 }
 
