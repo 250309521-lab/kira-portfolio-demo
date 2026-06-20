@@ -1471,6 +1471,161 @@ function register(test, assert, assertEqual) {
     assert(!/window\.cloudSync\b/.test(_rendererSrc), 'renderer must not read window.cloudSync');
   });
 
+  // ── 1G.3 proactive cloud-newer detection (read-only, default OFF) ───────────
+
+  function _detectBody() {
+    var m = _rendererSrc.match(/async function _detectCloudNewer\([^)]*\)\s*\{([\s\S]*?)\n\}/);
+    assert(m, '_detectCloudNewer body must be found');
+    return m[1];
+  }
+
+  test('1G.3 detect: _detectCloudNewer exists and is flag-gated (inert by default)', function() {
+    assert(/async function _detectCloudNewer\(/.test(_rendererSrc), '_detectCloudNewer must exist');
+    var body = _detectBody();
+    assert(/^\s*if\s*\(!_realSyncPushEnabled\(\)\)\s*return;/.test(body),
+      'first statement must be the KTP_REAL_SYNC_PUSH_ENABLED gate');
+  });
+
+  test('1G.3 detect: sets cloud_newer when currentRevision > baseRevision', function() {
+    var body = _detectBody();
+    assert(/cloudRev > SYNC_PUSH_UI\.baseRevision/.test(body), 'must compare cloud vs base revision');
+    assert(/SYNC_PUSH_UI\.state = \(WS_UI\.activeRole === 'viewer'\) \? 'view_only' : 'cloud_newer'/.test(body),
+      'newer cloud must set cloud_newer (view_only for viewer)');
+  });
+
+  test('1G.3 detect: clean + current can return to synced; never while dirty', function() {
+    var body = _detectBody();
+    assert(/cloudRev === SYNC_PUSH_UI\.baseRevision/.test(body), 'must handle equal revision');
+    assert(/SYNC_PUSH_UI\.pendingHash == null/.test(body), 'synced transition must require clean (no pendingHash)');
+    assert(/: 'synced'/.test(body), 'must be able to set synced when clean/current');
+  });
+
+  test('1G.3 detect: never mutates pendingHash or baseRevision (no overwrite)', function() {
+    var body = _detectBody();
+    assert(!/SYNC_PUSH_UI\.pendingHash\s*=[^=]/.test(body), 'detection must NOT assign pendingHash');
+    assert(!/SYNC_PUSH_UI\.baseRevision\s*=[^=]/.test(body), 'detection must NOT change baseRevision');
+  });
+
+  test('1G.3 detect: no pull/apply/restore/reload/DATA write', function() {
+    var body = _detectBody();
+    assert(!/location\.reload/.test(body), 'no reload');
+    assert(!/restoreBackupFromCloud|restoreFullBackup|_applyArchive|pushWorkspaceSnapshot/.test(body),
+      'no apply/restore/push from detection');
+    assert(!/\bDATA\s*=/.test(body), 'must not write DATA');
+  });
+
+  test('1G.3 detect: read-only — consumes only currentRevision, no forbidden fields', function() {
+    var body = _detectBody();
+    assert(/res\.currentRevision/.test(body), 'must read currentRevision');
+    assert(!/storage|snapshot_hash|snapshotHash|lease|createSignedUrl|get_latest_snapshot_metadata|device/i.test(body),
+      'detection must not reference storage paths, hashes, lease tokens, device ids, or snapshot content');
+  });
+
+  test('1G.3 detect: guards — pushInFlight, coalesce, activeId, hidden, workspace-stamp', function() {
+    var body = _detectBody();
+    assert(/if \(SYNC_PUSH_UI\.pushInFlight\) return;/.test(body), 'must skip while a push is in flight');
+    assert(/_syncPollInFlight/.test(body), 'must coalesce with an in-flight guard');
+    assert(/if \(!WS_UI\.activeId\) return;/.test(body), 'must no-op without an active workspace');
+    assert(/document\.hidden/.test(body), 'should skip when document hidden');
+    assert(/var reqWorkspaceId = WS_UI\.activeId/.test(body), 'must stamp the request with the workspace id');
+    assert(/WS_UI\.activeId !== reqWorkspaceId/.test(body), 'must discard a stale-workspace response');
+  });
+
+  test('1G.3 detect: offline/error/not-current-auth does not corrupt state', function() {
+    var body = _detectBody();
+    // getSyncStatus failure path returns without touching state.
+    assert(/catch \(_\) \{\s*_syncPollInFlight = false;\s*return;/.test(body.replace(/\n/g, ' ')),
+      'network error must return without state changes');
+    assert(/if \(!res \|\| res\.ok !== true\) return;/.test(body), 'non-ok status must return (no false synced)');
+  });
+
+  test('1G.3 suppress: auto-push tick is suppressed while cloud_newer', function() {
+    var tick = _rendererSrc.match(/async function wsAutoSyncPushTick\(\)([\s\S]*?)\n\}/);
+    assert(tick, 'wsAutoSyncPushTick body must be found');
+    var body = tick[1];
+    assert(/if \(SYNC_PUSH_UI\.state === 'cloud_newer'\) return;/.test(body),
+      'tick must return early while cloud_newer (no guaranteed-stale churn)');
+    // Suppression must come after the viewer check and before the push call.
+    var supIdx  = body.indexOf("state === 'cloud_newer'");
+    var pushIdx = body.indexOf('pushWorkspaceSnapshot');
+    assert(supIdx >= 0 && pushIdx > supIdx, 'suppression must precede the push call');
+  });
+
+  test('1G.3 invariant: cloudRev > baseRevision can never resolve to synced', function() {
+    var body = _detectBody();
+    // The newer-cloud branch must set cloud_newer and RETURN before any synced path.
+    var newerIdx  = body.indexOf('cloudRev > SYNC_PUSH_UI.baseRevision');
+    var equalIdx  = body.indexOf('cloudRev === SYNC_PUSH_UI.baseRevision');
+    var syncedIdx = body.indexOf(": 'synced'");
+    assert(newerIdx >= 0 && equalIdx > newerIdx, 'newer-branch must precede the equal-branch');
+    assert(syncedIdx > equalIdx, "'synced' may only be set inside the equal-revision branch");
+    // The newer branch must return before reaching the synced assignment.
+    var newerSeg = body.slice(newerIdx, equalIdx);
+    assert(/return;/.test(newerSeg), 'newer-cloud branch must return (no fall-through to synced)');
+    assert(!/'synced'/.test(newerSeg), 'newer-cloud branch must not set synced');
+  });
+
+  test('1G.3 reliability: document.hidden skip is interval-only (explicit triggers always run)', function() {
+    var body = _detectBody();
+    assert(/opts\.viaInterval && typeof document !== 'undefined' && document\.hidden/.test(body),
+      'hidden skip must be gated by opts.viaInterval, not unconditional');
+    // The unconditional hidden early-return must be gone.
+    assert(!/\n\s*if \(typeof document !== 'undefined' && document\.hidden\) return;/.test(body),
+      'there must be no unconditional document.hidden early-return');
+    assert(/_detectCloudNewer\(\{ viaInterval: true \}\)/.test(_rendererSrc),
+      'the periodic interval must pass { viaInterval: true }');
+  });
+
+  test('1G.3 manual helper: __ktpDetectCloudNewer is gated and returns only safe fields', function() {
+    assert(/window\.__ktpDetectCloudNewer = function \(\)/.test(_rendererSrc), 'manual helper must exist');
+    var m = _rendererSrc.match(/window\.__ktpDetectCloudNewer = function \(\)\s*\{([\s\S]*?)\n  \};/);
+    assert(m, 'manual helper body must be found');
+    var body = m[1];
+    assert(/if \(!_realSyncPushEnabled\(\)\) return Promise\.resolve\(\{ enabled: false \}\);/.test(body),
+      'helper must be flag-gated');
+    // Returns only safe fields — never DATA, hashes, tokens, storage paths, device ids.
+    assert(!/JSON\.stringify|rendererState|lastSyncedHash|pendingHash:[^!]|storage|snapshot|lease|device|token|checksum/i.test(body),
+      'helper must not expose DATA, hashes, tokens, storage paths, device ids, or lease tokens');
+    assert(/state:\s*SYNC_PUSH_UI\.state/.test(body) && /hasPending:\s*SYNC_PUSH_UI\.pendingHash != null/.test(body),
+      'helper must return state + a boolean hasPending (not the raw hash)');
+  });
+
+  test('1G.3 perf: detection does NO DOM/render/save work (UI-freeze regression guard)', function() {
+    var body = _detectBody();
+    assert(!/renderWorkspaceCard\(/.test(body), 'detection must not rebuild the workspace card');
+    assert(!/renderAutoBackupIndicator\(/.test(body), 'detection must not rebuild the backup indicator');
+    assert(!/[^_a-zA-Z]render\(/.test(body), 'detection must not call full render()');
+    assert(!/[^_a-zA-Z]saveLocal\(/.test(body), 'detection must not persist/save');
+    assert(!/\.innerHTML|modal-overlay|openMod\(|closeMod\(|\.style\.display/.test(body),
+      'detection must not touch DOM, overlay, or modal');
+  });
+
+  test('1G.3 perf: exactly one sync poll interval; focus/online listeners once', function() {
+    assert(/function _startSyncCloudNewerPolling\(\)\s*\{\s*if \(_syncPollInterval\) return;/.test(_rendererSrc),
+      'poll starter must guard against duplicate intervals');
+    // The sync-detection interval is created in exactly one place.
+    var intervalN = (_rendererSrc.match(/_syncPollInterval = setInterval\(/g) || []).length;
+    assert(intervalN === 1, 'sync poll interval must be created exactly once (found ' + intervalN + ')');
+    var focusN  = (_rendererSrc.match(/addEventListener\('focus',\s*function \(\) \{ _scheduleDetectCloudNewer\(\); \}\)/g) || []).length;
+    var onlineN = (_rendererSrc.match(/addEventListener\('online',\s*function \(\) \{ _scheduleDetectCloudNewer\(\); \}\)/g) || []).length;
+    assert(focusN === 1, 'exactly one sync-detect focus listener (found ' + focusN + ')');
+    assert(onlineN === 1, 'exactly one sync-detect online listener (found ' + onlineN + ')');
+  });
+
+  test('1G.3 triggers: hydrate + focus + online + interval wired; gated', function() {
+    var hyd = _rendererSrc.match(/function _hydrateSyncState\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(hyd && /_scheduleDetectCloudNewer\(\)/.test(hyd[1]), 'hydrate must trigger detection');
+    assert(/addEventListener\('focus',\s*function \(\) \{ _scheduleDetectCloudNewer\(\); \}\)/.test(_rendererSrc),
+      'focus must trigger detection');
+    assert(/addEventListener\('online',\s*function \(\) \{ _scheduleDetectCloudNewer\(\); \}\)/.test(_rendererSrc),
+      'online must trigger detection');
+    assert(/function _startSyncCloudNewerPolling\(\)/.test(_rendererSrc), 'periodic poll starter must exist');
+    assert(/SYNC_POLL_INTERVAL_MS = 60 \* 1000/.test(_rendererSrc), 'interval should be ~60s');
+    // Scheduler + interval are flag-gated.
+    var sch = _rendererSrc.match(/function _scheduleDetectCloudNewer\(delayMs\)\s*\{([\s\S]*?)\n\}/);
+    assert(sch && /if \(!_realSyncPushEnabled\(\)\) return;/.test(sch[1]), 'scheduler must be flag-gated');
+  });
+
   // ── 1F.6C UX polish: render order + reload behavior ─────────────────────────
 
   test('1F.6C render: wsConfirmManualBackup calls renderAutoBackupIndicator before renderWorkspaceCard', function() {

@@ -8553,7 +8553,12 @@ function _hydrateSyncState() {
     // rejected (stale) by CAS, never overwrite, so this is non-destructive.
     SYNC_PUSH_UI.baseRevision   = 0;
     SYNC_PUSH_UI.lastSyncedHash = null;
+    SYNC_PUSH_UI.cloudRevision  = null;
+    if (SYNC_PUSH_UI.state === 'cloud_newer') SYNC_PUSH_UI.state = 'idle';
   }
+  // 1G.3: now that the workspace + baseRevision are known, proactively check
+  // whether the cloud revision is newer (read-only; never pulls/applies).
+  _scheduleDetectCloudNewer();
 }
 
 // Called from saveLocal() ONLY when serialized DATA actually changed (1F.6D gate).
@@ -8588,6 +8593,11 @@ async function wsAutoSyncPushTick() {
 
   // Viewer cannot push — display view-only, never attempt a write.
   if (WS_UI.activeRole === 'viewer') { SYNC_PUSH_UI.state = 'view_only'; return; }
+
+  // 1G.3: suppress auto-push while the cloud is known to be newer. Pushing now
+  // would be a guaranteed-stale CAS attempt (churn). Local changes are preserved
+  // (pendingHash untouched); reconciliation is 1G.4 (pull) / 1G.5 (conflict).
+  if (SYNC_PUSH_UI.state === 'cloud_newer') return;
 
   var ser = JSON.stringify(DATA);
   var hash = _djb2Hash(ser);
@@ -8665,6 +8675,130 @@ function _syncStatusKey() {
     case 'view_only':     return 'syncViewOnly';
     default:              return 'syncIdle';
   }
+}
+
+// ── 1G.3: proactive detection of a newer cloud revision on other devices ─────
+// READ-ONLY. Compares the cloud workspace currentRevision (from the already-
+// sanitized getSyncStatus, which returns only currentRevision/lockFree/
+// lockExpiresAt) against the local baseRevision. It NEVER downloads/applies a
+// snapshot, NEVER calls restore/apply, NEVER reloads, NEVER writes DATA, and
+// NEVER clears pendingHash. It only raises SYNC_PUSH_UI.state to 'cloud_newer'
+// (or lowers a clean/idle state back to 'synced'). Reconciliation (pull/conflict)
+// is 1G.4/1G.5. Fully inert unless KTP_REAL_SYNC_PUSH_ENABLED is set.
+var _syncPollInFlight = false;
+var _syncDetectTimer  = null;
+var _syncPollInterval = null;
+var SYNC_POLL_INTERVAL_MS = 60 * 1000;
+
+// Read-only workspace bridge (getSyncStatus) — distinct from the push bridge.
+function _wsReadBridge() {
+  return (typeof window !== 'undefined' && window.cloudWorkspace && typeof window.cloudWorkspace.getSyncStatus === 'function')
+    ? window.cloudWorkspace : null;
+}
+
+async function _detectCloudNewer(opts) {
+  if (!_realSyncPushEnabled()) return;                       // flag-gated: inert by default
+  opts = opts || {};
+  // Skip on hidden ONLY for the periodic background interval. Explicit triggers
+  // (focus, online, hydrate, manual force) are intentional and must always run —
+  // otherwise a real focus/online event can no-op when document.hidden races true.
+  if (opts.viaInterval && typeof document !== 'undefined' && document.hidden) return;
+  if (!WS_UI.activeId) return;                               // no active workspace
+  if (SYNC_PUSH_UI.pushInFlight) return;                     // push resolves state itself
+  if (_syncPollInFlight) return;                             // coalesce overlapping triggers
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return; // offline
+  var bridge = _wsReadBridge();
+  if (!bridge) return;
+
+  var reqWorkspaceId = WS_UI.activeId;                       // stamp the request
+  _syncPollInFlight = true;
+  var res;
+  try {
+    res = await bridge.getSyncStatus({ workspaceId: reqWorkspaceId });
+  } catch (_) {
+    _syncPollInFlight = false;
+    return;                                                  // network/error: no state corruption
+  }
+  _syncPollInFlight = false;
+
+  // Discard a stale response if the active workspace changed mid-flight.
+  if (WS_UI.activeId !== reqWorkspaceId) return;
+  if (!res || res.ok !== true) return;                       // not_authenticated/error: no corruption
+  if (typeof res.currentRevision !== 'number') return;
+  if (SYNC_PUSH_UI.pushInFlight) return;                     // a push started during the await
+
+  var cloudRev = res.currentRevision;                        // the ONLY field we consume
+
+  // 1G.3B regression fix: detection updates ONLY in-memory sync state. It must NOT
+  // do any DOM work (no renderWorkspaceCard/render/saveLocal) — calling the heavy
+  // workspace-card rebuild from the focus/online/interval/hydrate path caused UI
+  // jank/overlay jumps and risked re-introducing the 1F.6D render/save churn.
+  // There is no visible sync indicator yet (that is 1G.8); the push tick is also
+  // DOM-free, so detection matches it. State is read via __ktpDetectCloudNewer /
+  // SYNC_PUSH_UI and will drive a targeted indicator in the dedicated UX phase.
+  if (cloudRev > SYNC_PUSH_UI.baseRevision) {
+    // Cloud is ahead. Mark cloud_newer (precedence over local_pending). NEVER
+    // clear pendingHash, NEVER pull/apply/overwrite. baseRevision is NOT changed.
+    SYNC_PUSH_UI.cloudRevision = cloudRev;                   // non-authoritative hint only
+    SYNC_PUSH_UI.state = (WS_UI.activeRole === 'viewer') ? 'view_only' : 'cloud_newer';
+    return;
+  }
+
+  if (cloudRev === SYNC_PUSH_UI.baseRevision) {
+    // We are current. Keep cloudRevision consistent (== base) so no stale value can
+    // leave the invariant "synced while cloudRevision > baseRevision" violated.
+    SYNC_PUSH_UI.cloudRevision = cloudRev;
+    // Only lower to 'synced' when truly clean and not mid-work — never override
+    // local_pending / syncing / offline, never mark synced if dirty.
+    if (SYNC_PUSH_UI.pendingHash == null &&
+        (SYNC_PUSH_UI.state === 'cloud_newer' || SYNC_PUSH_UI.state === 'idle' || SYNC_PUSH_UI.state === 'synced')) {
+      SYNC_PUSH_UI.state = (WS_UI.activeRole === 'viewer') ? 'view_only' : 'synced';
+    }
+  }
+}
+
+function _scheduleDetectCloudNewer(delayMs) {
+  if (!_realSyncPushEnabled()) return;
+  if (_syncDetectTimer) clearTimeout(_syncDetectTimer);
+  _syncDetectTimer = setTimeout(function () { _syncDetectTimer = null; _detectCloudNewer(); },
+    typeof delayMs === 'number' ? delayMs : 0);
+}
+
+// One persistent interval, internally gated so it is inert unless real sync is on.
+function _startSyncCloudNewerPolling() {
+  if (_syncPollInterval) return;
+  _syncPollInterval = setInterval(function () {
+    if (!_realSyncPushEnabled()) return;
+    _detectCloudNewer({ viaInterval: true });   // background poll: respects document.hidden
+  }, SYNC_POLL_INTERVAL_MS);
+}
+function _stopSyncCloudNewerPolling() {
+  if (_syncPollInterval) { clearInterval(_syncPollInterval); _syncPollInterval = null; }
+}
+
+// Event triggers (focus/online) + the periodic interval. Each path is gated by
+// _scheduleDetectCloudNewer/_detectCloudNewer, so this is inert when disabled.
+if (typeof window !== 'undefined') {
+  window.addEventListener('focus',  function () { _scheduleDetectCloudNewer(); });
+  window.addEventListener('online', function () { _scheduleDetectCloudNewer(); });
+  _startSyncCloudNewerPolling();
+
+  // Gated, read-only manual smoke helper: runs detection deterministically and
+  // returns ONLY safe fields (state, integer revisions, booleans, error category).
+  // Never downloads/applies/restores, never writes DATA, never exposes secrets.
+  window.__ktpDetectCloudNewer = function () {
+    if (!_realSyncPushEnabled()) return Promise.resolve({ enabled: false });
+    return Promise.resolve(_detectCloudNewer()).then(function () {
+      return {
+        state:             SYNC_PUSH_UI.state,
+        baseRevision:      SYNC_PUSH_UI.baseRevision,
+        cloudRevision:     SYNC_PUSH_UI.cloudRevision,
+        pushInFlight:      SYNC_PUSH_UI.pushInFlight,
+        hasPending:        SYNC_PUSH_UI.pendingHash != null,
+        lastErrorCategory: SYNC_PUSH_UI.lastErrorCategory,
+      };
+    });
+  };
 }
 
 // Called from saveLocal() — fingerprints the current state and schedules a
