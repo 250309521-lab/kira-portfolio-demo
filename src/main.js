@@ -16,6 +16,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { getMachineFingerprint } = require('./machine-id');
 const { verifyLicenseJson }     = require('./license-verifier');
+const cloudBackupModule         = require('./cloud/cloud-backup');
 
 const IS_DEV = process.argv.includes('--dev') || !app.isPackaged;
 const APP_VER = app.getVersion();
@@ -140,6 +141,74 @@ function validateFullBackup(archive) {
   }
   if (errors.length > 0) return { ok: false, errors };
   return { ok: true, manifest: archive.manifest };
+}
+
+// ── _applyArchiveInternal — shared restore helper (1F.6C) ─────────────────────
+// Shared by backup:restoreFull (local file) and backup:restoreFromCloud (cloud).
+// NEVER call without running validateFullBackup first.
+// Creates a mandatory pre-restore safety backup before any mutation.
+// Returns rendererState/importProfiles for renderer to write to localStorage.
+// manifest.checksums are intentionally stripped from the return value.
+async function _applyArchiveInternal(archive, preRestoreRendererState, preRestoreImportProfiles) {
+  if (!preRestoreRendererState) {
+    return { ok: false, error: 'pre_restore_state_required' };
+  }
+
+  // Mandatory pre-restore safety backup — failure blocks the apply.
+  let safetyBackupCreated = false;
+  try {
+    if (!store) initDatabase();
+    saveStore();
+    const preArchive = buildFullBackup(
+      preRestoreRendererState,
+      preRestoreImportProfiles || null,
+      'pre-restore'
+    );
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const prePath = path.join(BACKUP_DIR, `backup-${ts}-pre-restore.ktpbackup`);
+    atomicWriteJSON(prePath, preArchive);
+    log('INFO', 'Pre-restore safety backup created', { path: prePath });
+    safetyBackupCreated = true;
+  } catch (e) {
+    log('WARN', 'Pre-restore safety backup failed — blocking apply', { error: e.message });
+    return { ok: false, error: 'safety_backup_failed' };
+  }
+
+  // Apply mainStore (safe fields only — license dir untouched).
+  try {
+    const mainStoreData = JSON.parse(archive.mainStore);
+    if (mainStoreData && typeof mainStoreData === 'object') {
+      if (mainStoreData.settings)                        store.settings      = mainStoreData.settings;
+      if (Array.isArray(mainStoreData.audit_log))        store.audit_log     = mainStoreData.audit_log;
+      if (Array.isArray(mainStoreData.backup_records))   store.backup_records = mainStoreData.backup_records;
+      if (mainStoreData.schemaVersion)                   store.schemaVersion = mainStoreData.schemaVersion;
+      saveStore();
+    }
+  } catch (e) {
+    log('ERROR', 'mainStore apply failed', { error: e.message });
+    return { ok: false, error: 'apply_failed' };
+  }
+
+  // Sanitized manifest — checksums stripped (internal detail, not needed by renderer).
+  const sanitizedManifest = {
+    formatVersion:          archive.manifest.formatVersion          || null,
+    appVersion:             archive.manifest.appVersion             || null,
+    mainStoreSchemaVersion: archive.manifest.mainStoreSchemaVersion || null,
+    createdAt:              archive.manifest.createdAt              || null,
+    trigger:                archive.manifest.trigger                || null,
+    workspaceId:            archive.manifest.workspaceId            || null,
+    // checksums INTENTIONALLY STRIPPED
+  };
+
+  return {
+    ok:                  true,
+    safetyBackupCreated: safetyBackupCreated,
+    safetyBackupLabel:   'pre-restore',
+    rendererState:       archive.rendererState,       // validated — for renderer localStorage write
+    importProfiles:      archive.importProfiles || null,
+    manifest:            sanitizedManifest,
+    reloadRequired:      true,
+  };
 }
 
 function saveStore() {
@@ -665,38 +734,87 @@ function setupIPC() {
       catch (e) { return { ok: false, error: 'Backup file corrupted — JSON parse failed: ' + e.message }; }
       const validation = validateFullBackup(archive);
       if (!validation.ok) return { ok: false, error: validation.errors.join('; ') };
-      // Create pre-restore safety backup of current state
-      if (payload?.preRestoreRendererState) {
-        try {
-          if (!store) initDatabase();
-          saveStore();
-          const preArchive = buildFullBackup(
-            payload.preRestoreRendererState,
-            payload.preRestoreImportProfiles || null,
-            'pre-restore'
-          );
-          const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-          const prePath = path.join(BACKUP_DIR, `backup-${ts}-pre-restore.ktpbackup`);
-          atomicWriteJSON(prePath, preArchive);
-          log('INFO', 'Pre-restore safety backup created', { path: prePath });
-        } catch (e) {
-          log('WARN', 'Pre-restore safety backup failed', { error: e.message });
-        }
-      }
-      // Restore main store (only safe fields; never touch license dir)
-      const mainStoreData = JSON.parse(archive.mainStore);
-      if (mainStoreData && typeof mainStoreData === 'object') {
-        if (mainStoreData.settings) store.settings = mainStoreData.settings;
-        if (Array.isArray(mainStoreData.audit_log)) store.audit_log = mainStoreData.audit_log;
-        if (Array.isArray(mainStoreData.backup_records)) store.backup_records = mainStoreData.backup_records;
-        if (mainStoreData.schemaVersion) store.schemaVersion = mainStoreData.schemaVersion;
-        saveStore();
-      }
+      // Delegate to shared helper — safety backup + mainStore apply.
+      const result = await _applyArchiveInternal(archive, payload?.preRestoreRendererState, payload?.preRestoreImportProfiles);
+      if (!result.ok) return { ok: false, error: result.error };
       log('INFO', 'Full backup restored', { from: resolved });
-      return { ok: true, rendererState: archive.rendererState, importProfiles: archive.importProfiles || null, manifest: archive.manifest };
+      return { ok: true, rendererState: result.rendererState, importProfiles: result.importProfiles, manifest: result.manifest };
     } catch (err) {
       log('ERROR', 'Full restore failed', { error: err.message });
       return { ok: false, error: err.message };
+    }
+  });
+
+  // ── backup:restoreFromCloud (1F.6C) — owner-only, manual, fully gated ──────
+  // Downloads a .ktpbackup from ktp-backups, validates it, creates a local
+  // pre-restore safety backup, applies mainStore, returns rendererState/importProfiles
+  // to renderer for localStorage write + reload.
+  // Never mutates local data unless all preflight checks pass.
+  // rendererState/importProfiles permitted in response (restore exception — see 1F.6B).
+  ipcMain.handle('backup:restoreFromCloud', async (_, payload) => {
+    if (!licenseGuard().ok) return { ok: false, error: 'license_required' };
+    try {
+      const { workspaceId, backupId, preRestoreRendererState, preRestoreImportProfiles } = payload || {};
+
+      // Required inputs.
+      if (!workspaceId || typeof workspaceId !== 'string') return { ok: false, error: 'invalid_input' };
+      if (!backupId    || typeof backupId    !== 'string') return { ok: false, error: 'invalid_input' };
+      if (!preRestoreRendererState)                        return { ok: false, error: 'pre_restore_state_required' };
+
+      // Owner-only gate.
+      const readiness = await cloudBackupModule.getCloudBackupReadiness(workspaceId);
+      if (!readiness.ok) return { ok: false, error: readiness.error };
+      if (readiness.role !== 'owner') return { ok: false, error: 'owner_required' };
+
+      // Download archive content in memory (storage_path stays in main, never returned).
+      const dlResult = await cloudBackupModule.getCloudBackupContent(workspaceId, backupId);
+      if (!dlResult.ok) return { ok: false, error: dlResult.error };
+      if (dlResult.byteSize > MAX_KTPBACKUP_BYTES) return { ok: false, error: 'file_too_large' };
+
+      // Parse and validate archive (all SHA-256 checksums must pass).
+      let archive;
+      try { archive = JSON.parse(dlResult.content); }
+      catch (e) { return { ok: false, error: 'invalid_archive_format' }; }
+      const validation = validateFullBackup(archive);
+      if (!validation.ok) return { ok: false, error: validation.errors.join('; ') };
+
+      // Note on archive.manifest.workspaceId:
+      // This field holds DATA.workspaceId (the LOCAL workspace UUID stored in the renderer),
+      // NOT the cloud workspace UUID from ktp.workspaces.id. They are different ID spaces
+      // linked by ktp.workspaces.local_workspace_id — never equal strings.
+      // Cloud ownership is already proven by _callDownloadRpc → create_backup_download_url
+      // RPC with RLS enforcement. Comparing them as a safety check would always block.
+      // We log the informational comparison for auditing purposes only.
+      if (archive.manifest.workspaceId) {
+        log('INFO', 'cloud apply: archive local-workspace-id is informational only', {
+          localWorkspaceId: archive.manifest.workspaceId ? '[present]' : '[absent]',
+          cloudWorkspaceVerified: true, // proven by RPC/RLS above
+        });
+      }
+
+      // Apply via shared helper — safety backup created first, then mainStore applied.
+      const result = await _applyArchiveInternal(archive, preRestoreRendererState, preRestoreImportProfiles);
+      if (!result.ok) return { ok: false, error: result.error };
+
+      log('INFO', 'Cloud backup applied', { workspaceId, backupId });
+
+      // Safe response — checksums already stripped by _applyArchiveInternal.
+      // mainStore, storage_path, checksum, device_id, raw archive NEVER included.
+      return {
+        ok:                   true,
+        appliedAt:            new Date().toISOString(),
+        cloudBackupCreatedAt: archive.manifest.createdAt || null,
+        cloudBackupByteSize:  dlResult.byteSize,
+        safetyBackupCreated:  result.safetyBackupCreated,
+        safetyBackupLabel:    result.safetyBackupLabel,
+        reloadRequired:       true,
+        rendererState:        result.rendererState,   // validated restore — allowed (see 1F.6B)
+        importProfiles:       result.importProfiles,  // validated restore — allowed (see 1F.6B)
+        manifest:             result.manifest,        // checksums stripped
+      };
+    } catch (err) {
+      log('ERROR', 'Cloud backup apply failed', { error: err.message });
+      return { ok: false, error: 'apply_failed' };
     }
   });
 

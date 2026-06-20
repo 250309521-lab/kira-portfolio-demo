@@ -517,6 +517,44 @@ async function downloadBackupToFile(input) {
   };
 }
 
+// ── getCloudBackupContent (1F.6C — internal, for cloud apply flow in main.js) ──
+// Downloads a .ktpbackup archive as a string in memory only — no file, no dialog.
+// Returns {ok, content, byteSize}. content is the raw archive JSON; it MUST NOT
+// be returned to the renderer and is used only by backup:restoreFromCloud in main.js.
+
+async function getCloudBackupContent(workspaceId, backupId) {
+  if (!isConfigured()) return { ok: false, error: 'not_configured' };
+  if (!_validateWorkspaceId(workspaceId)) return { ok: false, error: 'invalid_input' };
+  if (typeof backupId !== 'string' || !backupId.trim()) return { ok: false, error: 'invalid_input' };
+
+  var rpc = await _callDownloadRpc(workspaceId, backupId);
+  if (!rpc.ok) return { ok: false, error: rpc.error };
+  if (!rpc.storagePath) return { ok: false, error: 'download_failed' };
+
+  var dlHeaders = await _buildAuthHeaders(false);
+  if (!dlHeaders) return { ok: false, error: 'not_authenticated' };
+
+  var dlRes, content;
+  try {
+    dlRes = await _doFetch(
+      getSupabaseUrl() + '/storage/v1/object/authenticated/' + BACKUP_BUCKET + '/' + rpc.storagePath,
+      { method: 'GET', headers: dlHeaders }
+    );
+    content = await dlRes.text();
+  } catch (_) {
+    return { ok: false, error: 'download_failed' };
+  }
+  if (!dlRes.ok || !content) return { ok: false, error: 'download_failed' };
+
+  var actualBytes = Buffer.byteLength(content, 'utf8');
+  if (rpc.byteSize !== null && actualBytes !== rpc.byteSize) {
+    return { ok: false, error: 'download_size_mismatch' };
+  }
+
+  // Return content in memory only. Caller (main.js) must never forward content to renderer.
+  return { ok: true, content: content, byteSize: actualBytes };
+}
+
 // ── Exports ──────────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -527,6 +565,7 @@ module.exports = {
   listCloudBackups,
   getBackupDownloadPreflight,
   downloadBackupToFile,
+  getCloudBackupContent,
   MAX_CLOUD_BACKUP_BYTES,
   BACKUP_ROLES,
   VALID_TRIGGERS,

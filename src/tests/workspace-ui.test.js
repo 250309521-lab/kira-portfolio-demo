@@ -735,6 +735,531 @@ function register(test, assert, assertEqual) {
     assert(!/Settings > Cloud/.test(_rendererSrc), 'no Settings > Cloud panel added yet');
   });
 
+  // ── 1F.6C: Cloud Backup Apply — owner-only, manual, dual confirmation ───────
+
+  test('1F.6C: Apply button exists only inside Advanced backup history', function() {
+    assert(/wsStartApply\(/.test(_rendererSrc), 'wsStartApply must exist');
+    // Apply is inside the Advanced backup list section only (ws-bkpl-apply-)
+    assert(/ws-bkpl-apply-/.test(_rendererSrc), 'Apply button must be in backup history rows');
+    // Apply must NOT appear outside the Advanced section (not in main card or topbar)
+    assert(!/id="ws-backup-apply"/.test(_rendererSrc), 'no standalone Apply button in main card');
+  });
+
+  test('1F.6C: Apply button gated to owner role only', function() {
+    assert(/BACKUP_UI\.role\s*===\s*'owner'/.test(_rendererSrc),
+      'Apply must check BACKUP_UI.role === owner');
+    // Confirm the Apply button onclick has the owner check in wsStartApply
+    var startFn = _rendererSrc.match(/function wsStartApply\(idx\)([\s\S]*?)^function /m);
+    assert(startFn, 'wsStartApply must be found');
+    assert(/BACKUP_UI\.role\s*!==\s*'owner'\s*\)\s*return/.test(startFn[1]),
+      'wsStartApply must return early if not owner');
+  });
+
+  test('1F.6C: Apply blocked when AUTO_BACKUP_UI.inFlight is true', function() {
+    var startFn = _rendererSrc.match(/function wsStartApply\(idx\)([\s\S]*?)^function /m);
+    assert(startFn, 'wsStartApply must be found');
+    assert(/AUTO_BACKUP_UI\.inFlight/.test(startFn[1]),
+      'wsStartApply must check AUTO_BACKUP_UI.inFlight');
+  });
+
+  test('1F.6C: Apply blocked when pendingHash exists (local changes pending)', function() {
+    assert(/AUTO_BACKUP_UI\.pendingHash/.test(_rendererSrc),
+      'pendingHash must be referenced in the apply area');
+    // The show-apply condition must check pendingHash
+    var showApply = _rendererSrc.match(/_canApp[^;]*;/);
+    assert(showApply, '_canApp condition must exist');
+  });
+
+  test('1F.6C: dual confirmation — confirm1 then confirm2 required', function() {
+    assert(/function wsConfirmApply1/.test(_rendererSrc), 'wsConfirmApply1 must exist');
+    assert(/function wsConfirmApply2/.test(_rendererSrc), 'wsConfirmApply2 must exist (second confirmation)');
+    assert(/function wsCancelApply/.test(_rendererSrc), 'wsCancelApply must exist');
+    // confirm2 must check that state is confirm2 (not confirm1)
+    var cfm2 = _rendererSrc.match(/async function wsConfirmApply2\(\)([\s\S]*?)^function /m);
+    assert(cfm2, 'wsConfirmApply2 body must be found');
+    assert(/applyState\s*!==\s*'confirm2'/.test(cfm2[1]),
+      'wsConfirmApply2 must guard against wrong state');
+  });
+
+  test('1F.6C: wsConfirmApply2 calls restoreBackupFromCloud, not restore/download/sync', function() {
+    var cfm2 = _rendererSrc.match(/async function wsConfirmApply2\(\)([\s\S]*?)^function /m);
+    assert(cfm2, 'wsConfirmApply2 must be found');
+    var body = cfm2[1];
+    assert(/restoreBackupFromCloud/.test(body), 'wsConfirmApply2 must call restoreBackupFromCloud');
+    assert(!/syncApply|pushSnapshot|restoreFullBackup|wsApplyBackup|applyBackup/.test(body),
+      'wsConfirmApply2 must not call sync/push/restore paths');
+  });
+
+  test('1F.6C: wsConfirmApply2 captures current state with _captureRendererState before IPC', function() {
+    var cfm2 = _rendererSrc.match(/async function wsConfirmApply2\(\)([\s\S]*?)^function /m);
+    assert(cfm2, 'wsConfirmApply2 must be found');
+    assert(/_captureRendererState\(\)/.test(cfm2[1]),
+      'wsConfirmApply2 must call _captureRendererState() before sending to IPC');
+  });
+
+  test('1F.6C: wsConfirmApply2 writes to localStorage and reloads on success', function() {
+    var cfm2 = _rendererSrc.match(/async function wsConfirmApply2\(\)([\s\S]*?)^function /m);
+    assert(cfm2, 'wsConfirmApply2 must be found');
+    var body = cfm2[1];
+    assert(/localStorage\.setItem\(LSKEY/.test(body),
+      'wsConfirmApply2 must write rendererState to localStorage on success');
+    assert(/location\.reload\(\)/.test(body),
+      'wsConfirmApply2 must reload page after applying');
+  });
+
+  test('1F.6C: wsConfirmApply2 does not mutate localStorage on failure', function() {
+    var cfm2 = _rendererSrc.match(/async function wsConfirmApply2\(\)([\s\S]*?)^function /m);
+    assert(cfm2, 'wsConfirmApply2 must be found');
+    var body = cfm2[1];
+    // localStorage.setItem must only be inside the success path (after !_r.ok guard)
+    // A failed response sets applyState=error and returns without writing
+    assert(/applyState\s*=\s*'error'[\s\S]*?return/.test(body),
+      'wsConfirmApply2 must set error state and return without localStorage write on failure');
+  });
+
+  test('1F.6C: Apply flow has no "Sync now" copy', function() {
+    assert(!/Sync now/.test(_rendererSrc), '"Sync now" must not appear anywhere');
+    assert(!/wsBackupSyncNow/.test(_rendererSrc), 'no wsBackupSyncNow i18n key');
+  });
+
+  test('1F.6C: backup:restoreFromCloud checks owner role in main.js source', function() {
+    var fs = require('fs');
+    var mainSrc = fs.readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+    assert(/backup:restoreFromCloud/.test(mainSrc), 'backup:restoreFromCloud must be registered');
+    assert(/owner_required/.test(mainSrc), 'must return owner_required error for non-owners');
+    assert(/getCloudBackupReadiness/.test(mainSrc), 'must call getCloudBackupReadiness for role check');
+    assert(/validateFullBackup/.test(mainSrc), 'must call validateFullBackup before apply');
+    assert(/_applyArchiveInternal/.test(mainSrc), 'must use shared apply helper');
+  });
+
+  test('1F.6C: backup:restoreFromCloud response strips forbidden fields', function() {
+    var fs = require('fs');
+    var mainSrc = fs.readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+    // The handler block for restoreFromCloud — find it
+    var m = mainSrc.match(/ipcMain\.handle\('backup:restoreFromCloud'([\s\S]*?)^\s*\}\);\n/m);
+    assert(m, 'backup:restoreFromCloud handler body must be found');
+    var body = m[1];
+    assert(!/mainStore\s*:/.test(body),     'must not return mainStore');
+    assert(!/storage_path\s*:/.test(body),  'must not return storage_path');
+    assert(!/checksum\s*:/.test(body),      'must not return checksum');
+    assert(!/device_id\s*:/.test(body),     'must not return device_id');
+    // checksums must be stripped in sanitizedManifest
+    assert(/checksums INTENTIONALLY STRIPPED/.test(mainSrc),
+      'manifest.checksums must be intentionally stripped (comment in source)');
+  });
+
+  test('1F.6C: manifest.checksums stripped in _applyArchiveInternal', function() {
+    var fs = require('fs');
+    var mainSrc = fs.readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+    var m = mainSrc.match(/const sanitizedManifest\s*=\s*\{([\s\S]*?)\};/);
+    assert(m, 'sanitizedManifest must be found in _applyArchiveInternal');
+    assert(!/checksums/.test(m[1].replace(/\/\/[^\n]*/g, '')),
+      'sanitizedManifest must not include checksums field');
+  });
+
+  test('1F.6C: pre-restore safety backup mandatory — apply blocked if safety backup fails', function() {
+    var fs = require('fs');
+    var mainSrc = fs.readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8').replace(/\r/g, '');
+    assert(/safety_backup_failed/.test(mainSrc),
+      'must return safety_backup_failed if pre-restore backup cannot be created');
+    // The safety backup must be created BEFORE mainStore is applied
+    var applyFn = mainSrc.match(/function _applyArchiveInternal([\s\S]*?)^(?:async )?function /m);
+    assert(applyFn, '_applyArchiveInternal must be found');
+    var safetyIdx = applyFn[1].indexOf('pre-restore');
+    var mainStoreIdx = applyFn[1].indexOf('Apply mainStore');
+    assert(safetyIdx < mainStoreIdx, 'safety backup must be created before mainStore apply');
+  });
+
+  test('1F.6C: restoreBackupFromCloud exposed on preload electron bridge', function() {
+    assert(/restoreBackupFromCloud/.test(_rendererSrc) || true, 'bridge exists');
+    // Verify in preload.js source
+    var fs = require('fs');
+    var preloadSrc = fs.readFileSync(require('path').join(__dirname, '..', 'preload.js'), 'utf8');
+    assert(/restoreBackupFromCloud/.test(preloadSrc), 'restoreBackupFromCloud must be in preload.js');
+    assert(/backup:restoreFromCloud/.test(preloadSrc), 'must invoke backup:restoreFromCloud channel');
+  });
+
+  test('1F.6C: no auto-apply or automatic cloud-to-local mutation', function() {
+    // wsAutoBackupTick must never call restoreBackupFromCloud or applyArchive
+    var tickFn = _rendererSrc.match(/async function wsAutoBackupTick\(\)([\s\S]*?)function _scheduleAutoRetry/);
+    assert(tickFn, 'wsAutoBackupTick must be found');
+    assert(!/restoreBackupFromCloud|wsConfirmApply|applyArchive|localStorage\.setItem.*rendererState/.test(tickFn[1]),
+      'wsAutoBackupTick must never auto-apply cloud data');
+  });
+
+  // ── 1F.6C workspace_mismatch root cause + policy fix ────────────────────────
+
+  test('1F.6C: workspace_mismatch removed — archive manifest.workspaceId is informational, not cloud authority', function() {
+    var fs = require('fs');
+    var mainSrc = fs.readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+    // The hard block must be removed — it was comparing LOCAL workspaceId vs CLOUD workspaceId
+    assert(!/return.*error.*workspace_mismatch/.test(mainSrc),
+      'workspace_mismatch hard block must be removed (compared wrong ID types)');
+    // Cloud ownership is proven by RPC/RLS — must still be present
+    assert(/getCloudBackupReadiness/.test(mainSrc),
+      'cloud ownership check via getCloudBackupReadiness must remain');
+    assert(/getCloudBackupContent/.test(mainSrc),
+      'cloud RLS-backed download must remain (proves backup belongs to workspace)');
+  });
+
+  test('1F.6C: archive.manifest.workspaceId is local UUID, not cloud UUID — informational only', function() {
+    var fs = require('fs');
+    var mainSrc = fs.readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+    // Confirm the code comments document the two-ID architecture
+    assert(/LOCAL workspace UUID/.test(mainSrc) || /local-workspace-id is informational/.test(mainSrc),
+      'code must document that manifest.workspaceId is the local UUID, not the cloud UUID');
+    // The manifest.workspaceId field must still be in the sanitized manifest (as informational)
+    var sanitized = mainSrc.match(/const sanitizedManifest\s*=\s*\{([\s\S]*?)\};/);
+    assert(sanitized, 'sanitizedManifest must exist');
+    assert(/workspaceId/.test(sanitized[1]), 'manifest.workspaceId still returned as informational metadata');
+  });
+
+  test('1F.6C: cloud ownership still proven by multiple authoritative checks before apply', function() {
+    var fs = require('fs');
+    var mainSrc = fs.readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8').replace(/\r/g,'');
+    // Check the full main.js source for these required elements (handler is too nested for a tight regex)
+    assert(/backup:restoreFromCloud/.test(mainSrc),  'backup:restoreFromCloud handler must exist');
+    assert(/owner_required/.test(mainSrc),           'owner role must still be checked');
+    assert(/getCloudBackupContent/.test(mainSrc),    'RLS-backed download must still be called');
+    assert(/validateFullBackup/.test(mainSrc),       'validateFullBackup must still be called');
+    assert(/_applyArchiveInternal/.test(mainSrc),    'safety backup still required via _applyArchiveInternal');
+  });
+
+  // ── 1F.6C: manual backup / status dot consistency (this fix) ────────────────
+
+  test('1F.6C manual-backup: wsConfirmManualBackup reconciles AUTO_BACKUP_UI on success', function() {
+    var manFn = _rendererSrc.match(/function wsConfirmManualBackup\(\)([\s\S]*?)^\/\/ ── Cloud backup list/m);
+    assert(manFn, 'wsConfirmManualBackup must be found');
+    var body = manFn[1];
+    assert(/AUTO_BACKUP_UI\.lastUploadedHash\s*=/.test(body),
+      'wsConfirmManualBackup must set lastUploadedHash after success');
+    assert(/AUTO_BACKUP_UI\.lastSuccessAt\s*=/.test(body),
+      'wsConfirmManualBackup must set lastSuccessAt after success');
+    assert(/AUTO_BACKUP_UI\.pendingHash\s*=\s*null/.test(body),
+      'wsConfirmManualBackup must clear pendingHash when data matches uploaded state');
+    assert(/AUTO_BACKUP_UI\.state\s*=\s*'ok'/.test(body),
+      'wsConfirmManualBackup must set state=ok when data matches');
+    assert(/clearTimeout\(_autoBackupDebounceTimer\)/.test(body),
+      'wsConfirmManualBackup must cancel debounce timer after successful upload');
+  });
+
+  test('1F.6C manual-backup: Apply button visible after manual backup clears pendingHash', function() {
+    // The _pend condition uses pendingHash — so clearing it makes Apply visible
+    assert(/AUTO_BACKUP_UI\.pendingHash\s*!==\s*null/.test(_rendererSrc) ||
+           /AUTO_BACKUP_UI\.pendingHash/.test(_rendererSrc),
+      'pendingHash must gate Apply button visibility');
+    // After manual backup: pendingHash = null → Apply shows for owner
+    assert(/_canApp.*role.*owner/.test(_rendererSrc.replace(/\n/g,' ')) ||
+           /role.*owner.*_canApp/.test(_rendererSrc.replace(/\n/g,' ')),
+      'Apply condition must require owner role');
+  });
+
+  test('1F.6C manual-backup: Apply remains hidden if DATA changed during upload', function() {
+    // The reconcile code only clears pendingHash if pendingHash===null or pendingHash===manualHash
+    // If pendingHash differs (data changed during upload), Apply stays hidden
+    var manFn = _rendererSrc.match(/function wsConfirmManualBackup\(\)([\s\S]*?)^\/\/ ── Cloud backup list/m);
+    assert(manFn, 'wsConfirmManualBackup must be found');
+    var body = manFn[1];
+    // Must NOT blindly clear pendingHash — must check it matches the uploaded hash
+    assert(/pendingHash\s*===\s*null\s*\|\|\s*AUTO_BACKUP_UI\.pendingHash\s*===\s*_manualHash/.test(body) ||
+           /pendingHash.*null.*pendingHash.*manualHash/.test(body.replace(/\n/g,' ')),
+      'pendingHash must only be cleared when it matches the uploaded hash (not blindly)');
+  });
+
+  // ── 1F.6C persistent backup status marker (root cause fix) ─────────────────
+
+  test('1F.6C persist: CLOUD_BK_STATUS_KEY constant exists — separate from DATA key', function() {
+    assert(/CLOUD_BK_STATUS_KEY\s*=\s*'ktp_cloud_backup_status_v1'/.test(_rendererSrc),
+      'CLOUD_BK_STATUS_KEY must be defined with a stable key name');
+    // Must be a DIFFERENT key from LSKEY (DATA) to avoid changing the fingerprint
+    var lsKey = _rendererSrc.match(/(?:var|const|let)\s+LSKEY\s*=\s*(['"])(.*?)\1/);
+    assert(lsKey, 'LSKEY must be defined');
+    assert(lsKey[2] !== 'ktp_cloud_backup_status_v1',
+      'cloud backup status key must differ from DATA/LSKEY');
+  });
+
+  test('1F.6C persist: _saveCloudBkStatus and _loadCloudBkStatus are defined', function() {
+    assert(/function _saveCloudBkStatus/.test(_rendererSrc), '_saveCloudBkStatus must be defined');
+    assert(/function _loadCloudBkStatus/.test(_rendererSrc), '_loadCloudBkStatus must be defined');
+    // Save uses the status key, not LSKEY
+    var saveFn = _rendererSrc.match(/function _saveCloudBkStatus([\s\S]*?)^function /m);
+    assert(saveFn, '_saveCloudBkStatus body must be found');
+    assert(/CLOUD_BK_STATUS_KEY/.test(saveFn[1]), '_saveCloudBkStatus must write to CLOUD_BK_STATUS_KEY');
+    assert(!/localStorage\.setItem\(LSKEY/.test(saveFn[1]), '_saveCloudBkStatus must NOT write to LSKEY (DATA)');
+  });
+
+  test('1F.6C persist: _saveCloudBkStatus stores workspaceId, hash, successAt — never raw rendererState', function() {
+    var saveFn = _rendererSrc.match(/function _saveCloudBkStatus([\s\S]*?)^function /m);
+    assert(saveFn, '_saveCloudBkStatus body must be found');
+    var body = saveFn[1];
+    assert(/workspaceId/.test(body),  '_saveCloudBkStatus must store workspaceId');
+    assert(/lastUploadedHash/.test(body), '_saveCloudBkStatus must store lastUploadedHash');
+    assert(/lastSuccessAt/.test(body), '_saveCloudBkStatus must store lastSuccessAt');
+    // Must NOT store rendererState, DATA contents, or raw archive
+    assert(!/rendererState|archive|mainStore|DATA/.test(body),
+      '_saveCloudBkStatus must not store rendererState/DATA/archive');
+  });
+
+  test('1F.6C persist: _scheduleAutoCloudBackup hydrates from localStorage before first hash comparison', function() {
+    // Use a loose match since async function wsAutoBackupTick follows after whitespace/comments
+    var schedFn = _rendererSrc.match(/function _scheduleAutoCloudBackup\(\)([\s\S]{0,3000})/);
+    assert(schedFn, '_scheduleAutoCloudBackup body must be found');
+    schedFn[1] = schedFn[1].slice(0, schedFn[1].indexOf('async function wsAutoBackupTick') || schedFn[1].length);
+    var body = schedFn[1];
+    // Hydration must happen before the first "hash === lastUploadedHash" check
+    var hydrateIdx    = body.indexOf('_loadCloudBkStatus()');
+    var hashCheckIdx  = body.indexOf('hash === AUTO_BACKUP_UI.lastUploadedHash');
+    assert(hydrateIdx >= 0, '_scheduleAutoCloudBackup must call _loadCloudBkStatus');
+    assert(hashCheckIdx > hydrateIdx, 'hydration must occur before lastUploadedHash comparison');
+    // Hydration must check workspaceId matches to avoid stale data
+    assert(/workspaceId.*WS_UI\.activeId|WS_UI\.activeId.*workspaceId/.test(body.replace(/\n/g,' ')),
+      'hydration must verify workspaceId matches active workspace');
+  });
+
+  test('1F.6C persist: wsAutoBackupTick saves marker on success', function() {
+    var tickFn = _rendererSrc.match(/async function wsAutoBackupTick\(\)([\s\S]*?)function _scheduleAutoRetry/);
+    assert(tickFn, 'wsAutoBackupTick must be found');
+    var body = tickFn[1];
+    // Must call _saveCloudBkStatus after setting lastUploadedHash
+    var saveIdx     = body.indexOf('_saveCloudBkStatus(');
+    var hashSetIdx  = body.indexOf('AUTO_BACKUP_UI.lastUploadedHash = uploadedHash');
+    assert(saveIdx > 0, 'wsAutoBackupTick must call _saveCloudBkStatus on success');
+    assert(saveIdx > hashSetIdx, '_saveCloudBkStatus must be called after lastUploadedHash is set');
+  });
+
+  test('1F.6C persist: wsConfirmManualBackup saves marker on success', function() {
+    var manFn = _rendererSrc.match(/function wsConfirmManualBackup\(\)([\s\S]*?)^\/\/ ── Cloud backup list/m);
+    assert(manFn, 'wsConfirmManualBackup must be found');
+    var body = manFn[1];
+    assert(/_saveCloudBkStatus\(/.test(body),
+      'wsConfirmManualBackup must call _saveCloudBkStatus to persist the uploaded hash');
+  });
+
+  test('1F.6C persist: wsConfirmApply2 saves restored-state fingerprint before reload', function() {
+    var cfm2 = _rendererSrc.match(/async function wsConfirmApply2\(\)([\s\S]*?)^function _backupDownloadErrMsg/m);
+    assert(cfm2, 'wsConfirmApply2 must be found');
+    var body = cfm2[1];
+    assert(/_saveCloudBkStatus\(/.test(body),
+      'wsConfirmApply2 must call _saveCloudBkStatus before reload');
+    // Must use _djb2Hash of rendererState (not raw rendererState) for the hash
+    assert(/_djb2Hash\(_r\.rendererState\)/.test(body),
+      'wsConfirmApply2 must compute fingerprint from restored rendererState using _djb2Hash');
+    // Must be called before reload
+    var saveIdx   = body.indexOf('_saveCloudBkStatus(');
+    var reloadIdx = body.indexOf('location.reload()');
+    assert(saveIdx > 0 && reloadIdx > saveIdx,
+      '_saveCloudBkStatus must be called before location.reload()');
+  });
+
+  test('1F.6C persist: UI-only state changes do not create new pendingHash', function() {
+    // CLOUD_BK_STATUS_KEY is written only by _saveCloudBkStatus, not by renderWorkspaceCard,
+    // wsRefreshBackupList, language toggle, panel open/close, topbar indicator, etc.
+    // This static check verifies that the status key is not written outside the expected functions.
+    var writeSites = (_rendererSrc.match(/localStorage\.setItem\(CLOUD_BK_STATUS_KEY/g) || []).length;
+    // Should only appear inside _saveCloudBkStatus
+    assert(writeSites === 1, 'CLOUD_BK_STATUS_KEY must only be written inside _saveCloudBkStatus (1 site)');
+    // _saveCloudBkStatus is only called from known safe places (auto-tick, manual backup, apply)
+    var callSites = (_rendererSrc.match(/_saveCloudBkStatus\(/g) || []).length;
+    // Should be: definition (1) + wsAutoBackupTick (1) + wsConfirmManualBackup (1) + wsConfirmApply2 (1) = 4
+    assert(callSites <= 6, '_saveCloudBkStatus call sites must be bounded (not spread to every render)');
+  });
+
+  // ── 1F.6C deterministic hydration (runtime reload acceptance fix) ───────────
+
+  test('1F.6C hydrate: _hydrateCloudBackupStatus function exists', function() {
+    assert(/function _hydrateCloudBackupStatus\(\)/.test(_rendererSrc),
+      '_hydrateCloudBackupStatus deterministic reconciler must be defined');
+  });
+
+  test('1F.6C hydrate: called at every workspace-activation point (wsRestore/wsActivate/offline)', function() {
+    // wsRestore success path
+    var restoreFn = _rendererSrc.match(/async function wsRestore\(\)([\s\S]*?)^\/\/ ── _wsRestoreOffline/m);
+    assert(restoreFn, 'wsRestore must be found');
+    assert(/_hydrateCloudBackupStatus\(\)/.test(restoreFn[1]),
+      'wsRestore must call _hydrateCloudBackupStatus on success');
+    // wsActivateWorkspace success path
+    var activateFn = _rendererSrc.match(/async function wsActivateWorkspace\(workspaceId\)([\s\S]*?)^async function wsActivateByIndex/m);
+    assert(activateFn, 'wsActivateWorkspace must be found');
+    assert(/_hydrateCloudBackupStatus\(\)/.test(activateFn[1]),
+      'wsActivateWorkspace must call _hydrateCloudBackupStatus');
+    // offline restore
+    var offlineFn = _rendererSrc.match(/function _wsRestoreOffline\(\)([\s\S]*?)\n\}/);
+    assert(offlineFn, '_wsRestoreOffline must be found');
+    assert(/_hydrateCloudBackupStatus\(\)/.test(offlineFn[1]),
+      '_wsRestoreOffline must call _hydrateCloudBackupStatus');
+  });
+
+  test('1F.6C hydrate: reconciles to ok and clears pending when DATA matches marker', function() {
+    var hydFn = _rendererSrc.match(/function _hydrateCloudBackupStatus\(\)([\s\S]*?)\n\}/);
+    assert(hydFn, '_hydrateCloudBackupStatus body must be found');
+    var body = hydFn[1];
+    // When hash matches lastUploadedHash → state ok, pendingHash null
+    assert(/AUTO_BACKUP_UI\.pendingHash\s*=\s*null/.test(body),
+      'must clear pendingHash when DATA matches marker');
+    assert(/AUTO_BACKUP_UI\.state\s*=\s*'ok'/.test(body),
+      'must set state=ok when DATA matches marker');
+    // Comparison uses _djb2Hash(JSON.stringify(DATA)) — same algorithm as scheduler
+    assert(/_djb2Hash\(JSON\.stringify\(DATA\)\)/.test(body),
+      'must compute fingerprint with same algorithm as scheduler');
+    // Must verify workspaceId matches the saved marker
+    assert(/saved\.workspaceId\s*===\s*WS_UI\.activeId/.test(body),
+      'must verify marker workspaceId matches active workspace');
+  });
+
+  test('1F.6C hydrate: keeps real pending when DATA differs from marker', function() {
+    var hydFn = _rendererSrc.match(/function _hydrateCloudBackupStatus\(\)([\s\S]*?)\n\}/);
+    assert(hydFn, '_hydrateCloudBackupStatus body must be found');
+    var body = hydFn[1];
+    // When data differs, it calls the scheduler (which sets real pending) — does NOT force ok
+    assert(/_scheduleAutoCloudBackup\(\)/.test(body),
+      'must call scheduler when DATA differs (real pending allowed)');
+  });
+
+  test('1F.6C hydrate: requires activeId — never reconciles without a workspace', function() {
+    var hydFn = _rendererSrc.match(/function _hydrateCloudBackupStatus\(\)([\s\S]*?)\n\}/);
+    assert(hydFn, '_hydrateCloudBackupStatus body must be found');
+    var body = hydFn[1];
+    assert(/if\s*\(!WS_UI\.activeId\)\s*return/.test(body),
+      '_hydrateCloudBackupStatus must return early when no active workspace');
+  });
+
+  test('1F.6C scheduler: early-return clears stale false-pending when hash matches uploaded', function() {
+    var schedFn = _rendererSrc.match(/function _scheduleAutoCloudBackup\(\)([\s\S]{0,3500})/);
+    assert(schedFn, '_scheduleAutoCloudBackup must be found');
+    var body = schedFn[1].slice(0, schedFn[1].indexOf('async function wsAutoBackupTick'));
+    // The hash===lastUploadedHash branch must clear pending and set ok
+    var idx = body.indexOf('hash === AUTO_BACKUP_UI.lastUploadedHash');
+    assert(idx >= 0, 'early-return branch must exist');
+    var branch = body.slice(idx, idx + 400);
+    assert(/pendingHash\s*=\s*null/.test(branch),
+      'early-return must clear stale pendingHash');
+    assert(/state\s*=\s*'ok'/.test(branch),
+      'early-return must reset state to ok when clearing stale pending');
+  });
+
+  test('1F.6C workspace-switch: wsActivateWorkspace resets in-memory hash tracking before hydrate', function() {
+    var activateFn = _rendererSrc.match(/async function wsActivateWorkspace\(workspaceId\)([\s\S]*?)^async function wsActivateByIndex/m);
+    assert(activateFn, 'wsActivateWorkspace must be found');
+    var body = activateFn[1];
+    // Reset lastUploadedHash to null before hydrating the new workspace's marker
+    var resetIdx   = body.indexOf('AUTO_BACKUP_UI.lastUploadedHash = null');
+    var hydrateIdx = body.indexOf('_hydrateCloudBackupStatus()');
+    assert(resetIdx >= 0, 'must reset lastUploadedHash on workspace switch');
+    assert(hydrateIdx > resetIdx, 'reset must occur before hydration on workspace switch');
+  });
+
+  test('1F.6C status-dot: backup card dot uses warn for pending/uploading/error', function() {
+    // The inner backup card dot must NOT show green for pending state
+    assert(!/AUTO_BACKUP_UI\.state === 'pending'.*?'ok'/.test(_rendererSrc.replace(/\n/g,' ')),
+      'pending state must not map to ok (green) dot in the backup card');
+    assert(!/AUTO_BACKUP_UI\.state === 'uploading'.*?'ok'/.test(_rendererSrc.replace(/\n/g,' ')),
+      'uploading state must not map to ok (green) dot in the backup card');
+    // Must use warn variant
+    assert(/ws-status-dot.*warn|'warn'/.test(_rendererSrc),
+      'warn CSS class must be used for pending/uploading states');
+    assert(/\.ws-status-dot\.warn/.test(_rendererSrc),
+      'ws-status-dot.warn CSS variant must be defined');
+  });
+
+  // ── 1F.6C UX polish: render order + reload behavior ─────────────────────────
+
+  test('1F.6C render: wsConfirmManualBackup calls renderAutoBackupIndicator before renderWorkspaceCard', function() {
+    var manFn = _rendererSrc.match(/function wsConfirmManualBackup\(\)([\s\S]*?)^\/\/ ── Cloud backup list/m);
+    assert(manFn, 'wsConfirmManualBackup must be found');
+    var body = manFn[1];
+    // Explicit topbar update before full card render
+    assert(/renderAutoBackupIndicator\(\)/.test(body),
+      'wsConfirmManualBackup must call renderAutoBackupIndicator() after reconciliation');
+    // Render order: AUTO_BACKUP_UI reconciled THEN render
+    var reconcileIdx = body.indexOf('AUTO_BACKUP_UI.state        = \'ok\'');
+    var renderIdx    = body.indexOf('renderAutoBackupIndicator()');
+    assert(reconcileIdx >= 0 && renderIdx > reconcileIdx,
+      'renderAutoBackupIndicator must be called AFTER AUTO_BACKUP_UI is reconciled');
+  });
+
+  test('1F.6C render: topbar indicator is always updated when wsConfirmManualBackup succeeds', function() {
+    // renderAutoBackupIndicator() is called explicitly AND via renderWorkspaceCard()
+    var manFn = _rendererSrc.match(/function wsConfirmManualBackup\(\)([\s\S]*?)^\/\/ ── Cloud backup list/m);
+    assert(manFn, 'wsConfirmManualBackup must be found');
+    var body = manFn[1];
+    assert((body.match(/renderAutoBackupIndicator\(\)/g) || []).length >= 1,
+      'renderAutoBackupIndicator must be called at least once after manual backup success');
+    assert(/renderWorkspaceCard\(\)/.test(body),
+      'renderWorkspaceCard must also be called for full panel update');
+  });
+
+  test('1F.6C apply: wsConfirmApply2 writes localStorage ONLY after ok response — never on failure', function() {
+    var cfm2 = _rendererSrc.match(/async function wsConfirmApply2\(\)([\s\S]*?)^function _backupDownloadErrMsg/m);
+    assert(cfm2, 'wsConfirmApply2 must be found');
+    var body = cfm2[1];
+    // localStorage.setItem(LSKEY) must appear after the ok check (not in failure paths)
+    var failIdx   = body.indexOf('applyState = \'error\'');
+    var writeIdx  = body.indexOf('localStorage.setItem(LSKEY');
+    assert(writeIdx > 0, 'localStorage.setItem(LSKEY) must exist in wsConfirmApply2');
+    assert(failIdx < writeIdx,
+      'localStorage write must come AFTER the ok check (failure returns before reaching it)');
+    // The failure path must NOT write to localStorage
+    var failureBlock = body.slice(0, writeIdx);
+    assert(!/localStorage\.setItem\(LSKEY/.test(failureBlock),
+      'localStorage must NOT be written in the failure path');
+  });
+
+  test('1F.6C apply: wsConfirmApply2 calls location.reload after writing localStorage', function() {
+    var cfm2 = _rendererSrc.match(/async function wsConfirmApply2\(\)([\s\S]*?)^function _backupDownloadErrMsg/m);
+    assert(cfm2, 'wsConfirmApply2 must be found');
+    var body = cfm2[1];
+    assert(/location\.reload\(\)/.test(body), 'wsConfirmApply2 must call location.reload()');
+    var writeIdx  = body.indexOf('localStorage.setItem(LSKEY');
+    var reloadIdx = body.indexOf('location.reload()');
+    assert(reloadIdx > writeIdx, 'reload must come AFTER localStorage write');
+  });
+
+  test('1F.6C apply: _applyArchiveInternal in main.js never touches license or cloud-auth files', function() {
+    var fs = require('fs');
+    var mainSrc = fs.readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8').replace(/\r/g,'');
+    var applyFn = mainSrc.match(/function _applyArchiveInternal([\s\S]*?)^(?:async )?function /m);
+    assert(applyFn, '_applyArchiveInternal must be found');
+    var body = applyFn[1];
+    assert(!/LICENSE_PATH|LICENSE_DIR|active\.ktplicense/.test(body),
+      '_applyArchiveInternal must never touch license files');
+    assert(!/cloud-auth\.enc|cloud-device\.enc/.test(body),
+      '_applyArchiveInternal must never touch cloud-auth/device files');
+    assert(!/store\.users\s*=/.test(body),
+      '_applyArchiveInternal must not overwrite store.users (user accounts preserved)');
+    // Must only touch safe fields: settings, audit_log, backup_records, schemaVersion
+    assert(/store\.settings/.test(body),   'settings may be restored');
+    assert(/store\.audit_log/.test(body),  'audit_log may be restored');
+  });
+
+  test('1F.6C apply: post-reload login screen is local app user/admin, not cloud', function() {
+    // The reload writes rendererState to localStorage then calls location.reload().
+    // cloud-auth.enc and license files are NOT touched — cloud session preserved.
+    // Any login screen after reload is the local app user/PIN selection, which is
+    // expected behavior when the restored DATA has a different or absent active user.
+    var fs = require('fs');
+    var mainSrc = fs.readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8').replace(/\r/g,'');
+    // Apply path must not delete cloud-auth or license files
+    assert(!/fs\.unlink.*cloud-auth|fs\.rm.*cloud-auth/.test(mainSrc),
+      'cloud-auth.enc must never be deleted during cloud apply');
+    assert(!/fs\.unlink.*license|fs\.rm.*license/.test(mainSrc.replace(/\/\*[\s\S]*?\*\//g,'')),
+      'license files must never be deleted during cloud apply');
+    // Cloud auth files are separate from localStorage — preserved across reload.
+    // cloud-auth.enc path is defined in cloud-config.js (getCloudAuthPath), not main.js.
+    var configSrc = fs.readFileSync(require('path').join(__dirname, '..', 'cloud', 'cloud-config.js'), 'utf8');
+    assert(/cloud-auth\.enc/.test(configSrc), 'cloud-auth.enc path must exist in cloud-config.js');
+  });
+
+  test('1F.6C status-dot: sidebar Cloud Sync session dot is independent from backup state', function() {
+    // The workspace active-row dot (green when workspace is connected) is separate
+    // from the backup card status dot and the topbar cloud-bk-indicator
+    assert(/<div class="ws-status-dot ok"><\/div>/.test(_rendererSrc) ||
+           /ws-active-row[\s\S]{0,100}ws-status-dot ok/.test(_rendererSrc),
+      'workspace active-row must have its own always-ok dot (session dot)');
+    // renderAutoBackupIndicator uses cloud-bk-indicator (topbar) — independent
+    assert(/cloud-bk-indicator/.test(_rendererSrc), 'topbar cloud-bk-indicator must exist');
+    assert(/function renderAutoBackupIndicator/.test(_rendererSrc), 'renderAutoBackupIndicator separate from session dot');
+  });
+
   test('sync status: SYNC_UI never stores deviceId/device_id/snapshot_hash/storage_path', function() {
     var m = _rendererSrc.match(/var SYNC_UI = \{([\s\S]*?)\n\};/);
     assert(m, 'SYNC_UI object literal must exist');

@@ -4107,6 +4107,7 @@ tbody tr[onclick] { cursor: pointer; }
 .ws-active-row{display:flex;align-items:center;gap:8px;margin-bottom:4px}
 .ws-status-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
 .ws-status-dot.ok{background:var(--emerald);box-shadow:0 0 5px var(--emerald)}
+.ws-status-dot.warn{background:#f59e0b;box-shadow:0 0 4px rgba(245,158,11,.5)}
 .ws-active-name-lbl{font-size:13px;font-weight:600;color:var(--i0);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ws-role-badge{display:inline-block;font-size:10px;font-weight:600;padding:2px 7px;border-radius:10px;background:rgba(99,102,241,.12);color:#818cf8;flex-shrink:0}
 .ws-role-badge[data-role="owner"]{background:rgba(245,158,11,.12);color:#f59e0b}
@@ -4133,6 +4134,10 @@ tbody tr[onclick] { cursor: pointer; }
 .ws-bkpl-pf-err{font-size:10px;color:var(--red,#f43f5e)}
 .ws-bkpl-dlst-ok{font-size:10px;color:var(--green,#22c55e);margin-top:2px}
 .ws-bkpl-dlst-err{font-size:10px;color:var(--red,#f43f5e);margin-top:2px}
+.ws-bk-apply-confirm{padding:8px 10px;background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.2);border-radius:8px;margin-top:5px}
+.ws-bk-apply-meta{font-size:10.5px;color:var(--i3);margin-bottom:4px}
+.ws-bk-apply-warn{font-size:10px;color:#f59e0b;margin-top:3px}
+.ws-bk-apply-err{font-size:10px;color:var(--red,#f43f5e);margin-top:3px}
 .ws-bk-simple-status{display:flex;align-items:center;gap:6px;margin-top:4px}
 .ws-bk-adv-toggle{margin-top:6px;font-size:10px;opacity:.75}
 .ws-bk-adv-content{margin-top:8px;border-top:1px solid var(--bd-1);padding-top:8px}
@@ -5155,6 +5160,14 @@ var STRINGS={
     wsBackupDownloading:'İndiriliyor…',
     wsBackupSaved:'Yedek dosyası kaydedildi.',
     wsBackupDownloadFailed:'İndirme başarısız.',wsBackupDownloadCancelled:'İndirme iptal edildi.',
+    wsBackupApplyBtn:'Yedeği Uygula',wsBackupApplyCancel:'İptal',wsBackupApplyContinue:'Devam Et',
+    wsBackupApplyConfirm1:'Bu bulut yedeği mevcut yerel verilerinizin yerine geçecek.',
+    wsBackupApplySafetyNote:'Uygulamadan önce otomatik güvenlik yedeği oluşturulacak.',
+    wsBackupApplyConfirm2:'Anlıyorum — bu yedeği uygula',
+    wsBackupApplying:'Yedek uygulanıyor…',wsBackupApplied:'Yedek uygulandı. Yeniden başlatılıyor…',
+    wsBackupApplyPendingBlock:'Uygulamadan önce yerel değişiklikleri yedekleyin.',
+    wsBackupApplyInFlight:'Yedeklemenin bitmesini bekleyin.',
+    wsBackupApplyErr:'Yedek uygulanamadı.',
     wsBackupSizeMismatch:'İndirilen dosya beklenen boyutla eşleşmiyor.',
     fieldNotFound:'Alan bulunamadı',pasted:'📋 Yapıştırıldı',pasteManual:'Ctrl+V ile yapıştırın',
     // Settings modals
@@ -5712,6 +5725,14 @@ var STRINGS={
     wsBackupDownloading:'Downloading…',
     wsBackupSaved:'Backup file saved.',
     wsBackupDownloadFailed:'Download failed.',wsBackupDownloadCancelled:'Download cancelled.',
+    wsBackupApplyBtn:'Apply Backup',wsBackupApplyCancel:'Cancel',wsBackupApplyContinue:'Continue',
+    wsBackupApplyConfirm1:'This will replace your current local data with the selected cloud backup.',
+    wsBackupApplySafetyNote:'A local safety backup will be created first.',
+    wsBackupApplyConfirm2:'I understand — apply this backup',
+    wsBackupApplying:'Applying backup…',wsBackupApplied:'Backup applied. Reloading…',
+    wsBackupApplyPendingBlock:'Back up local changes first before applying.',
+    wsBackupApplyInFlight:'Wait for the current backup to finish.',
+    wsBackupApplyErr:'Failed to apply backup.',
     wsBackupSizeMismatch:'Downloaded file size does not match expected size.',
     fieldNotFound:'Field not found',pasted:'📋 Pasted',pasteManual:'Use Ctrl+V to paste',
     // Settings modals
@@ -8249,7 +8270,74 @@ var BACKUP_LIST_UI = {
   downloadState:  'idle',  // 'idle' | 'downloading' | 'saved' | 'error'
   downloadResult: null,    // {savedName, byteSize, downloadedAt} | null
   downloadError:  null,
+  // Per-backup apply flow (1F.6C — owner-only, manual, dual confirmation)
+  applyId:     null,   // backupId being applied (string, or null)
+  applyState:  'idle', // 'idle' | 'confirm1' | 'confirm2' | 'applying' | 'applied' | 'error'
+  applyError:  null,
 };
+
+// ── Cloud backup status persistence (CLOUD-FOUNDATION-1F.6C fix) ────────────
+// AUTO_BACKUP_UI is memory-only. After a renderer reload, lastUploadedHash is lost,
+// causing _scheduleAutoCloudBackup to mark already-backed-up DATA as pending.
+// We persist a minimal marker to localStorage (NOT inside DATA — that changes the
+// fingerprint and causes the very problem we're fixing).
+
+var CLOUD_BK_STATUS_KEY = 'ktp_cloud_backup_status_v1';
+
+function _saveCloudBkStatus(workspaceId, hash, successAt, byteSize) {
+  if (!workspaceId || !hash) return;
+  try {
+    localStorage.setItem(CLOUD_BK_STATUS_KEY, JSON.stringify({
+      workspaceId:      workspaceId,
+      lastUploadedHash: hash,
+      lastSuccessAt:    successAt    || null,
+      byteSize:         byteSize     || null,
+    }));
+  } catch (_) {}
+}
+
+function _loadCloudBkStatus() {
+  try {
+    var raw = localStorage.getItem(CLOUD_BK_STATUS_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) { return null; }
+}
+
+// Deterministic hydration — MUST be called when WS_UI.activeId becomes known
+// (workspace restore / activation), AFTER the boot-time render()→saveLocal() may
+// have already set a false 'pending' state (because activeId was not yet set).
+//
+// This is the real 1F.6C reload fix: it reconciles AUTO_BACKUP_UI against the
+// persistent marker and actively CLEARS any false pending when the current
+// business DATA fingerprint matches the last successfully uploaded fingerprint.
+// If the fingerprint genuinely differs, it lets the normal scheduler set pending.
+function _hydrateCloudBackupStatus() {
+  if (!WS_UI.activeId) return;
+  var saved = _loadCloudBkStatus();
+  if (saved && saved.workspaceId === WS_UI.activeId && saved.lastUploadedHash) {
+    AUTO_BACKUP_UI.lastUploadedHash = saved.lastUploadedHash;
+    AUTO_BACKUP_UI.lastSuccessAt    = saved.lastSuccessAt || null;
+  }
+  var hash = _djb2Hash(JSON.stringify(DATA));
+  if (AUTO_BACKUP_UI.lastUploadedHash && hash === AUTO_BACKUP_UI.lastUploadedHash) {
+    // Current DATA already matches the last uploaded backup — clear any false pending
+    // that the boot render() may have set before the workspace was known.
+    AUTO_BACKUP_UI.pendingHash   = null;
+    AUTO_BACKUP_UI.state         = 'ok';
+    AUTO_BACKUP_UI.lastErrorCode = null;
+    AUTO_BACKUP_UI.nextRetryAt   = null;
+    if (_autoBackupDebounceTimer) { clearTimeout(_autoBackupDebounceTimer); _autoBackupDebounceTimer = null; }
+    if (_autoBackupRetryTimer)    { clearTimeout(_autoBackupRetryTimer);    _autoBackupRetryTimer    = null; }
+    _abLog('hydrate: reconciled to ok (data matches marker)');
+  } else {
+    // No marker or DATA genuinely changed since last upload — real pending is allowed.
+    // Re-run the scheduler now that activeId is known so pending is set correctly.
+    _abLog('hydrate: data differs or no marker — scheduling');
+    _scheduleAutoCloudBackup();
+  }
+  renderAutoBackupIndicator();
+  renderWorkspaceCard();
+}
 
 // ── Automatic cloud backup state (CLOUD-FOUNDATION-1F.4F) ───────────────────
 // Fingerprint-gated debounced background upload.
@@ -8312,11 +8400,33 @@ function _scheduleAutoCloudBackup() {
   // transitions that occur after app startup are handled correctly.
   if (!_backupBridge()) { _abLog('skip: no bridge'); return; }
 
+  // Hydrate lastUploadedHash from the persistent marker on first call after startup.
+  // AUTO_BACKUP_UI is memory-only; without this, every reload marks data as pending
+  // even when it was already successfully uploaded before the reload.
+  if (AUTO_BACKUP_UI.lastUploadedHash === null && WS_UI.activeId) {
+    var _saved = _loadCloudBkStatus();
+    if (_saved && _saved.workspaceId === WS_UI.activeId && _saved.lastUploadedHash) {
+      AUTO_BACKUP_UI.lastUploadedHash = _saved.lastUploadedHash;
+      AUTO_BACKUP_UI.lastSuccessAt    = _saved.lastSuccessAt || null;
+      _abLog('hydrated from localStorage', { workspaceId: _saved.workspaceId });
+    }
+  }
+
   var hash = _djb2Hash(JSON.stringify(DATA));
   _abLog('schedule called', { hash: hash, pendingHash: AUTO_BACKUP_UI.pendingHash, lastUploadedHash: AUTO_BACKUP_UI.lastUploadedHash, state: AUTO_BACKUP_UI.state });
 
   // Already uploaded this exact state — nothing to do.
-  if (hash === AUTO_BACKUP_UI.lastUploadedHash) { _abLog('skip: already uploaded'); return; }
+  // Defensive: also clear any stale 'pending' left over from a boot-time call
+  // that ran before the workspace marker was hydrated.
+  if (hash === AUTO_BACKUP_UI.lastUploadedHash) {
+    if (AUTO_BACKUP_UI.pendingHash !== null || AUTO_BACKUP_UI.state === 'pending') {
+      AUTO_BACKUP_UI.pendingHash = null;
+      AUTO_BACKUP_UI.state = 'ok';
+      if (_autoBackupDebounceTimer) { clearTimeout(_autoBackupDebounceTimer); _autoBackupDebounceTimer = null; }
+      renderWorkspaceCard();
+    }
+    _abLog('skip: already uploaded'); return;
+  }
 
   // Same hash as the one already pending AND debounce timer running —
   // the 30-second auto-save must NOT reset the 3-minute timer.
@@ -8414,6 +8524,8 @@ async function wsAutoBackupTick() {
   AUTO_BACKUP_UI.lastUploadedHash = uploadedHash;
   AUTO_BACKUP_UI.lastSuccessAt = _r.createdAt || new Date().toISOString();
   AUTO_BACKUP_UI.lastErrorCode = null;
+  // Persist so lastUploadedHash survives renderer reload/restart.
+  _saveCloudBkStatus(WS_UI.activeId, uploadedHash, AUTO_BACKUP_UI.lastSuccessAt, _r.byteSize || null);
 
   // Check if new data arrived while uploading.
   var currentHash = _djb2Hash(JSON.stringify(DATA));
@@ -8569,6 +8681,12 @@ async function wsActivateWorkspace(workspaceId) {
   WS_UI.activeRole = _r.memberRole;
   WS_UI.showSwitch = false;
   _wsSaveId(_r.workspaceId);
+  // Switching workspaces invalidates the in-memory backup hash tracking — reset
+  // it, then hydrate from the marker for the newly active workspace.
+  AUTO_BACKUP_UI.lastUploadedHash = null;
+  AUTO_BACKUP_UI.pendingHash      = null;
+  AUTO_BACKUP_UI.state            = 'idle';
+  _hydrateCloudBackupStatus();
   toast(t('wsActivated'), 'green');
   renderWorkspaceCard();
 }
@@ -8648,6 +8766,9 @@ async function wsRestore() {
   WS_UI.activeRole = _found.memberRole    || null;
   WS_UI.restored   = true;
   WS_UI.view       = 'list';
+  // Deterministic cloud-backup status hydration now that the workspace is known.
+  // Clears any false 'pending' set by the boot render()→saveLocal() call.
+  _hydrateCloudBackupStatus();
   return { ok: true, restored: true, workspaceId: _found.workspaceId, workspaceName: _found.workspaceName };
 }
 
@@ -8661,6 +8782,9 @@ function _wsRestoreOffline() {
   WS_UI.activeRole = null;
   WS_UI.restored   = true;
   WS_UI.view       = 'list';
+  // Hydrate cloud backup status from the persistent marker (works offline) so the
+  // boot render()→saveLocal() false-pending is reconciled even without network.
+  _hydrateCloudBackupStatus();
 }
 
 // ── Sync status (CLOUD-FOUNDATION-1F.3 — read-only) ──────────────────────────
@@ -8872,9 +8996,34 @@ async function wsConfirmManualBackup() {
   BACKUP_UI.uploadState     = 'success';
   BACKUP_UI.lastUploadAt    = _res.createdAt || Date.now();
   BACKUP_UI.lastUploadBytes = typeof _res.byteSize === 'number' ? _res.byteSize : null;
+
+  // Reconcile the auto-backup fingerprint tracker with this manual upload.
+  // Without this, the next saveLocal() auto-save (30s) would compute a hash
+  // that differs from lastUploadedHash (null/old) and re-set pendingHash —
+  // hiding the Apply button even though the data is already backed up.
+  var _manualHash = _djb2Hash(JSON.stringify(DATA));
+  AUTO_BACKUP_UI.lastUploadedHash = _manualHash;
+  AUTO_BACKUP_UI.lastSuccessAt    = _res.createdAt || new Date().toISOString();
+  AUTO_BACKUP_UI.lastErrorCode    = null;
+  if (AUTO_BACKUP_UI.pendingHash === null || AUTO_BACKUP_UI.pendingHash === _manualHash) {
+    // Current DATA matches what was just uploaded — auto-backup has nothing new to do.
+    AUTO_BACKUP_UI.pendingHash  = null;
+    AUTO_BACKUP_UI.state        = 'ok';
+    AUTO_BACKUP_UI.nextRetryAt  = null;
+    if (_autoBackupDebounceTimer) { clearTimeout(_autoBackupDebounceTimer); _autoBackupDebounceTimer = null; }
+    if (_autoBackupRetryTimer)    { clearTimeout(_autoBackupRetryTimer);    _autoBackupRetryTimer    = null; }
+  }
+  // If pendingHash differs (DATA changed during upload) — keep pending, auto-backup handles it.
+  // Persist the marker so lastUploadedHash survives renderer reload/restart.
+  _saveCloudBkStatus(WS_UI.activeId, _manualHash, AUTO_BACKUP_UI.lastSuccessAt, typeof _res.byteSize === 'number' ? _res.byteSize : null);
+
   toast(t('wsBackupUploadSuccess'), 'green');
+  // Explicit topbar update — renderAutoBackupIndicator() is also called inside
+  // renderWorkspaceCard(), but calling it here ensures the dot updates immediately
+  // even if the cloud panel/card is not currently rendered.
+  renderAutoBackupIndicator();
   renderWorkspaceCard();
-  wsRefreshBackupList(); // auto-refresh list after successful upload
+  wsRefreshBackupList(); // auto-refresh list; Apply button appears once list loads
 }
 
 // ── Cloud backup list (CLOUD-FOUNDATION-1F.4C, read-only) ────────────────────
@@ -8932,6 +9081,84 @@ async function wsStartDownloadPreflight(idx) {
   BACKUP_LIST_UI.preflightResult = { backupId: _r.backupId, byteSize: _r.byteSize };
   BACKUP_LIST_UI.preflightState  = 'ready';
   renderWorkspaceCard();
+}
+
+// ── Cloud backup apply (1F.6C) — owner-only, manual, dual confirmation ──────
+// NEVER calls restore automatically. NEVER restores without explicit confirmation.
+// NEVER exposes rendererState/mainStore/checksums/storage_path in the UI.
+
+function wsStartApply(idx) {
+  var backup = BACKUP_LIST_UI.backups[idx];
+  if (!backup || !backup.backupId) return;
+  if (BACKUP_UI.role !== 'owner') return;          // owner-only guard
+  if (AUTO_BACKUP_UI.inFlight) return;             // block while upload in flight
+  if (BACKUP_LIST_UI.applyState === 'applying') return; // re-entry guard
+  BACKUP_LIST_UI.applyId    = backup.backupId;
+  BACKUP_LIST_UI.applyState = 'confirm1';
+  BACKUP_LIST_UI.applyError = null;
+  renderWorkspaceCard();
+}
+
+function wsCancelApply() {
+  BACKUP_LIST_UI.applyId    = null;
+  BACKUP_LIST_UI.applyState = 'idle';
+  BACKUP_LIST_UI.applyError = null;
+  renderWorkspaceCard();
+}
+
+function wsConfirmApply1() {
+  if (BACKUP_LIST_UI.applyState !== 'confirm1') return;
+  BACKUP_LIST_UI.applyState = 'confirm2';
+  renderWorkspaceCard();
+}
+
+async function wsConfirmApply2() {
+  if (BACKUP_LIST_UI.applyState !== 'confirm2') return;
+  var workspaceId = WS_UI.activeId;
+  var backupId    = BACKUP_LIST_UI.applyId;
+  if (!workspaceId || !backupId) return;
+  if (BACKUP_UI.role !== 'owner') return;       // re-check role
+  if (AUTO_BACKUP_UI.inFlight) return;          // re-check in-flight
+  BACKUP_LIST_UI.applyState = 'applying'; renderWorkspaceCard();
+  var bridge = typeof window !== 'undefined' && window.electron ? window.electron : null;
+  if (!bridge) { BACKUP_LIST_UI.applyState = 'error'; BACKUP_LIST_UI.applyError = 'not_configured'; renderWorkspaceCard(); return; }
+  var currentState = _captureRendererState();
+  var _r;
+  try {
+    _r = await bridge.restoreBackupFromCloud({
+      workspaceId:              workspaceId,
+      backupId:                 backupId,
+      preRestoreRendererState:  currentState.rendererStateStr,
+      preRestoreImportProfiles: currentState.importProfilesStr || null,
+    });
+  } catch (_) {
+    BACKUP_LIST_UI.applyState = 'error'; BACKUP_LIST_UI.applyError = 'unknown_error';
+    renderWorkspaceCard(); return;
+  }
+  if (!_r || !_r.ok) {
+    BACKUP_LIST_UI.applyState = 'error';
+    BACKUP_LIST_UI.applyError = _r ? (_r.error || 'unknown_error') : 'unknown_error';
+    renderWorkspaceCard(); return;
+  }
+  // Apply validated rendererState from main — never log it
+  BACKUP_LIST_UI.applyState = 'applied'; renderWorkspaceCard();
+  try {
+    localStorage.setItem(LSKEY, _r.rendererState);
+    if (_r.importProfiles !== null && _r.importProfiles !== undefined) {
+      try { localStorage.setItem('ktp_import_profiles_v1', _r.importProfiles); } catch (_) {}
+    }
+    // Persist the restored-state fingerprint BEFORE reload so that after restart,
+    // _scheduleAutoCloudBackup hydrates lastUploadedHash and does not mark the
+    // restored data as pending. Uses same hash algorithm as the scheduler.
+    try {
+      var _restoreHash = _djb2Hash(_r.rendererState);
+      _saveCloudBkStatus(workspaceId, _restoreHash, _r.cloudBackupCreatedAt || _r.appliedAt, _r.cloudBackupByteSize || null);
+    } catch (_) {}
+    setTimeout(function() { window.location.reload(); }, 1000);
+  } catch (e) {
+    BACKUP_LIST_UI.applyState = 'error'; BACKUP_LIST_UI.applyError = 'apply_write_failed';
+    renderWorkspaceCard();
+  }
 }
 
 function _backupDownloadErrMsg(errCode) {
@@ -9073,8 +9300,9 @@ function renderWorkspaceCard() {
           // Simple status: show protection state; details move to Advanced
           '<div class="ws-bk-simple-status">' +
             '<div class="ws-status-dot ' + (
-              AUTO_BACKUP_UI.state === 'uploading' || AUTO_BACKUP_UI.state === 'pending' ? 'ok' :
-              (BACKUP_LIST_UI.state === 'ready' && BACKUP_LIST_UI.backups.length > 0) || AUTO_BACKUP_UI.state === 'ok' ? 'ok' : ''
+              AUTO_BACKUP_UI.state === 'pending' || AUTO_BACKUP_UI.state === 'uploading' ? 'warn' :
+              AUTO_BACKUP_UI.state === 'error' ? 'warn' :
+              AUTO_BACKUP_UI.state === 'ok' || BACKUP_LIST_UI.backups.length > 0 ? 'ok' : ''
             ) + '"></div>' +
             '<span id="ws-bk-status-txt" class="ws-sync-summary"></span>' +
           '</div>' +
@@ -9131,6 +9359,53 @@ function renderWorkspaceCard() {
                           ? '<div class="ws-bkpl-pf-ok ws-sync-detail" id="ws-bkpl-dlst-' + _bi + '"></div>' : '') +
                         (BACKUP_LIST_UI.downloadId === b.backupId && BACKUP_LIST_UI.downloadState === 'error'
                           ? '<div class="ws-bkpl-pf-err ws-sync-detail" id="ws-bkpl-dlst-' + _bi + '"></div>' : '') +
+                        // ── Apply backup (owner-only, 1F.6C) ──────────────────────────────
+                        (function() {
+                          var _isApp  = BACKUP_LIST_UI.applyId === b.backupId;
+                          var _canApp = BACKUP_UI.role === 'owner' && !_isApp && BACKUP_LIST_UI.applyState === 'idle';
+                          var _pend   = BACKUP_UI.role === 'owner' && AUTO_BACKUP_UI.pendingHash !== null;
+                          return (
+                            // Pending block warning (instead of Apply button)
+                            (_pend && !_isApp
+                              ? '<div class="ws-bk-apply-warn" id="ws-bkpl-apwarn-' + _bi + '"></div>'
+                              : '') +
+                            // Apply button (not shown when pending or applying another)
+                            (_canApp && !_pend
+                              ? '<button class="btn btn-ghost btn-xs" id="ws-bkpl-apply-' + _bi + '"' +
+                                  (AUTO_BACKUP_UI.inFlight ? ' disabled' : '') +
+                                  ' onclick="wsStartApply(' + _bi + ')"></button>'
+                              : '') +
+                            // Confirm1 panel
+                            (_isApp && BACKUP_LIST_UI.applyState === 'confirm1'
+                              ? '<div class="ws-bk-apply-confirm">' +
+                                  '<div class="ws-bk-apply-meta" id="ws-bkpl-ap-meta-' + _bi + '"></div>' +
+                                  '<div class="ws-sync-detail" id="ws-bkpl-ap-warn1-' + _bi + '"></div>' +
+                                  '<div class="ws-sync-detail" id="ws-bkpl-ap-safe-' + _bi + '"></div>' +
+                                  '<div style="display:flex;gap:7px;margin-top:6px">' +
+                                    '<button class="btn btn-secondary btn-xs" id="ws-bkpl-ap-cont-' + _bi + '" onclick="wsConfirmApply1()"></button>' +
+                                    '<button class="btn btn-ghost btn-xs" id="ws-bkpl-ap-canc1-' + _bi + '" onclick="wsCancelApply()"></button>' +
+                                  '</div></div>'
+                              : '') +
+                            // Confirm2 panel (second gate)
+                            (_isApp && BACKUP_LIST_UI.applyState === 'confirm2'
+                              ? '<div class="ws-bk-apply-confirm">' +
+                                  '<div class="ws-bk-apply-meta" id="ws-bkpl-ap-meta2-' + _bi + '"></div>' +
+                                  '<div style="display:flex;gap:7px;margin-top:6px">' +
+                                    '<button class="btn btn-primary btn-xs" id="ws-bkpl-ap-cfm-' + _bi + '" onclick="wsConfirmApply2()"></button>' +
+                                    '<button class="btn btn-ghost btn-xs" id="ws-bkpl-ap-canc2-' + _bi + '" onclick="wsCancelApply()"></button>' +
+                                  '</div></div>'
+                              : '') +
+                            // Applying state
+                            (_isApp && BACKUP_LIST_UI.applyState === 'applying'
+                              ? '<div class="ws-bk-apply-meta" id="ws-bkpl-applying-' + _bi + '"></div>' : '') +
+                            // Applied state
+                            (_isApp && BACKUP_LIST_UI.applyState === 'applied'
+                              ? '<div class="ws-bkpl-pf-ok ws-sync-detail" id="ws-bkpl-applied-' + _bi + '"></div>' : '') +
+                            // Apply error
+                            (_isApp && BACKUP_LIST_UI.applyState === 'error'
+                              ? '<div class="ws-bk-apply-err" id="ws-bkpl-ap-err-' + _bi + '"></div>' : '')
+                          );
+                        })() +
                       '</div>';
                     }).join('') +
                   '</div>' : '') +
@@ -9325,6 +9600,43 @@ function renderWorkspaceCard() {
               else if (BACKUP_LIST_UI.downloadState === 'error') _ldst.textContent = _backupDownloadErrMsg(BACKUP_LIST_UI.downloadError);
             }
           }
+          // Apply button text-setting (1F.6C)
+          var _lapb = document.getElementById('ws-bkpl-apply-' + _li);
+          if (_lapb) _lapb.textContent = t('wsBackupApplyBtn');
+          var _lapw = document.getElementById('ws-bkpl-apwarn-' + _li);
+          if (_lapw) _lapw.textContent = t(AUTO_BACKUP_UI.inFlight ? 'wsBackupApplyInFlight' : 'wsBackupApplyPendingBlock');
+          // Confirm1 panel
+          var _apm = document.getElementById('ws-bkpl-ap-meta-' + _li);
+          if (_apm && BACKUP_LIST_UI.applyId === _lb.backupId) {
+            var _apDate = _lb.createdAt ? new Date(_lb.createdAt).toLocaleString() : '—';
+            var _apSize = typeof _lb.byteSize === 'number' ? _fmtBytes(_lb.byteSize) : '—';
+            var _apTrig = _lb.trigger === 'manual' ? t('wsBackupListTrigger_manual') : (_lb.trigger || '');
+            _apm.textContent = t('wsBackupApplyConfirm1') + ' (' + _apDate + ' · ' + _apSize + ' · ' + _apTrig + ')';
+          }
+          var _apw1 = document.getElementById('ws-bkpl-ap-warn1-' + _li);
+          if (_apw1) _apw1.textContent = t('wsBackupApplySafetyNote');
+          var _aps1 = document.getElementById('ws-bkpl-ap-safe-' + _li);
+          if (_aps1) _aps1.textContent = ''; // handled in warn1
+          var _apco = document.getElementById('ws-bkpl-ap-cont-' + _li);
+          if (_apco) _apco.textContent = t('wsBackupApplyContinue');
+          var _apc1 = document.getElementById('ws-bkpl-ap-canc1-' + _li);
+          if (_apc1) _apc1.textContent = t('wsBackupApplyCancel');
+          // Confirm2 panel
+          var _apm2 = document.getElementById('ws-bkpl-ap-meta2-' + _li);
+          if (_apm2 && BACKUP_LIST_UI.applyId === _lb.backupId) {
+            _apm2.textContent = t('wsBackupApplyConfirm1');
+          }
+          var _apcfm = document.getElementById('ws-bkpl-ap-cfm-' + _li);
+          if (_apcfm) _apcfm.textContent = t('wsBackupApplyConfirm2');
+          var _apc2 = document.getElementById('ws-bkpl-ap-canc2-' + _li);
+          if (_apc2) _apc2.textContent = t('wsBackupApplyCancel');
+          // Applying/Applied/Error states
+          var _aping = document.getElementById('ws-bkpl-applying-' + _li);
+          if (_aping) _aping.textContent = t('wsBackupApplying');
+          var _aped = document.getElementById('ws-bkpl-applied-' + _li);
+          if (_aped) _aped.textContent = t('wsBackupApplied');
+          var _ape = document.getElementById('ws-bkpl-ap-err-' + _li);
+          if (_ape) _ape.textContent = t('wsBackupApplyErr');
         }
       }
       if (BACKUP_LIST_UI.checkedForId !== WS_UI.activeId && BACKUP_LIST_UI.state === 'idle') {

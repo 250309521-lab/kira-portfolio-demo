@@ -53,8 +53,9 @@ contextBridge.exposeInMainWorld('electron', {
   importLicense:  () => ipcRenderer.invoke('license:import'),
 
   // ── Local Backup (LOCAL-BACKUP-1) ─────────────────────────────────────────
-  createFullBackup:  (payload) => ipcRenderer.invoke('backup:createFull', payload),
-  restoreFullBackup: (payload) => ipcRenderer.invoke('backup:restoreFull', payload),
+  createFullBackup:        (payload) => ipcRenderer.invoke('backup:createFull', payload),
+  restoreFullBackup:       (payload) => ipcRenderer.invoke('backup:restoreFull', payload),
+  restoreBackupFromCloud:  (payload) => ipcRenderer.invoke('backup:restoreFromCloud', payload),
 
   // ── UI chrome ─────────────────────────────────────────────────────────────
   setTitleBarColor: (opts) => ipcRenderer.send('titlebar:setColor', opts),
