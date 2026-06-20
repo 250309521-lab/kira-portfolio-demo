@@ -408,6 +408,51 @@ async function registerAsync(testAsync, assert, assertEqual) {
     assert(!cs._looksLikeData([]), 'array is not DATA-like');
     assert(!cs._looksLikeData(null), 'null is not DATA-like');
   });
+
+  await testAsync('pull-preflight: result never carries content', async function() {
+    setupPull({ revision: 2 });
+    var r = await cs.preflightPullSnapshot({ workspaceId: WS_ID, baseRevision: 1 });
+    cs._resetForTests();
+    assert(r.ok, 'preflight ok');
+    assert(!('content' in r), 'preflight must discard content');
+  });
+
+  // ── 1G.4C: pullSnapshotForApply (returns validated content for accepted apply) ──
+  console.log('\nCloud Sync — pull-for-apply (CLOUD-FOUNDATION-1G.4C, async):');
+
+  await testAsync('pull-for-apply: valid newer snapshot returns validated content', async function() {
+    setupPull({ revision: 2 });
+    var r = await cs.pullSnapshotForApply({ workspaceId: WS_ID, baseRevision: 1 });
+    cs._resetForTests();
+    assert(r.ok, 'must succeed');
+    assertEqual(r.revision, 2);
+    assert(typeof r.content === 'string' && r.content.length > 0, 'content must be returned for apply');
+    assert(JSON.parse(r.content) && typeof JSON.parse(r.content) === 'object', 'content parses as DATA');
+  });
+
+  await testAsync('pull-for-apply: not newer → no content', async function() {
+    setupPull({ revision: 2 });
+    var r = await cs.pullSnapshotForApply({ workspaceId: WS_ID, baseRevision: 2 });
+    cs._resetForTests();
+    assert(!r.ok && r.error === 'not_newer', 'must reject non-newer');
+    assert(!('content' in r), 'no content on failure');
+  });
+
+  await testAsync('pull-for-apply: hash mismatch → no content', async function() {
+    setupPull({ revision: 2, hashOverride: 'c'.repeat(64) });
+    var r = await cs.pullSnapshotForApply({ workspaceId: WS_ID, baseRevision: 1 });
+    cs._resetForTests();
+    assert(!r.ok && r.error === 'hash_mismatch', 'integrity mismatch fails');
+    assert(!('content' in r), 'no content on failure');
+  });
+
+  await testAsync('pull-for-apply: invalid shape → no content', async function() {
+    setupPull({ revision: 2, content: JSON.stringify({ foo: 'bar' }) });
+    var r = await cs.pullSnapshotForApply({ workspaceId: WS_ID, baseRevision: 1 });
+    cs._resetForTests();
+    assert(!r.ok && r.error === 'invalid_shape', 'non-DATA shape fails');
+    assert(!('content' in r), 'no content on failure');
+  });
 }
 
 module.exports = { register, registerAsync };

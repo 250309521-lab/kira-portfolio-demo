@@ -8547,15 +8547,30 @@ function _saveSyncState() {
   } catch (_) {}
 }
 
-// Reconcile in-memory sync state from the marker once the workspace is known.
-// Called from _hydrateCloudBackupStatus(). Inert unless real sync is enabled.
+// Reconcile in-memory sync state from the persisted marker once the workspace is
+// known. This is READ-ONLY and MUST run regardless of the runtime flags: the
+// marker records real sync progress (e.g. the revision applied by an accepted
+// 1G.4C pull), and after a reload the KTP_REAL_SYNC_* flags are not set, so
+// gating hydration on them would lose the synced baseRevision (idle/0 bug). It
+// only reads localStorage + sets in-memory SYNC_PUSH_UI — no network, no DOM.
+// 1G.4C-FIX: previously gated by _realSyncPushEnabled(), which reset on reload.
 function _hydrateSyncState() {
-  if (!_realSyncPushEnabled() || !WS_UI.activeId) return;
+  if (!WS_UI.activeId) return;
   var saved = _loadSyncState();
   if (saved && saved.workspaceId === WS_UI.activeId) {
     SYNC_PUSH_UI.baseRevision   = (typeof saved.baseRevision === 'number') ? saved.baseRevision : 0;
     SYNC_PUSH_UI.lastSyncedHash = saved.lastSyncedHash || null;
     SYNC_PUSH_UI.lastPushAt     = saved.lastPushAt || null;
+    // Reflect a settled status when the local DATA fingerprint matches the
+    // last-synced hash (e.g. immediately after an accepted apply + reload). Never
+    // claim settled if DATA differs — leave state idle so detection can resolve
+    // cloud_newer / pending.
+    if (SYNC_PUSH_UI.lastSyncedHash &&
+        _djb2Hash(JSON.stringify(DATA)) === SYNC_PUSH_UI.lastSyncedHash) {
+      SYNC_PUSH_UI.state         = 'synced';
+      SYNC_PUSH_UI.cloudRevision = SYNC_PUSH_UI.baseRevision;
+      SYNC_PUSH_UI.pendingHash   = null;
+    }
   } else {
     // Different/absent workspace — reset to a safe base. base 0 can only be
     // rejected (stale) by CAS, never overwrite, so this is non-destructive.
@@ -8564,8 +8579,8 @@ function _hydrateSyncState() {
     SYNC_PUSH_UI.cloudRevision  = null;
     if (SYNC_PUSH_UI.state === 'cloud_newer') SYNC_PUSH_UI.state = 'idle';
   }
-  // 1G.3: now that the workspace + baseRevision are known, proactively check
-  // whether the cloud revision is newer (read-only; never pulls/applies).
+  // 1G.3: proactively check whether the cloud revision is newer (read-only).
+  // Internally gated by the push flag, so inert when sync is disabled.
   _scheduleDetectCloudNewer();
 }
 
@@ -8829,6 +8844,108 @@ async function _preflightPullSnapshot() {
   return res || { ok: false, error: 'unknown_error' };
 }
 
+// ── 1G.4C: clean-only ACCEPTED apply (explicit/manual — never auto) ──────────
+// Applies a newer cloud snapshot to local DATA, but ONLY when local is clean and
+// the action is explicitly invoked (never from detection/focus/online/interval).
+// Main creates a MANDATORY safety backup before returning the validated content;
+// the renderer writes LSKEY and reloads. baseRevision/lastSyncedHash/state are
+// advanced ONLY after a successful write. On any failure local data is preserved
+// and state stays cloud_newer. Gated by the SEPARATE pull flag.
+async function _applyPulledSnapshot() {
+  if (!_realSyncPullEnabled())                 return { ok: false, error: 'pull_disabled' };
+  if (!WS_UI.activeId)                         return { ok: false, error: 'no_workspace' };
+  if (SYNC_PUSH_UI.pushInFlight)               return { ok: false, error: 'blocked_push_in_flight' };
+  if (SYNC_PUSH_UI.pullInFlight)               return { ok: false, error: 'blocked_pull_in_flight' };
+  if (SYNC_PUSH_UI.pendingHash != null)        return { ok: false, error: 'blocked_dirty' };
+  if (SYNC_PUSH_UI.state === 'local_pending' ||
+      SYNC_PUSH_UI.state === 'syncing')        return { ok: false, error: 'blocked_dirty' };
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return { ok: false, error: 'offline' };
+  if (typeof SYNC_PUSH_UI.baseRevision !== 'number') return { ok: false, error: 'invalid_base_revision' };
+  if (typeof SYNC_PUSH_UI.cloudRevision !== 'number' ||
+      SYNC_PUSH_UI.cloudRevision <= SYNC_PUSH_UI.baseRevision) return { ok: false, error: 'not_newer' };
+  var bridge = _pullBridge();
+  if (!bridge || typeof bridge.applyPulledSnapshot !== 'function') return { ok: false, error: 'no_bridge' };
+
+  var reqWorkspaceId  = WS_UI.activeId;          // stamp the request
+  var reqBaseRevision = SYNC_PUSH_UI.baseRevision;
+  var preState = JSON.stringify(DATA);           // current local DATA for the safety backup
+  var preHash  = _djb2Hash(preState);            // to re-verify clean immediately before write
+
+  SYNC_PUSH_UI.pullInFlight = true;
+  var res;
+  try {
+    res = await bridge.applyPulledSnapshot({
+      workspaceId:             reqWorkspaceId,
+      baseRevision:            reqBaseRevision,
+      preRestoreRendererState: preState,
+    });
+  } catch (_) {
+    res = { ok: false, error: 'apply_failed' };
+  }
+
+  // Workspace switched mid-apply → discard, do NOT write.
+  if (WS_UI.activeId !== reqWorkspaceId) { SYNC_PUSH_UI.pullInFlight = false; return { ok: false, error: 'stale_workspace' }; }
+  if (!res || res.ok !== true)           { SYNC_PUSH_UI.pullInFlight = false; return res || { ok: false, error: 'unknown_error' }; }
+  if (typeof res.rendererState !== 'string' || !res.rendererState) {
+    SYNC_PUSH_UI.pullInFlight = false; return { ok: false, error: 'apply_failed' };
+  }
+
+  // RE-CHECK clean immediately before the write: if local DATA changed during the
+  // await (or a pending edit appeared), abort. The safety backup already exists.
+  if (_djb2Hash(JSON.stringify(DATA)) !== preHash || SYNC_PUSH_UI.pendingHash != null) {
+    SYNC_PUSH_UI.pullInFlight = false;
+    return { ok: false, error: 'blocked_dirty' };
+  }
+
+  // 1G.4C-FIX: scope the apply. The snapshot carries the whole workspace DATA,
+  // but a device's LOGIN IDENTITY (users/PINs) and its LOCAL workspace linkage
+  // (DATA.workspaceId, which maps to the cloud workspace via local_workspace_id)
+  // are DEVICE-LOCAL — not shared business data. Overwriting them with another
+  // device's values would (a) lock this operator out with unknown PINs and (b)
+  // break this device's cloud workspace linkage, so the workspace never restores
+  // after reload. We therefore PRESERVE local users + workspaceId and apply only
+  // the shared business data. (The active workspace selection lives in its own
+  // separate localStorage key and is untouched by this LSKEY write.)
+  var _applyStr = res.rendererState;
+  try {
+    var _incoming = JSON.parse(res.rendererState);
+    var _localPrev = JSON.parse(preState);
+    if (_incoming && typeof _incoming === 'object' && _localPrev && typeof _localPrev === 'object') {
+      if (_localPrev.users !== undefined)       _incoming.users       = _localPrev.users;        // keep local login identity
+      if (_localPrev.workspaceId !== undefined) _incoming.workspaceId = _localPrev.workspaceId;   // keep local workspace linkage
+      _applyStr = JSON.stringify(_incoming);
+    }
+  } catch (_) { _applyStr = res.rendererState; }   // fall back to raw content if merge fails
+
+  // Narrow accepted-apply: write the merged DATA to localStorage (LSKEY).
+  try {
+    localStorage.setItem(LSKEY, _applyStr);
+    _lastPersistedSer = _applyStr;               // keep the 1F.6D persisted-serialization cache consistent
+  } catch (_) {
+    SYNC_PUSH_UI.pullInFlight = false;
+    return { ok: false, error: 'local_write_failed' };   // safety backup exists; state stays cloud_newer
+  }
+
+  // SUCCESS — advance sync state ONLY after the write, then persist the marker.
+  // lastSyncedHash fingerprints the MERGED local state (what we actually stored),
+  // so post-reload hydration recognises it as 'synced' at the applied revision.
+  SYNC_PUSH_UI.baseRevision      = res.revision;
+  SYNC_PUSH_UI.cloudRevision     = res.revision;
+  SYNC_PUSH_UI.lastSyncedHash    = _djb2Hash(_applyStr);
+  SYNC_PUSH_UI.pendingHash       = null;
+  SYNC_PUSH_UI.lastErrorCategory = null;
+  SYNC_PUSH_UI.state             = 'synced';
+  SYNC_PUSH_UI.pullInFlight      = false;
+  _saveSyncState();
+
+  // Reload so the app re-reads the applied DATA from localStorage. Marker +
+  // LSKEY are already consistent, so a missed reload is recovered on next boot.
+  var _reloaded = false;
+  try { setTimeout(function () { try { location.reload(); } catch (_) {} }, 300); _reloaded = true; } catch (_) {}
+
+  return { ok: true, revision: res.revision, reloaded: _reloaded };
+}
+
 // Event triggers (focus/online) + the periodic interval. Each path is gated by
 // _scheduleDetectCloudNewer/_detectCloudNewer, so this is inert when disabled.
 if (typeof window !== 'undefined') {
@@ -8866,6 +8983,29 @@ if (typeof window !== 'undefined') {
         baseRevision: SYNC_PUSH_UI.baseRevision,       // must be unchanged by preflight
         hasPending:   SYNC_PUSH_UI.pendingHash != null,
         pullInFlight: SYNC_PUSH_UI.pullInFlight,
+      };
+    });
+  };
+
+  // Gated, explicit manual smoke helper for 1G.4C ACCEPTED apply. Runs the clean-
+  // only accepted apply (mandatory safety backup in main, then LSKEY write + reload
+  // on success). Returns ONLY safe state fields — never content/hash/path/url.
+  // NOTE: on success the app reloads shortly after this resolves.
+  window.__ktpApplyPulledSnapshot = function () {
+    if (!_realSyncPullEnabled()) return Promise.resolve({ enabled: false });
+    return _applyPulledSnapshot().then(function (r) {
+      return {
+        ok:              r.ok === true,
+        error:           (r.ok === true) ? null : (r.error || 'unknown_error'),
+        revision:        (r.ok === true) ? (r.revision || null) : null,
+        scheduledReload: (r.ok === true) && (r.reloaded === true),
+        state:           SYNC_PUSH_UI.state,
+        baseRevision:    SYNC_PUSH_UI.baseRevision,
+        cloudRevision:   SYNC_PUSH_UI.cloudRevision,
+        activeId:        WS_UI.activeId || null,        // cloud workspace id (not a secret)
+        activeRole:      WS_UI.activeRole || null,      // role label (not a secret)
+        hasPending:      SYNC_PUSH_UI.pendingHash != null,
+        pullInFlight:    SYNC_PUSH_UI.pullInFlight,
       };
     });
   };

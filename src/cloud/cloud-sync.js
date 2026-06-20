@@ -296,6 +296,25 @@ function _looksLikeData(parsed) {
 // NEVER applies, NEVER writes DATA, NEVER returns content/storage_path/hash/URL.
 // input: { workspaceId, baseRevision }
 async function preflightPullSnapshot(input) {
+  var r = await _downloadAndValidateSnapshot(input);
+  if (!r.ok) return r;
+  // 1G.4B: content validated — DISCARD it. Safe metadata only.
+  return { ok: true, revision: r.revision, byteSize: r.byteSize, createdAt: r.createdAt };
+}
+
+// pullSnapshotForApply (1G.4C) — same download + validation as preflight, but
+// RETURNS the validated content for the narrow accepted-apply path. The caller
+// (main.js cloud:applyPulledSnapshot) creates a mandatory safety backup before
+// forwarding the content to the renderer for the localStorage write. The content
+// MUST NOT be logged and is the only place a snapshot body leaves this module.
+async function pullSnapshotForApply(input) {
+  return _downloadAndValidateSnapshot(input);
+}
+
+// Shared: download the latest snapshot IN MEMORY and fully validate it. Returns
+// { ok, revision, byteSize, createdAt, content } on success (content included),
+// or { ok:false, error } with a typed reason. storage_path/snapshot_hash stay here.
+async function _downloadAndValidateSnapshot(input) {
   input = input || {};
   if (!isConfigured()) return { ok: false, error: 'not_configured' };
 
@@ -341,22 +360,21 @@ async function preflightPullSnapshot(input) {
   var parsed;
   try { parsed = JSON.parse(content); } catch (_) { return { ok: false, error: 'invalid_json' }; }
   if (!_looksLikeData(parsed)) return { ok: false, error: 'invalid_shape' };
+  parsed = null;
 
-  // 1G.4B: content validated — DISCARD it. Apply belongs to 1G.4C.
-  content = null; parsed = null;
-
-  // Safe result only — no content, storage_path, hash, signed URL, device id.
   return {
     ok:        true,
     revision:  m.revision,
     byteSize:  m.byteSize,
     createdAt: m.createdAt || null,
+    content:   content,   // validated; caller is responsible for safe handling
   };
 }
 
 module.exports = {
   pushWorkspaceSnapshot,
   preflightPullSnapshot,
+  pullSnapshotForApply,
   computeSnapshotHash,
   // Constants exported for tests/wiring
   PUSH_ROLES,

@@ -1416,9 +1416,16 @@ function register(test, assert, assertEqual) {
     var hyd = _rendererSrc.match(/function _hydrateCloudBackupStatus\(\)([\s\S]*?)\n\}/);
     assert(hyd, '_hydrateCloudBackupStatus body must be found');
     assert(/_hydrateSyncState\(\)/.test(hyd[1]), 'backup hydration must also reconcile sync state');
-    // And hydration of sync state is itself gated.
+    // 1G.4C-FIX: marker hydration must be READ-ONLY and FLAG-INDEPENDENT. The
+    // runtime KTP_REAL_SYNC_* flags reset on reload; gating hydration on them lost
+    // the synced baseRevision after an accepted apply (idle/0 bug). The only guard
+    // is the active workspace; detection inside remains push-flag-gated.
     var hs = _rendererSrc.match(/function _hydrateSyncState\(\)\s*\{([\s\S]*?)\n\}/);
-    assert(hs && /!_realSyncPushEnabled\(\)/.test(hs[1]), '_hydrateSyncState must be gated by the flag');
+    assert(hs, '_hydrateSyncState body must be found');
+    assert(/^\s*if \(!WS_UI\.activeId\) return;/.test(hs[1]),
+      '_hydrateSyncState guard must be the active-workspace check only');
+    assert(!/!_realSyncPushEnabled\(\)\s*\|\|/.test(hs[1]),
+      '_hydrateSyncState must NOT gate marker hydration on the push flag');
   });
 
   test('1G.2 labels: truthful sync status keys exist and are distinct from backup', function() {
@@ -1695,6 +1702,187 @@ function register(test, assert, assertEqual) {
       'helper must be gated by the pull flag');
     assert(!/content|storage|snapshotHash|snapshot_hash|signedUrl|lease|device|token|checksum|JSON\.stringify/i.test(body),
       'helper must not expose content, storage paths, hashes, signed URLs, device ids, or lease tokens');
+  });
+
+  // ── 1G.4C clean-only accepted apply (explicit; destructive; gated) ───────────
+
+  function _applyBody() {
+    var m = _rendererSrc.match(/async function _applyPulledSnapshot\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(m, '_applyPulledSnapshot body must be found');
+    return m[1];
+  }
+
+  test('1G.4C apply: gated by pull flag first; blocks dirty / not-newer / in-flight', function() {
+    assert(/async function _applyPulledSnapshot\(\)/.test(_rendererSrc), '_applyPulledSnapshot must exist');
+    var body = _applyBody();
+    assert(/^\s*if\s*\(!_realSyncPullEnabled\(\)\)\s*return \{ ok: false, error: 'pull_disabled' \};/.test(body),
+      'first statement must be the pull-flag gate');
+    assert(/pendingHash != null\)\s*return \{ ok: false, error: 'blocked_dirty' \}/.test(body), 'dirty blocks apply');
+    assert(/cloudRevision <= SYNC_PUSH_UI\.baseRevision\) return \{ ok: false, error: 'not_newer' \}/.test(body), 'not-newer blocks');
+    assert(/pushInFlight\)\s*return \{ ok: false, error: 'blocked_push_in_flight' \}/.test(body), 'push-in-flight blocks');
+    assert(/pullInFlight\)\s*return \{ ok: false, error: 'blocked_pull_in_flight' \}/.test(body), 'pull-in-flight blocks');
+  });
+
+  test('1G.4C apply: re-checks clean immediately before the LSKEY write', function() {
+    var body = _applyBody();
+    assert(/_djb2Hash\(JSON\.stringify\(DATA\)\) !== preHash/.test(body),
+      'must re-verify DATA is unchanged right before writing');
+    var recheckIdx = body.indexOf('!== preHash');
+    var writeIdx   = body.indexOf('localStorage.setItem(LSKEY');
+    assert(recheckIdx >= 0 && writeIdx > recheckIdx, 'the re-check must precede the LSKEY write');
+  });
+
+  test('1G.4C apply: sync state advances ONLY after a successful LSKEY write', function() {
+    var body = _applyBody();
+    var writeIdx   = body.indexOf('localStorage.setItem(LSKEY');
+    var baseIdx    = body.indexOf('= res.revision');               // baseRevision assignment
+    var syncedIdx  = body.indexOf("= 'synced'");                   // state advance
+    assert(writeIdx >= 0, 'must write LSKEY');
+    assert(baseIdx > writeIdx, 'baseRevision must be set after the write');
+    assert(syncedIdx > writeIdx, 'state synced must be set after the write');
+    // The ok===true guard must precede the write (no write on failure).
+    var okGuardIdx = body.indexOf('res.ok !== true');
+    assert(okGuardIdx >= 0 && okGuardIdx < writeIdx, 'failure guard must precede the write');
+  });
+
+  test('1G.4C apply: workspace-stamp discards a stale-workspace apply', function() {
+    var body = _applyBody();
+    assert(/var reqWorkspaceId  = WS_UI\.activeId/.test(body), 'must stamp the request workspace');
+    assert(/WS_UI\.activeId !== reqWorkspaceId\) \{ SYNC_PUSH_UI\.pullInFlight = false; return \{ ok: false, error: 'stale_workspace' \}/.test(body),
+      'must discard a stale-workspace apply with no write');
+  });
+
+  test('1G.4C apply: never auto-triggered (not called from detection/preflight)', function() {
+    assert(!/_applyPulledSnapshot\(/.test(_detectBody()), 'detection must never call apply');
+    assert(!/_applyPulledSnapshot\(/.test(_preflightBody()), 'preflight must never call apply');
+    // focus/online listeners only schedule detection, never apply.
+    assert(!/addEventListener\('(focus|online)'[^)]*_applyPulledSnapshot/.test(_rendererSrc),
+      'focus/online must not trigger apply');
+  });
+
+  test('1G.4C manual helper: __ktpApplyPulledSnapshot gated; returns no content/secrets', function() {
+    assert(/window\.__ktpApplyPulledSnapshot = function \(\)/.test(_rendererSrc), 'manual apply helper must exist');
+    var m = _rendererSrc.match(/window\.__ktpApplyPulledSnapshot = function \(\)\s*\{([\s\S]*?)\n  \};/);
+    assert(m, 'manual apply helper body must be found');
+    var body = m[1];
+    assert(/if \(!_realSyncPullEnabled\(\)\) return Promise\.resolve\(\{ enabled: false \}\);/.test(body),
+      'helper must be gated by the pull flag');
+    assert(!/rendererState|content|storage|snapshotHash|snapshot_hash|signedUrl|lease|device|token|checksum/i.test(body),
+      'helper must not expose content/state blob, storage paths, hashes, signed URLs, device ids, lease tokens');
+  });
+
+  test('1G.4C main: applyPulledSnapshot creates mandatory safety backup BEFORE returning content', function() {
+    var fs = require('fs'); var path = require('path');
+    var mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r/g, '');
+    var h = mainSrc.match(/ipcMain\.handle\('cloud:applyPulledSnapshot'[\s\S]*?\n  \}\);/);
+    assert(h, 'cloud:applyPulledSnapshot handler must exist');
+    var body = h[0];
+    assert(/pullSnapshotForApply/.test(body), 'must use the sync pull path (not backup restore)');
+    assert(/buildFullBackup\(preRestoreRendererState, null, 'pre-sync-pull'\)/.test(body), 'must build a local pre-sync-pull safety backup');
+    assert(/atomicWriteJSON\(/.test(body), 'safety backup must be written to disk');
+    assert(/error: 'safety_backup_failed'/.test(body), 'safety-backup failure must block apply');
+    // Ordering: safety backup precedes returning rendererState content.
+    var backupIdx = body.indexOf('buildFullBackup(');
+    var returnIdx = body.indexOf('rendererState:');
+    assert(backupIdx >= 0 && returnIdx > backupIdx, 'safety backup must precede the content return');
+    // Must NOT route sync through the emergency restore/apply path.
+    assert(!/_applyArchiveInternal|getCloudBackupContent|restoreFromCloud/.test(body),
+      'sync apply must not reuse Cloud Backup Apply / emergency restore');
+  });
+
+  test('1G.4C main: applyPulledSnapshot never logs snapshot content', function() {
+    var fs = require('fs'); var path = require('path');
+    var mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r/g, '');
+    var h = mainSrc.match(/ipcMain\.handle\('cloud:applyPulledSnapshot'[\s\S]*?\n  \}\);/);
+    assert(h, 'handler must exist');
+    var body = h[0];
+    // No log/console call may include the content/rendererState.
+    assert(!/log\([^)]*(pulled\.content|rendererState|preRestoreRendererState)/.test(body),
+      'must not log snapshot content or renderer state');
+    assert(!/console\.(log|error|warn)\([^)]*(content|rendererState)/.test(body),
+      'must not console-log content or renderer state');
+  });
+
+  // ── 1G.4C-FIX: post-apply reload must restore active workspace + synced state ──
+
+  test('1G.4C-fix: apply persists the sync marker BEFORE scheduling reload', function() {
+    var body = _applyBody();
+    var saveIdx   = body.indexOf('_saveSyncState()');
+    var reloadIdx = body.indexOf('location.reload');
+    assert(saveIdx >= 0, 'apply must persist the sync marker');
+    assert(reloadIdx >= 0, 'apply must schedule a reload on success');
+    assert(saveIdx < reloadIdx, '_saveSyncState() must run before the reload');
+  });
+
+  test('1G.4C-fix: apply does NOT clear the active workspace selection', function() {
+    var body = _applyBody();
+    assert(!/_wsSaveId\(\s*null\s*\)/.test(body), 'apply must not clear ktp_active_workspace_id');
+    assert(!/removeItem\(\s*'ktp_active_workspace_id'/.test(body), 'apply must not remove the active workspace key');
+    assert(!/WS_UI\.activeId\s*=\s*null/.test(body), 'apply must not null the active workspace');
+  });
+
+  test('1G.4C-fix: hydration reflects synced when local DATA matches the marker', function() {
+    var hs = _rendererSrc.match(/function _hydrateSyncState\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(hs, '_hydrateSyncState body must be found');
+    var body = hs[1];
+    assert(/_djb2Hash\(JSON\.stringify\(DATA\)\) === SYNC_PUSH_UI\.lastSyncedHash/.test(body),
+      'hydration must compare local DATA fingerprint to the synced hash');
+    var cmpIdx    = body.indexOf('=== SYNC_PUSH_UI.lastSyncedHash');
+    var syncedIdx = body.indexOf("= 'synced'");
+    assert(cmpIdx >= 0 && syncedIdx > cmpIdx, "synced must be set only inside the DATA-matches-marker branch");
+    // It must NOT blanket-set synced unconditionally.
+    var firstSynced = body.indexOf("'synced'");
+    assert(firstSynced > cmpIdx, "must not set synced before verifying the fingerprint match");
+  });
+
+  test('1G.4C-fix: sync marker stores only safe fields (no DATA/content/hash-of-secret)', function() {
+    var sv = _rendererSrc.match(/function _saveSyncState\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(sv, '_saveSyncState body must be found');
+    var body = sv[1];
+    // Allowed: workspaceId, baseRevision, lastSyncedHash (local change fingerprint), lastPushAt.
+    assert(/workspaceId:/.test(body) && /baseRevision:/.test(body), 'marker keys present');
+    assert(!/rendererState|JSON\.stringify\(DATA\)|content|storage_path|storagePath|snapshot_hash|snapshotHash|signedUrl|deviceId|device_id|leaseToken|lease_token|checksum/i.test(body),
+      'marker must not store DATA/content/storage path/snapshot hash/device id/lease token');
+  });
+
+  test('1G.4C-fix: apply helper returns activeId/activeRole/scheduledReload (safe)', function() {
+    var m = _rendererSrc.match(/window\.__ktpApplyPulledSnapshot = function \(\)\s*\{([\s\S]*?)\n  \};/);
+    assert(m, 'apply helper body must be found');
+    var body = m[1];
+    assert(/activeId:\s*WS_UI\.activeId/.test(body), 'helper must report active workspace restoration');
+    assert(/activeRole:\s*WS_UI\.activeRole/.test(body), 'helper must report active role');
+    assert(/scheduledReload:/.test(body), 'helper must report whether a reload was scheduled');
+  });
+
+  test('1G.4C-fix: apply preserves local login identity + workspace linkage (no lockout)', function() {
+    var body = _applyBody();
+    assert(/_incoming\.users\s*=\s*_localPrev\.users/.test(body),
+      'apply must preserve local users (avoid PIN lockout from another device)');
+    assert(/_incoming\.workspaceId\s*=\s*_localPrev\.workspaceId/.test(body),
+      'apply must preserve local DATA.workspaceId (keep cloud workspace linkage)');
+    // The merged string is what gets written and fingerprinted.
+    assert(/localStorage\.setItem\(LSKEY,\s*_applyStr\)/.test(body), 'LSKEY write must use the merged string');
+    assert(/SYNC_PUSH_UI\.lastSyncedHash\s*=\s*_djb2Hash\(_applyStr\)/.test(body),
+      'lastSyncedHash must fingerprint the merged local state actually written');
+    // Merge must sit AFTER the clean re-check and BEFORE the write.
+    var recheckIdx = body.indexOf('!== preHash');
+    var mergeIdx   = body.indexOf('_incoming.users');
+    var writeIdx   = body.indexOf('localStorage.setItem(LSKEY');
+    assert(recheckIdx >= 0 && mergeIdx > recheckIdx && writeIdx > mergeIdx,
+      'order must be: clean re-check → merge → write');
+  });
+
+  test('1G.4C-fix: apply does not depend on snapshot DATA.workspaceId for workspace restore', function() {
+    // Active workspace selection is the separate ktp_active_workspace_id key; the
+    // applied snapshot DATA.workspaceId (a LOCAL id from the pushing device) is
+    // preserved as the local value and never used to pick the cloud workspace.
+    var body = _applyBody();
+    assert(!/ktp_active_workspace_id/.test(body), 'apply must not touch the active-workspace key');
+    var restore = _rendererSrc.match(/async function wsRestore\(\)([\s\S]*?)\n\}/);
+    if (restore) {
+      assert(/_wsReadSavedId\(\)/.test(restore[1]), 'wsRestore must restore by the saved cloud workspace id');
+      assert(!/DATA\.workspaceId/.test(restore[1]), 'wsRestore must NOT key on local DATA.workspaceId');
+    }
   });
 
   // ── 1F.6C UX polish: render order + reload behavior ─────────────────────────

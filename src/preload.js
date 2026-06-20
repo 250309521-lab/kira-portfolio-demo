@@ -107,4 +107,5 @@ contextBridge.exposeInMainWorld('cloudSyncPush', {
 // off, independent of push). Exposed as 'cloudSyncPull' (no legacy collision).
 contextBridge.exposeInMainWorld('cloudSyncPull', {
   preflightPullSnapshot:            (payload) => ipcRenderer.invoke('cloud:preflightPullSnapshot', payload),
+  applyPulledSnapshot:              (payload) => ipcRenderer.invoke('cloud:applyPulledSnapshot', payload),
 });

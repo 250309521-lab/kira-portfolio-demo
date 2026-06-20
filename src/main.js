@@ -17,6 +17,7 @@ const crypto = require('crypto');
 const { getMachineFingerprint } = require('./machine-id');
 const { verifyLicenseJson }     = require('./license-verifier');
 const cloudBackupModule         = require('./cloud/cloud-backup');
+const cloudSyncModule           = require('./cloud/cloud-sync');
 
 const IS_DEV = process.argv.includes('--dev') || !app.isPackaged;
 const APP_VER = app.getVersion();
@@ -814,6 +815,62 @@ function setupIPC() {
       };
     } catch (err) {
       log('ERROR', 'Cloud backup apply failed', { error: err.message });
+      return { ok: false, error: 'apply_failed' };
+    }
+  });
+
+  // ── cloud:applyPulledSnapshot (1G.4C) — clean-only accepted SYNC apply ───────
+  // SEPARATE from Cloud Backup Apply (emergency restore). Downloads + validates
+  // the latest sync snapshot (content stays in main), creates a MANDATORY local
+  // safety backup of the current renderer state, then returns the validated DATA
+  // content for the renderer to write to localStorage. It applies DATA ONLY —
+  // never mainStore, never the .ktpbackup archive path, never owner-only/dual-
+  // confirm. Clean-state + explicit-accept gating is enforced in the renderer;
+  // this handler additionally guarantees the safety backup precedes any content
+  // hand-off. Content/storage_path/snapshot_hash are NEVER logged.
+  ipcMain.handle('cloud:applyPulledSnapshot', async (_, payload) => {
+    if (!licenseGuard().ok) return { ok: false, error: 'license_required' };
+    try {
+      const { workspaceId, baseRevision, preRestoreRendererState } = payload || {};
+      if (!workspaceId || typeof workspaceId !== 'string') return { ok: false, error: 'invalid_input' };
+      if (typeof baseRevision !== 'number' || !isFinite(baseRevision) ||
+          baseRevision < 0 || Math.floor(baseRevision) !== baseRevision) return { ok: false, error: 'invalid_input' };
+      if (!preRestoreRendererState || typeof preRestoreRendererState !== 'string') {
+        return { ok: false, error: 'pre_restore_state_required' };
+      }
+
+      // 1) Download + validate the target snapshot (content held in main only).
+      const pulled = await cloudSyncModule.pullSnapshotForApply({ workspaceId, baseRevision });
+      if (!pulled.ok) return { ok: false, error: pulled.error };
+      if (typeof pulled.content !== 'string' || !pulled.content) return { ok: false, error: 'apply_failed' };
+
+      // 2) MANDATORY local safety backup BEFORE any content is handed to the
+      //    renderer. Failure blocks the apply (no content returned → no write).
+      //    Uses the local backup-file mechanism — NOT Cloud Backup Apply/restore.
+      try {
+        if (!store) initDatabase();
+        saveStore();
+        const preArchive = buildFullBackup(preRestoreRendererState, null, 'pre-sync-pull');
+        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const prePath = path.join(BACKUP_DIR, `backup-${ts}-pre-sync-pull.ktpbackup`);
+        atomicWriteJSON(prePath, preArchive);
+        log('INFO', 'Pre-sync-pull safety backup created', { path: prePath });
+      } catch (e) {
+        log('WARN', 'Pre-sync-pull safety backup failed — blocking apply', { error: e.message });
+        return { ok: false, error: 'safety_backup_failed' };
+      }
+
+      // 3) Narrow accepted-apply exception: return validated DATA content for the
+      //    renderer localStorage write. No storage_path/hash/url/device id/content log.
+      return {
+        ok:                  true,
+        revision:            pulled.revision,
+        byteSize:            pulled.byteSize,
+        safetyBackupCreated: true,
+        rendererState:       pulled.content,   // validated sync DATA — renderer LSKEY write only
+      };
+    } catch (err) {
+      log('ERROR', 'Cloud sync apply failed', { error: err.message });
       return { ok: false, error: 'apply_failed' };
     }
   });
