@@ -1581,6 +1581,7 @@ async function runB3Tests() {
   // ── Cloud Backup readiness/preflight (CLOUD-FOUNDATION-1F.4A) ─────────────
   await _cloudBackupTest.registerAsync(testAsync, assert, assertEqual);
   await _cloudBackupIpcTest.registerAsync(testAsync, assert, assertEqual);
+  await _cloudSyncTest.registerAsync(testAsync, assert, assertEqual);
 
   // ── Preload Bridge (CLOUD-FOUNDATION-1E.4) ────────────────────────────────
   await _preloadTest.registerAsync(testAsync, assert, assertEqual);
@@ -1781,6 +1782,10 @@ _cloudBackupTest.register(test, assert, assertEqual);
 
 var _cloudBackupIpcTest = require('./cloud-backup-ipc.test.js');
 _cloudBackupIpcTest.register(test, assert, assertEqual);
+
+// ── Cloud Sync auto-push CAS (CLOUD-FOUNDATION-1G.2) ──────────────────────────
+var _cloudSyncTest = require('./cloud-sync.test.js');
+_cloudSyncTest.register(test, assert, assertEqual);
 
 // ── Preload Bridge (CLOUD-FOUNDATION-1E.4) ────────────────────────────────────
 var _preloadTest = require('./preload.test.js');

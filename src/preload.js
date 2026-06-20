@@ -90,3 +90,13 @@ contextBridge.exposeInMainWorld('cloudBackup', {
   downloadBackupToFile:             (payload) => ipcRenderer.invoke('cloud:downloadBackupToFile', payload),
   createAutoBackup:                 (payload) => ipcRenderer.invoke('cloud:createAutoBackup', payload),
 });
+
+// ── Real Sync: auto-push whole-workspace snapshot with CAS (CLOUD-FOUNDATION-1G.2) ──
+// Separate from cloud backup. Push-only in 1G.2 (no pull/apply). Renderer
+// auto-push is gated behind window.KTP_REAL_SYNC_PUSH_ENABLED (default off).
+// NOTE: exposed as 'cloudSyncPush' (NOT 'cloudSync') — the renderer already has a
+// legacy top-level `function cloudSync()`; a non-configurable global named
+// 'cloudSync' would collide with it and break the whole renderer script parse.
+contextBridge.exposeInMainWorld('cloudSyncPush', {
+  pushWorkspaceSnapshot:            (payload) => ipcRenderer.invoke('cloud:pushWorkspaceSnapshot', payload),
+});

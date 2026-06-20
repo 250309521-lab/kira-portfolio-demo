@@ -861,6 +861,21 @@ function setupIPC() {
     },
   });
 
+  // ── Real Sync: auto-push whole-workspace snapshot with CAS (CLOUD-FOUNDATION-1G.2) ──
+  // SEPARATE from cloud backup. Pushes the serialized whole-workspace snapshot to
+  // ktp-snapshots with compare-and-swap. byteSize + sha256 + device id + app
+  // version are computed/resolved here in main; the renderer only sends the
+  // serialized state, workspace id, and its base revision. Default-OFF in the
+  // renderer (window.KTP_REAL_SYNC_PUSH_ENABLED) — this handler is inert until
+  // the renderer auto-push is enabled. Never pulls, applies, or touches backup.
+  require('./cloud/cloud-sync-ipc').register(ipcMain, licenseGuard, log, {
+    getDeviceId: function() {
+      try { return require('./cloud/cloud-workspace').getOrCreateDeviceId(); }
+      catch (_) { return null; }
+    },
+    appVersion: APP_VER,
+  });
+
   ipcMain.on('titlebar:setColor', (_, opts) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.setTitleBarOverlay({ height: 52, ...opts });

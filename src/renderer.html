@@ -5115,6 +5115,14 @@ var STRINGS={
     wsSyncLocalUnknown:'Yerel değişiklikler takip edilmiyor.',
     wsSyncLastChecked:'Son kontrol',
     wsSyncSnapshotLbl:'Son yedek anlık görüntüsü',
+    // 1G.2 real-sync status (truthful — distinct from backup labels)
+    syncIdle:'Eşitleme hazır',
+    syncSynced:'Eşitlendi',
+    syncSyncing:'Eşitleniyor…',
+    syncLocalPending:'Yerel değişiklikler bekliyor',
+    syncOffline:'Çevrimdışı — bağlanınca eşitlenecek',
+    syncCloudNewer:'Bulutta daha yeni değişiklikler var',
+    syncViewOnly:'Yalnızca görüntüleme (eşitleme izni yok)',
     wsRole_editor:'Editör',wsRole_viewer:'Görüntüleyici',
     wsBackupHdr:'Bulut Yedek',
     wsBackupChecking:'Hazırlık kontrol ediliyor…',
@@ -5680,6 +5688,14 @@ var STRINGS={
     wsSyncLocalUnknown:'Local changes not tracked yet.',
     wsSyncLastChecked:'Last checked',
     wsSyncSnapshotLbl:'Latest snapshot',
+    // 1G.2 real-sync status (truthful — distinct from backup labels)
+    syncIdle:'Sync ready',
+    syncSynced:'Synced',
+    syncSyncing:'Syncing…',
+    syncLocalPending:'Local changes pending',
+    syncOffline:'Offline — changes will sync when online',
+    syncCloudNewer:'Cloud has newer changes',
+    syncViewOnly:'View only (no sync permission)',
     wsRole_editor:'Editor',wsRole_viewer:'Viewer',
     wsBackupHdr:'Cloud Backup',
     wsBackupChecking:'Checking readiness…',
@@ -8320,6 +8336,9 @@ function _hydrateCloudBackupStatus() {
   // subsequent saveLocal() calls schedule normally. Releasing it here (and only
   // here) guarantees the scheduler never runs its fingerprint before hydration.
   _autoBackupBootGate = false;
+  // 1G.2: reconcile real-sync state from its marker now that the workspace is
+  // known (inert unless real sync is enabled). Separate from the backup marker.
+  try { _hydrateSyncState(); } catch (_) {}
   var saved = _loadCloudBkStatus();
   if (saved && saved.workspaceId === WS_UI.activeId && saved.lastUploadedHash) {
     AUTO_BACKUP_UI.lastUploadedHash = saved.lastUploadedHash;
@@ -8462,6 +8481,190 @@ function _persistSelectedMonth() {
       window.electron.setSetting('selected_month', S.month).catch(function () {});
     }
   } catch (_) {}
+}
+
+// ── Real Sync: auto-push state (CLOUD-FOUNDATION-1G.2) ───────────────────────
+// SEPARATE from cloud backup. This is the daily multi-device data flow: a real
+// DATA edit auto-pushes the whole-workspace snapshot to cloud with CAS. Push-only
+// in 1G.2 — NO auto-pull, NO auto-apply, NO conflict UI beyond a safe marker.
+//
+// DEFAULT OFF: every entry point below is a no-op unless the operator opts in via
+//   window.KTP_REAL_SYNC_PUSH_ENABLED = true
+// so this phase changes nothing at runtime until explicitly enabled for testing.
+// All state lives OUTSIDE DATA (localStorage marker) so it never changes the DATA
+// fingerprint — preserving the 1F.6C/1F.6D invariants.
+function _realSyncPushEnabled() {
+  return typeof window !== 'undefined' && !!window.KTP_REAL_SYNC_PUSH_ENABLED;
+}
+
+var SYNC_STATE_KEY = 'ktp_sync_state_v1';
+
+// In-memory sync state. baseRevision/lastSyncedHash also persisted to the marker.
+var SYNC_PUSH_UI = {
+  state:            'idle',  // 'idle'|'syncing'|'synced'|'local_pending'|'offline'|'cloud_newer'|'view_only'|'error'
+  baseRevision:     0,       // cloud revision this local state was last reconciled to
+  lastSyncedHash:   null,    // fingerprint of last successfully pushed state
+  pendingHash:      null,    // fingerprint of changed state awaiting push
+  pushInFlight:     false,
+  lastPushAt:       null,
+  lastErrorCategory:null,
+  retryAt:          null,
+  cloudRevision:    null,    // last known server revision (set on stale CAS)
+};
+var _autoSyncPushTimer = null;
+var _autoSyncRetryTimer = null;
+var AUTO_SYNC_DEBOUNCE_MS = 3000;          // quiet period after an edit before push
+var AUTO_SYNC_RETRY_MS    = 30 * 1000;     // backoff after network/lock failure
+
+function _syncBridge() {
+  // Bridge is exposed as window.cloudSyncPush (NOT cloudSync) — a global named
+  // 'cloudSync' would collide with the legacy top-level function cloudSync().
+  return (typeof window !== 'undefined' && window.cloudSyncPush && typeof window.cloudSyncPush.pushWorkspaceSnapshot === 'function')
+    ? window.cloudSyncPush : null;
+}
+
+function _loadSyncState() {
+  try { var raw = localStorage.getItem(SYNC_STATE_KEY); return raw ? JSON.parse(raw) : null; }
+  catch (_) { return null; }
+}
+function _saveSyncState() {
+  if (!WS_UI.activeId) return;
+  try {
+    localStorage.setItem(SYNC_STATE_KEY, JSON.stringify({
+      workspaceId:    WS_UI.activeId,
+      baseRevision:   SYNC_PUSH_UI.baseRevision,
+      lastSyncedHash: SYNC_PUSH_UI.lastSyncedHash,
+      lastPushAt:     SYNC_PUSH_UI.lastPushAt,
+    }));
+  } catch (_) {}
+}
+
+// Reconcile in-memory sync state from the marker once the workspace is known.
+// Called from _hydrateCloudBackupStatus(). Inert unless real sync is enabled.
+function _hydrateSyncState() {
+  if (!_realSyncPushEnabled() || !WS_UI.activeId) return;
+  var saved = _loadSyncState();
+  if (saved && saved.workspaceId === WS_UI.activeId) {
+    SYNC_PUSH_UI.baseRevision   = (typeof saved.baseRevision === 'number') ? saved.baseRevision : 0;
+    SYNC_PUSH_UI.lastSyncedHash = saved.lastSyncedHash || null;
+    SYNC_PUSH_UI.lastPushAt     = saved.lastPushAt || null;
+  } else {
+    // Different/absent workspace — reset to a safe base. base 0 can only be
+    // rejected (stale) by CAS, never overwrite, so this is non-destructive.
+    SYNC_PUSH_UI.baseRevision   = 0;
+    SYNC_PUSH_UI.lastSyncedHash = null;
+  }
+}
+
+// Called from saveLocal() ONLY when serialized DATA actually changed (1F.6D gate).
+// Marks the workspace dirty and schedules a debounced push. Inert when disabled.
+function _markSyncDirty(serialized) {
+  if (!_realSyncPushEnabled()) return;
+  if (!WS_UI.activeId) return;
+  var hash = _djb2Hash(typeof serialized === 'string' ? serialized : JSON.stringify(DATA));
+  if (hash === SYNC_PUSH_UI.lastSyncedHash) return; // already synced this state
+  SYNC_PUSH_UI.pendingHash = hash;
+  if (SYNC_PUSH_UI.state !== 'cloud_newer' && SYNC_PUSH_UI.state !== 'view_only') {
+    SYNC_PUSH_UI.state = 'local_pending';
+  }
+  _scheduleAutoSyncPush();
+}
+
+function _scheduleAutoSyncPush() {
+  if (!_realSyncPushEnabled()) return;
+  if (SYNC_PUSH_UI.pushInFlight) return;
+  if (_autoSyncPushTimer) clearTimeout(_autoSyncPushTimer);
+  _autoSyncPushTimer = setTimeout(wsAutoSyncPushTick, AUTO_SYNC_DEBOUNCE_MS);
+}
+
+// Performs the actual CAS push. NEVER pulls, NEVER applies, NEVER overwrites DATA.
+async function wsAutoSyncPushTick() {
+  _autoSyncPushTimer = null;
+  if (!_realSyncPushEnabled()) return;
+  var bridge = _syncBridge();
+  if (!bridge) return;
+  if (!WS_UI.activeId) return;
+  if (SYNC_PUSH_UI.pushInFlight) return;
+
+  // Viewer cannot push — display view-only, never attempt a write.
+  if (WS_UI.activeRole === 'viewer') { SYNC_PUSH_UI.state = 'view_only'; return; }
+
+  var ser = JSON.stringify(DATA);
+  var hash = _djb2Hash(ser);
+  if (hash === SYNC_PUSH_UI.lastSyncedHash) { SYNC_PUSH_UI.state = 'synced'; SYNC_PUSH_UI.pendingHash = null; return; }
+
+  SYNC_PUSH_UI.pushInFlight = true;
+  SYNC_PUSH_UI.state = 'syncing';
+  var res;
+  try {
+    res = await bridge.pushWorkspaceSnapshot({
+      workspaceId:  WS_UI.activeId,
+      baseRevision: SYNC_PUSH_UI.baseRevision,
+      rendererState: ser,
+    });
+  } catch (_) {
+    res = { ok: false, error: 'network_error' };
+  }
+  SYNC_PUSH_UI.pushInFlight = false;
+
+  if (res && res.ok === true) {
+    SYNC_PUSH_UI.baseRevision     = (typeof res.newRevision === 'number') ? res.newRevision : (SYNC_PUSH_UI.baseRevision + 1);
+    SYNC_PUSH_UI.lastSyncedHash   = hash;
+    SYNC_PUSH_UI.pendingHash      = null;
+    SYNC_PUSH_UI.lastPushAt       = res.pushedAt || new Date().toISOString();
+    SYNC_PUSH_UI.lastErrorCategory = null;
+    SYNC_PUSH_UI.cloudRevision    = SYNC_PUSH_UI.baseRevision;
+    // If DATA changed again during the push, schedule another round.
+    SYNC_PUSH_UI.state = (_djb2Hash(JSON.stringify(DATA)) === hash) ? 'synced' : 'local_pending';
+    _saveSyncState();
+    if (SYNC_PUSH_UI.state === 'local_pending') _scheduleAutoSyncPush();
+    return;
+  }
+
+  var err = (res && res.error) || 'unknown_error';
+  SYNC_PUSH_UI.lastErrorCategory = err;
+  if (err === 'stale_revision') {
+    // Another device advanced the revision. NON-DESTRUCTIVE: do NOT pull/overwrite.
+    // Record that cloud is newer; real reconciliation is 1G.4/1G.5.
+    if (typeof res.currentRevision === 'number') SYNC_PUSH_UI.cloudRevision = res.currentRevision;
+    SYNC_PUSH_UI.state = 'cloud_newer';
+    return;
+  }
+  if (err === 'permission_denied') { SYNC_PUSH_UI.state = 'view_only'; return; }
+  if (err === 'locked' || err === 'lock_lost' || err === 'lock_failed') {
+    SYNC_PUSH_UI.state = 'local_pending';
+    _scheduleAutoSyncRetry();
+    return;
+  }
+  if (err === 'network_error' || err === 'not_authenticated' || err === 'license_required') {
+    SYNC_PUSH_UI.state = 'offline';
+    _scheduleAutoSyncRetry();
+    return;
+  }
+  // Any other category — keep changes, retry later, never lose data.
+  SYNC_PUSH_UI.state = 'local_pending';
+  _scheduleAutoSyncRetry();
+}
+
+function _scheduleAutoSyncRetry() {
+  if (!_realSyncPushEnabled()) return;
+  SYNC_PUSH_UI.retryAt = Date.now() + AUTO_SYNC_RETRY_MS;
+  if (_autoSyncRetryTimer) clearTimeout(_autoSyncRetryTimer);
+  _autoSyncRetryTimer = setTimeout(function () { _autoSyncRetryTimer = null; wsAutoSyncPushTick(); }, AUTO_SYNC_RETRY_MS);
+}
+
+// Truthful status text key for the current sync state (used by future sync UX).
+// Returns an i18n key, never raw data. Backup labels are intentionally distinct.
+function _syncStatusKey() {
+  switch (SYNC_PUSH_UI.state) {
+    case 'synced':        return 'syncSynced';
+    case 'syncing':       return 'syncSyncing';
+    case 'local_pending': return 'syncLocalPending';
+    case 'offline':       return 'syncOffline';
+    case 'cloud_newer':   return 'syncCloudNewer';
+    case 'view_only':     return 'syncViewOnly';
+    default:              return 'syncIdle';
+  }
 }
 
 // Called from saveLocal() — fingerprints the current state and schedules a
@@ -13754,6 +13957,10 @@ try{(function(){
     if(_changed){
       try { _abLog('saveLocal hook'); _scheduleAutoCloudBackup(typeof _ser === 'string' ? _ser : undefined); }
       catch(_abHookErr) { console.warn('[auto-backup] hook error', _abHookErr && _abHookErr.message); }
+      // 1G.2 real-sync dirty hook — inert unless KTP_REAL_SYNC_PUSH_ENABLED.
+      // Isolated try/catch so the sync path can never break a local save.
+      try { _markSyncDirty(typeof _ser === 'string' ? _ser : undefined); }
+      catch(_syncHookErr) { /* real-sync hook is best-effort, never throws into save */ }
     }
     _perfEnd('saveLocal', _t0);
   };

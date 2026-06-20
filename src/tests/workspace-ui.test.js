@@ -1344,6 +1344,133 @@ function register(test, assert, assertEqual) {
       'profiler stats must not capture DATA, tenants, payments, tokens, or rendererState');
   });
 
+  // ── 1G.2 real-sync auto-push (renderer state machine, default OFF) ───────────
+
+  test('1G.2 flag: real sync is gated behind KTP_REAL_SYNC_PUSH_ENABLED (default off)', function() {
+    assert(/function _realSyncPushEnabled\(\)/.test(_rendererSrc), '_realSyncPushEnabled gate must exist');
+    var fn = _rendererSrc.match(/function _realSyncPushEnabled\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(fn, '_realSyncPushEnabled body must be found');
+    assert(/KTP_REAL_SYNC_PUSH_ENABLED/.test(fn[1]), 'gate must read window.KTP_REAL_SYNC_PUSH_ENABLED');
+  });
+
+  test('1G.2 marker: ktp_sync_state_v1 is separate from DATA and the backup marker', function() {
+    assert(/SYNC_STATE_KEY\s*=\s*'ktp_sync_state_v1'/.test(_rendererSrc), 'sync state marker key must exist');
+    assert(_rendererSrc.indexOf("'ktp_sync_state_v1'") !== _rendererSrc.indexOf("'ktp_cloud_backup_status_v1'"),
+      'sync marker must be distinct from the backup marker');
+    // Marker is written only inside _saveSyncState.
+    var writes = (_rendererSrc.match(/localStorage\.setItem\(SYNC_STATE_KEY/g) || []).length;
+    assert(writes === 1, 'SYNC_STATE_KEY must be written in exactly one place (_saveSyncState)');
+  });
+
+  test('1G.2 inert: _markSyncDirty / _scheduleAutoSyncPush no-op when disabled', function() {
+    var md = _rendererSrc.match(/function _markSyncDirty\(serialized\)\s*\{([\s\S]*?)\n\}/);
+    assert(md, '_markSyncDirty body must be found');
+    assert(/^\s*if\s*\(!_realSyncPushEnabled\(\)\)\s*return;/.test(md[1]),
+      '_markSyncDirty must return immediately when real sync is disabled');
+    var sp = _rendererSrc.match(/function _scheduleAutoSyncPush\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(sp, '_scheduleAutoSyncPush body must be found');
+    assert(/if\s*\(!_realSyncPushEnabled\(\)\)\s*return;/.test(sp[1]),
+      '_scheduleAutoSyncPush must return when disabled');
+  });
+
+  test('1G.2 saveLocal: dirty hook fires only inside the _changed branch', function() {
+    var save = _rendererSrc.match(/window\.saveLocal = saveLocal = function\(\)\{([\s\S]*?)\n  \};/);
+    assert(save, 'active saveLocal override must be found');
+    var body = save[1];
+    var schedIdx = body.indexOf('_markSyncDirty(');
+    var guardIdx = body.lastIndexOf('if(_changed)', schedIdx);
+    assert(schedIdx >= 0, 'saveLocal must call _markSyncDirty');
+    assert(guardIdx >= 0 && guardIdx < schedIdx, '_markSyncDirty must be inside the _changed guard');
+  });
+
+  test('1G.2 viewer: auto-push tick never pushes for a viewer role', function() {
+    var tick = _rendererSrc.match(/async function wsAutoSyncPushTick\(\)([\s\S]*?)\n\}/);
+    assert(tick, 'wsAutoSyncPushTick body must be found');
+    var body = tick[1];
+    assert(/WS_UI\.activeRole === 'viewer'/.test(body), 'tick must detect viewer role');
+    var viewerIdx = body.indexOf("activeRole === 'viewer'");
+    var pushIdx   = body.indexOf('pushWorkspaceSnapshot');
+    assert(viewerIdx >= 0 && pushIdx > viewerIdx, 'viewer check must precede the push call');
+  });
+
+  test('1G.2 push-only: sync tick has NO auto-pull / auto-apply / reload', function() {
+    var tick = _rendererSrc.match(/async function wsAutoSyncPushTick\(\)([\s\S]*?)\n\}/);
+    assert(tick, 'wsAutoSyncPushTick body must be found');
+    var body = tick[1];
+    assert(!/location\.reload/.test(body), 'sync tick must not reload');
+    assert(!/restoreBackupFromCloud|restoreFullBackup|_applyArchive/.test(body), 'sync tick must not restore/apply');
+    assert(!/\bDATA\s*=/.test(body), 'sync tick must never overwrite DATA');
+  });
+
+  test('1G.2 stale: CAS stale marks cloud_newer and does NOT overwrite locally', function() {
+    var tick = _rendererSrc.match(/async function wsAutoSyncPushTick\(\)([\s\S]*?)\n\}/);
+    assert(tick, 'wsAutoSyncPushTick body must be found');
+    var body = tick[1];
+    assert(/stale_revision/.test(body), 'tick must handle stale_revision');
+    var staleIdx = body.indexOf('stale_revision');
+    var seg = body.slice(staleIdx, staleIdx + 400);
+    assert(/cloud_newer/.test(seg), 'stale must set cloud_newer state');
+  });
+
+  test('1G.2 hydrate: _hydrateSyncState is invoked from _hydrateCloudBackupStatus', function() {
+    var hyd = _rendererSrc.match(/function _hydrateCloudBackupStatus\(\)([\s\S]*?)\n\}/);
+    assert(hyd, '_hydrateCloudBackupStatus body must be found');
+    assert(/_hydrateSyncState\(\)/.test(hyd[1]), 'backup hydration must also reconcile sync state');
+    // And hydration of sync state is itself gated.
+    var hs = _rendererSrc.match(/function _hydrateSyncState\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(hs && /!_realSyncPushEnabled\(\)/.test(hs[1]), '_hydrateSyncState must be gated by the flag');
+  });
+
+  test('1G.2 labels: truthful sync status keys exist and are distinct from backup', function() {
+    ['syncSynced', 'syncSyncing', 'syncLocalPending', 'syncOffline', 'syncCloudNewer', 'syncViewOnly'].forEach(function(k) {
+      assert(new RegExp(k + ':').test(_rendererSrc), 'sync label ' + k + ' must exist');
+    });
+    // No "Sync now" control is introduced in this phase.
+    assert(!/Sync now|Şimdi senkron/i.test(_rendererSrc), 'no "Sync now" control in 1G.2');
+  });
+
+  // ── 1G.2 collision guard: preload globals must not clash with renderer code ──
+  // Regression for the "Identifier 'cloudSync' has already been declared" boot
+  // crash: contextBridge.exposeInMainWorld('NAME', ...) defines a non-configurable
+  // GLOBAL named NAME. A renderer top-level `function NAME()` / `const NAME` then
+  // fails to declare, breaking the entire renderer script parse. syntax-check
+  // can't catch this (it parses the renderer JS without the injected globals).
+
+  test('1G.2 collision: renderer has no duplicate top-level cloudSync lexical declaration', function() {
+    // At most one `function cloudSync` and NO const/let/var/class cloudSync.
+    var fnDecls = (_rendererSrc.match(/(?:^|\n)\s*(?:async\s+)?function\s+cloudSync\s*\(/g) || []).length;
+    assert(fnDecls <= 1, 'there must be at most one top-level function cloudSync (found ' + fnDecls + ')');
+    assert(!/(?:^|\n)\s*(?:const|let|var|class)\s+cloudSync\b/.test(_rendererSrc),
+      'renderer must not also declare const/let/var/class cloudSync alongside function cloudSync');
+  });
+
+  test('1G.2 collision: no preload-exposed global collides with a renderer top-level function', function() {
+    var fs = require('fs'); var path = require('path');
+    var preloadSrc = fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8').replace(/\r/g, '');
+    var names = [];
+    var re = /exposeInMainWorld\(\s*'([A-Za-z0-9_]+)'/g, m;
+    while ((m = re.exec(preloadSrc)) !== null) names.push(m[1]);
+    assert(names.length >= 4, 'expected several exposed bridges, found ' + names.length);
+    names.forEach(function(name) {
+      var fnRe  = new RegExp('(?:^|\\n)\\s*(?:async\\s+)?function\\s+' + name + '\\s*\\(');
+      var lexRe = new RegExp('(?:^|\\n)\\s*(?:const|let|class)\\s+' + name + '\\b');
+      assert(!fnRe.test(_rendererSrc),
+        "exposed global '" + name + "' collides with a renderer top-level function " + name + "()");
+      assert(!lexRe.test(_rendererSrc),
+        "exposed global '" + name + "' collides with a renderer top-level const/let/class " + name);
+    });
+  });
+
+  test('1G.2 collision: real-sync bridge is exposed as cloudSyncPush (not cloudSync)', function() {
+    var fs = require('fs'); var path = require('path');
+    var preloadSrc = fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8');
+    assert(/exposeInMainWorld\(\s*'cloudSyncPush'/.test(preloadSrc), 'bridge must be exposed as cloudSyncPush');
+    assert(!/exposeInMainWorld\(\s*'cloudSync'\s*,/.test(preloadSrc), "bridge must NOT be exposed as 'cloudSync'");
+    // Renderer reads the renamed global, never window.cloudSync.
+    assert(/window\.cloudSyncPush/.test(_rendererSrc), 'renderer must read window.cloudSyncPush');
+    assert(!/window\.cloudSync\b/.test(_rendererSrc), 'renderer must not read window.cloudSync');
+  });
+
   // ── 1F.6C UX polish: render order + reload behavior ─────────────────────────
 
   test('1F.6C render: wsConfirmManualBackup calls renderAutoBackupIndicator before renderWorkspaceCard', function() {
@@ -1804,7 +1931,7 @@ function register(test, assert, assertEqual) {
       '_scheduleAutoCloudBackup must be defined');
     // The active saveLocal HOTFIX uses setSetting('selected_month') — unique to it.
     // The 1F.4F hook must appear within a small window after that call.
-    assert(/setSetting\('selected_month'[\s\S]{0,800}_scheduleAutoCloudBackup\(/.test(_rendererSrc),
+    assert(/setSetting\('selected_month'[\s\S]{0,1400}_scheduleAutoCloudBackup\(/.test(_rendererSrc),
       '_scheduleAutoCloudBackup hook must be present after setSetting in the active saveLocal');
   });
 
