@@ -6770,6 +6770,7 @@ function goto(page,bld){
 }
 
 function updateBadges(){
+  var _ub0 = (typeof _perfStart==='function') ? _perfStart() : 0;
   BK.forEach(b=>{
     const cnt=(DATA.tenants[b]||[]).filter(t=>{
       if(!t.active||t.rent===0) return false;
@@ -6778,6 +6779,7 @@ function updateBadges(){
     const el=document.getElementById('bdg-'+bldDomId(b));
     if(el){el.textContent=cnt;el.style.display=cnt?'':'none';}
   });
+  if (typeof _perfEnd==='function') _perfEnd('updateBadges', _ub0);
 }
 
 // Toggle status filter; same key → clear filter
@@ -6965,7 +6967,7 @@ function render(){
   c.innerHTML=(pages[S.page]||renderDash)();
   if(S.page==='charts') initCharts();
   if(S.page==='viz') initViz();
-  if(DATA.settings.autoSave) saveLocal();
+  if(DATA.settings.autoSave) _persistSelectedMonth(); // 1F.6D: render is view-only — no full DATA serialize/write on navigation
 }
 
 // ═══════════════════════════════════════════════
@@ -8313,12 +8315,18 @@ function _loadCloudBkStatus() {
 // If the fingerprint genuinely differs, it lets the normal scheduler set pending.
 function _hydrateCloudBackupStatus() {
   if (!WS_UI.activeId) return;
+  _perfMark('hydrateCloudBackupStatus:start');
+  // 1F.6D: the workspace is now known — open the boot gate so this and all
+  // subsequent saveLocal() calls schedule normally. Releasing it here (and only
+  // here) guarantees the scheduler never runs its fingerprint before hydration.
+  _autoBackupBootGate = false;
   var saved = _loadCloudBkStatus();
   if (saved && saved.workspaceId === WS_UI.activeId && saved.lastUploadedHash) {
     AUTO_BACKUP_UI.lastUploadedHash = saved.lastUploadedHash;
     AUTO_BACKUP_UI.lastSuccessAt    = saved.lastSuccessAt || null;
   }
-  var hash = _djb2Hash(JSON.stringify(DATA));
+  var _ser = JSON.stringify(DATA);
+  var hash = _djb2Hash(_ser);
   if (AUTO_BACKUP_UI.lastUploadedHash && hash === AUTO_BACKUP_UI.lastUploadedHash) {
     // Current DATA already matches the last uploaded backup — clear any false pending
     // that the boot render() may have set before the workspace was known.
@@ -8333,10 +8341,11 @@ function _hydrateCloudBackupStatus() {
     // No marker or DATA genuinely changed since last upload — real pending is allowed.
     // Re-run the scheduler now that activeId is known so pending is set correctly.
     _abLog('hydrate: data differs or no marker — scheduling');
-    _scheduleAutoCloudBackup();
+    _scheduleAutoCloudBackup(_ser);
   }
   renderAutoBackupIndicator();
   renderWorkspaceCard();
+  _perfMark('hydrateCloudBackupStatus:end');
 }
 
 // ── Automatic cloud backup state (CLOUD-FOUNDATION-1F.4F) ───────────────────
@@ -8361,14 +8370,26 @@ var AUTO_BACKUP_UI = {
 };
 var _autoBackupDebounceTimer = null; // fires after debounce period (data-change gate)
 var _autoBackupRetryTimer    = null; // fires after failure retry period or online fast-retry
+// ── Startup responsiveness (CLOUD-FOUNDATION-1F.6D) ──────────────────────────
+// Boot gate: the auto-backup scheduler runs the (relatively expensive)
+// JSON.stringify(DATA) + djb2 fingerprint on every saveLocal(). During the boot
+// login→render burst, saveLocal() can fire several times BEFORE the workspace is
+// known, blocking the main thread and forcing pointless fingerprinting that the
+// deterministic hydration then has to undo. While this gate is true the scheduler
+// is a cheap no-op; _hydrateCloudBackupStatus() releases it once the workspace
+// is actually known (the only point at which a real backup decision is possible).
+// This also strengthens the 1F.6C fix: no false 'pending' can be set pre-hydration.
+var _autoBackupBootGate = true;
 var AUTO_BACKUP_DEBOUNCE_MS  = 3 * 60 * 1000; // 3 min quiet period before upload
 var AUTO_BACKUP_RETRY_MS     = 5 * 60 * 1000; // 5 min backoff after network failure
 var AUTO_BACKUP_ONLINE_MS    =          5000;  // 5 s fast retry when connectivity returns
 
 // Lightweight djb2-style fingerprint — not cryptographic, just change detection.
 function _djb2Hash(str) {
+  var _dh0 = (typeof _perfStart==='function') ? _perfStart() : 0;
   var h = 5381;
   for (var i = 0; i < str.length; i++) { h = ((h << 5) + h) + str.charCodeAt(i); h = h & h; }
+  if (typeof _perfEnd==='function') _perfEnd('_djb2Hash', _dh0);
   return h.toString(36);
 }
 
@@ -8384,6 +8405,65 @@ function _abLog(msg, extra) {
   else console.log('[auto-backup]', msg);
 }
 
+// ── Boot performance marks (CLOUD-FOUNDATION-1F.6D diagnostics) ──────────────
+// SILENT BY DEFAULT — enable with:  window.__KTP_BOOT_PERF = true
+// Logs ONLY a label and a millisecond delta. Never logs DATA, hashes, or secrets.
+var _perfLast = 0;
+function _perfMark(label) {
+  if (!window.__KTP_BOOT_PERF || typeof performance === 'undefined') return;
+  var now = performance.now();
+  var delta = _perfLast ? (now - _perfLast) : 0;
+  _perfLast = now;
+  console.log('[boot-perf] ' + label + '  +' + delta.toFixed(1) + 'ms');
+}
+
+// ── Runtime profiler (CLOUD-FOUNDATION-1F.6D diagnostics) ────────────────────
+// SILENT BY DEFAULT — enable with:  window.__KTP_PERF_DEBUG = true
+// Aggregates per-label {count, total ms, worst ms}. Logs ONLY the label, timing
+// and call counts. NEVER records DATA, tenants, payments, paths, hashes, tokens.
+// Dump a table any time with:  window.__ktpPerfReport()    reset: __ktpPerfReset()
+var _PERF_STATS = {};
+function _perfStart() {
+  if (!window.__KTP_PERF_DEBUG || typeof performance === 'undefined') return 0;
+  return performance.now();
+}
+function _perfEnd(label, t0) {
+  if (!t0 || !window.__KTP_PERF_DEBUG || typeof performance === 'undefined') return;
+  var d = performance.now() - t0;
+  var s = _PERF_STATS[label] || (_PERF_STATS[label] = { count: 0, total: 0, worst: 0 });
+  s.count++; s.total += d; if (d > s.worst) s.worst = d;
+}
+if (typeof window !== 'undefined') {
+  window.__ktpPerfReport = function () {
+    var rows = Object.keys(_PERF_STATS).map(function (k) {
+      var s = _PERF_STATS[k];
+      return { label: k, count: s.count, avgMs: +(s.total / s.count).toFixed(2), worstMs: +s.worst.toFixed(2), totalMs: +s.total.toFixed(1) };
+    }).sort(function (a, b) { return b.totalMs - a.totalMs; });
+    if (console.table) console.table(rows); else console.log(rows);
+    return rows;
+  };
+  window.__ktpPerfReset = function () { _PERF_STATS = {}; };
+}
+
+// ── Persistence change-gate (CLOUD-FOUNDATION-1F.6D) ─────────────────────────
+// The serialized snapshot last written to localStorage. saveLocal() compares the
+// current serialization against this and SKIPS the (expensive, synchronous)
+// localStorage write + auto-backup scheduling when nothing actually changed —
+// which is the common case for pure view navigation and the 30s auto-save tick.
+var _lastPersistedSer = null;
+
+// Cheap per-navigation persistence: render() must NOT rewrite the whole DATA blob
+// (that synchronous serialize + localStorage write on every section/month switch
+// was the runtime freeze). It only needs to remember the selected month, which is
+// a tiny IPC setting. Real DATA mutations persist via their own saveLocal() calls.
+function _persistSelectedMonth() {
+  try {
+    if (typeof window.electron !== 'undefined' && window.electron && window.electron.isElectron && typeof S !== 'undefined' && S && S.month) {
+      window.electron.setSetting('selected_month', S.month).catch(function () {});
+    }
+  } catch (_) {}
+}
+
 // Called from saveLocal() — fingerprints the current state and schedules a
 // debounced backup ONLY when the fingerprint differs from the last uploaded hash.
 //
@@ -8394,11 +8474,18 @@ function _abLog(msg, extra) {
 //
 //   The 30-second auto-save timer does NOT reset the debounce while DATA is unchanged
 //   (hash === pendingHash guard).
-function _scheduleAutoCloudBackup() {
+function _scheduleAutoCloudBackup(_preSerialized) {
   // Only skip if the cloud bridge doesn't exist at all (cloud not configured).
   // Auth and workspace checks are deferred to wsAutoBackupTick() so state
   // transitions that occur after app startup are handled correctly.
   if (!_backupBridge()) { _abLog('skip: no bridge'); return; }
+
+  // 1F.6D: Boot responsiveness gate. Until the workspace is known and the
+  // deterministic hydration has run, do NOT serialize+fingerprint the renderer
+  // state — it blocks the boot render burst and can only produce a false
+  // 'pending' that hydration must undo. _hydrateCloudBackupStatus() opens this
+  // gate (and itself schedules) once a real backup decision is possible.
+  if (_autoBackupBootGate) { _abLog('skip: boot gate'); return; }
 
   // Hydrate lastUploadedHash from the persistent marker on first call after startup.
   // AUTO_BACKUP_UI is memory-only; without this, every reload marks data as pending
@@ -8412,7 +8499,9 @@ function _scheduleAutoCloudBackup() {
     }
   }
 
-  var hash = _djb2Hash(JSON.stringify(DATA));
+  // Reuse the serialized DATA string from the caller (saveLocal already builds it
+  // for localStorage) so the boot/steady-state path serializes DATA once, not twice.
+  var hash = _djb2Hash(typeof _preSerialized === 'string' ? _preSerialized : JSON.stringify(DATA));
   _abLog('schedule called', { hash: hash, pendingHash: AUTO_BACKUP_UI.pendingHash, lastUploadedHash: AUTO_BACKUP_UI.lastUploadedHash, state: AUTO_BACKUP_UI.state });
 
   // Already uploaded this exact state — nothing to do.
@@ -10440,6 +10529,7 @@ function makeEditable(el, onSave){
 // AUTO-RECALCULATE ACCOUNTING
 // ═══════════════════════════════════════════════
 function autoRecalc(){
+  var _ar0 = (typeof _perfStart==='function') ? _perfStart() : 0;
   // Recalc alper rows from actual data
   Object.keys(DATA.mgmt).forEach(mo=>{
     const a=DATA.mgmt[mo];
@@ -10467,6 +10557,7 @@ function autoRecalc(){
     d.net = (d.col||0) - (d.exp||0);
     d.eur = (d.kur&&d.kur>0) ? d.net/d.kur : 0;
   });
+  if (typeof _perfEnd==='function') _perfEnd('autoRecalc', _ar0);
 }
 
 // ═══════════════════════════════════════════════
@@ -11563,7 +11654,7 @@ function render(){
   if(S.page==='charts') initCharts();
   if(S.page==='viz') initViz();
   if(S.page==='analytics') setTimeout(initAnalyticsCharts,100);
-  if(DATA.settings.autoSave) saveLocal();
+  if(DATA.settings.autoSave) _persistSelectedMonth(); // 1F.6D: render is view-only — no full DATA serialize/write on navigation
   // Scroll active month button into view
   setTimeout(()=>{
     const active=document.querySelector('.mbtn.active');
@@ -13460,7 +13551,7 @@ function render(){
     const active=document.querySelector('.mbtn.active');
     if(active) active.scrollIntoView({behavior:'instant',block:'nearest',inline:'center'});
   },30);
-  if(DATA.settings?.autoSave) saveLocal();
+  if(DATA.settings?.autoSave) _persistSelectedMonth(); // 1F.6D: render is view-only — no full DATA serialize/write on navigation
 }
 
 // ── Electron bridge status ────────────────────────────────────────────────────
@@ -13519,6 +13610,7 @@ try{(function(){
   };
 
   window.render = render = function(){
+    var _rt0 = _perfStart();
     const c = document.getElementById('content');
     if(!c) return;
     if(S.page==='bld' && S.bld && !(DATA.buildings||[]).some(b=>b.id===S.bld&&b.active)){
@@ -13535,7 +13627,9 @@ try{(function(){
       viz:renderViz, analytics: (typeof renderAnalytics==='function'?renderAnalytics:renderCharts),
       bld:()=>renderBld(S.bld)
     };
+    var _pt0 = _perfStart();
     c.innerHTML = safePage(pages[S.page] || renderDash);
+    _perfEnd('renderPage:' + S.page, _pt0);
     const _dpb=document.getElementById('btn-dash-prefs'); if(_dpb) _dpb.style.display=S.page==='dash'?'':'none';
     try { if(S.page==='charts') initCharts(); } catch(e){ console.error(e); }
     try { if(S.page==='viz') initViz(); } catch(e){ console.error(e); }
@@ -13544,10 +13638,15 @@ try{(function(){
       const active=document.querySelector('.mbtn.active');
       if(active) active.scrollIntoView({behavior:'instant',block:'nearest',inline:'nearest'});
     },30);
-    try { if(DATA.settings && DATA.settings.autoSave) saveLocal(); } catch(e){ console.error(e); }
+    // 1F.6D: render is view-only. Persist ONLY the selected month (cheap IPC) — do
+    // NOT serialize+write the whole DATA blob on every navigation (that was the lag).
+    // Real DATA mutations persist through their own explicit save calls.
+    try { if(DATA.settings && DATA.settings.autoSave) _persistSelectedMonth(); } catch(e){ console.error(e); }
+    _perfEnd('render', _rt0);
   };
 
   window.initApp = initApp = function(){
+    _perfMark('initApp:start');
     if(!currentUser){
       const users = DATA.users && DATA.users.length ? DATA.users : DEFAULT_USERS;
       currentUser = users.find(u=>u.role==='admin') || users[0] || {name:'Admin',role:'admin',avatar:'A',color:'#4a8af4'};
@@ -13570,11 +13669,14 @@ try{(function(){
     try { addAboutToSidebar && addAboutToSidebar(); } catch(e){}
     try { renderBuildingNav(); } catch(e){ console.error('[renderBuildingNav]',e); }
     __boot('initApp.render');
+    _perfMark('initApp:beforeFirstRender');
     try { render(); } catch(e){ console.error('[initApp] render failed',e); }
+    _perfMark('initApp:afterFirstRender');
     try { updateBadges(); } catch(e){}
     if(!DATA.history?.length) try{ addHist('Giriş yapıldı'); }catch(e){}
     if(typeof window.__BOOT_WATCHDOG__!=='undefined') clearTimeout(window.__BOOT_WATCHDOG__);
     __boot('initApp.done');
+    _perfMark('initApp:done(interactive)');
     if(isElectron && typeof restoreElectronState==='function'){
       restoreElectronState().then(function(){
         try{ render(); }catch(e){}
@@ -13610,11 +13712,29 @@ try{(function(){
 ═══════════════════════════════════════════════════════ */
 try{(function(){
   window.saveLocal = saveLocal = function(){
+    var _t0 = _perfStart();
+    // 1F.6D: serialize DATA exactly once and reuse it for both the localStorage
+    // write and the auto-backup fingerprint (previously each call stringified
+    // DATA twice — a measurable cost on every save, including the boot burst).
+    var _ser;
+    var _changed = true;
     try{
-      localStorage.setItem(LSKEY, JSON.stringify(DATA));
-      const t=new Date();
-      const lbl=document.getElementById('save-lbl');
-      if(lbl){ lbl.textContent=`${window.t('saved')} ${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}`; lbl.style.color=''; }
+      var _ts0 = _perfStart();
+      _ser = JSON.stringify(DATA);
+      _perfEnd('serialize:DATA', _ts0);
+      // 1F.6D change-gate: if the serialized state is byte-identical to what we
+      // last persisted, skip the synchronous localStorage write entirely. This is
+      // the common case for redundant saves (pure navigation, 30s tick with no edit).
+      _changed = (_ser !== _lastPersistedSer);
+      if(_changed){
+        var _tw0 = _perfStart();
+        localStorage.setItem(LSKEY, _ser);
+        _perfEnd('localStorage.setItem(LSKEY)', _tw0);
+        _lastPersistedSer = _ser;
+        const t=new Date();
+        const lbl=document.getElementById('save-lbl');
+        if(lbl){ lbl.textContent=`${window.t('saved')} ${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}`; lbl.style.color=''; }
+      }
       if(typeof window.electron!=='undefined' && window.electron && window.electron.isElectron && S && S.month){
         window.electron.setSetting('selected_month', S.month).catch(()=>{});
       }
@@ -13628,8 +13748,14 @@ try{(function(){
     // 1F.4F: auto cloud backup hook — isolated try/catch, never breaks local save.
     // Runs unconditionally so the scheduler sees data changes regardless of
     // CLOUD_UI state, WS_UI.activeId, or whether the cloud/Advanced UI is open.
-    try { _abLog('saveLocal hook'); _scheduleAutoCloudBackup(); }
-    catch(_abHookErr) { console.warn('[auto-backup] hook error', _abHookErr && _abHookErr.message); }
+    // (Gated as a cheap no-op during boot — see _autoBackupBootGate.)
+    // 1F.6D: only schedule when the serialized state actually changed — an unchanged
+    // save can never need a new cloud backup, and the scheduler would no-op anyway.
+    if(_changed){
+      try { _abLog('saveLocal hook'); _scheduleAutoCloudBackup(typeof _ser === 'string' ? _ser : undefined); }
+      catch(_abHookErr) { console.warn('[auto-backup] hook error', _abHookErr && _abHookErr.message); }
+    }
+    _perfEnd('saveLocal', _t0);
   };
 
   window.addHist = addHist = function(desc){

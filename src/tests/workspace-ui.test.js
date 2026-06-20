@@ -1002,7 +1002,7 @@ function register(test, assert, assertEqual) {
 
   test('1F.6C persist: _scheduleAutoCloudBackup hydrates from localStorage before first hash comparison', function() {
     // Use a loose match since async function wsAutoBackupTick follows after whitespace/comments
-    var schedFn = _rendererSrc.match(/function _scheduleAutoCloudBackup\(\)([\s\S]{0,3000})/);
+    var schedFn = _rendererSrc.match(/function _scheduleAutoCloudBackup\([^)]*\)([\s\S]{0,3800})/);
     assert(schedFn, '_scheduleAutoCloudBackup body must be found');
     schedFn[1] = schedFn[1].slice(0, schedFn[1].indexOf('async function wsAutoBackupTick') || schedFn[1].length);
     var body = schedFn[1];
@@ -1098,9 +1098,10 @@ function register(test, assert, assertEqual) {
       'must clear pendingHash when DATA matches marker');
     assert(/AUTO_BACKUP_UI\.state\s*=\s*'ok'/.test(body),
       'must set state=ok when DATA matches marker');
-    // Comparison uses _djb2Hash(JSON.stringify(DATA)) — same algorithm as scheduler
-    assert(/_djb2Hash\(JSON\.stringify\(DATA\)\)/.test(body),
-      'must compute fingerprint with same algorithm as scheduler');
+    // Comparison fingerprints JSON.stringify(DATA) via _djb2Hash — same algorithm as
+    // scheduler. 1F.6D serializes once into _ser and reuses it for the hash.
+    assert(/JSON\.stringify\(DATA\)/.test(body) && /_djb2Hash\(\s*_ser\s*\)/.test(body),
+      'must compute fingerprint from JSON.stringify(DATA) with same algorithm as scheduler');
     // Must verify workspaceId matches the saved marker
     assert(/saved\.workspaceId\s*===\s*WS_UI\.activeId/.test(body),
       'must verify marker workspaceId matches active workspace');
@@ -1111,7 +1112,7 @@ function register(test, assert, assertEqual) {
     assert(hydFn, '_hydrateCloudBackupStatus body must be found');
     var body = hydFn[1];
     // When data differs, it calls the scheduler (which sets real pending) — does NOT force ok
-    assert(/_scheduleAutoCloudBackup\(\)/.test(body),
+    assert(/_scheduleAutoCloudBackup\(/.test(body),
       'must call scheduler when DATA differs (real pending allowed)');
   });
 
@@ -1124,7 +1125,7 @@ function register(test, assert, assertEqual) {
   });
 
   test('1F.6C scheduler: early-return clears stale false-pending when hash matches uploaded', function() {
-    var schedFn = _rendererSrc.match(/function _scheduleAutoCloudBackup\(\)([\s\S]{0,3500})/);
+    var schedFn = _rendererSrc.match(/function _scheduleAutoCloudBackup\([^)]*\)([\s\S]{0,3800})/);
     assert(schedFn, '_scheduleAutoCloudBackup must be found');
     var body = schedFn[1].slice(0, schedFn[1].indexOf('async function wsAutoBackupTick'));
     // The hash===lastUploadedHash branch must clear pending and set ok
@@ -1159,6 +1160,188 @@ function register(test, assert, assertEqual) {
       'warn CSS class must be used for pending/uploading states');
     assert(/\.ws-status-dot\.warn/.test(_rendererSrc),
       'ws-status-dot.warn CSS variant must be defined');
+  });
+
+  // ── 1F.6D startup responsiveness + reload hydration hardening ───────────────
+
+  test('1F.6D boot-gate: _autoBackupBootGate is declared and starts true', function() {
+    assert(/var _autoBackupBootGate\s*=\s*true/.test(_rendererSrc),
+      '_autoBackupBootGate must be declared and initialized true so boot saveLocal() does not fingerprint DATA');
+  });
+
+  test('1F.6D boot-gate: scheduler returns early on the gate BEFORE serializing/fingerprinting DATA', function() {
+    var schedFn = _rendererSrc.match(/function _scheduleAutoCloudBackup\([^)]*\)([\s\S]{0,3800})/);
+    assert(schedFn, '_scheduleAutoCloudBackup must be found');
+    var body = schedFn[1].slice(0, schedFn[1].indexOf('async function wsAutoBackupTick'));
+    var gateIdx = body.indexOf('_autoBackupBootGate');
+    var hashIdx = body.indexOf('_djb2Hash(');
+    var stringifyIdx = body.indexOf('JSON.stringify(DATA)');
+    assert(gateIdx >= 0, 'scheduler must check _autoBackupBootGate');
+    assert(/if\s*\(\s*_autoBackupBootGate\s*\)\s*\{[^}]*return/.test(body.replace(/\n/g, ' ')),
+      'scheduler must return early while the boot gate is set');
+    assert(hashIdx > gateIdx, 'gate check must occur before the _djb2Hash fingerprint (no boot-time hashing)');
+    assert(stringifyIdx === -1 || stringifyIdx > gateIdx,
+      'gate check must occur before any JSON.stringify(DATA) fallback');
+  });
+
+  test('1F.6D boot-gate: scheduler accepts and reuses a pre-serialized DATA string', function() {
+    // Signature carries an optional pre-serialized string and uses it instead of
+    // re-stringifying DATA (single serialization per saveLocal).
+    assert(/function _scheduleAutoCloudBackup\(_preSerialized\)/.test(_rendererSrc),
+      'scheduler must accept a _preSerialized parameter');
+    assert(/_djb2Hash\(typeof _preSerialized === 'string' \? _preSerialized : JSON\.stringify\(DATA\)\)/.test(_rendererSrc),
+      'scheduler must reuse _preSerialized when provided, else serialize DATA itself');
+  });
+
+  test('1F.6D single-serialize: active saveLocal serializes DATA once and passes it to the scheduler', function() {
+    // Extract the active HOTFIX saveLocal (the one using setSetting selected_month).
+    var save = _rendererSrc.match(/window\.saveLocal = saveLocal = function\(\)\{([\s\S]*?)\n  \};/);
+    assert(save, 'active saveLocal override must be found');
+    var body = save[1];
+    // Exactly one JSON.stringify(DATA) in the active saveLocal (was previously two).
+    var serCount = (body.match(/JSON\.stringify\(DATA\)/g) || []).length;
+    assert(serCount === 1, 'active saveLocal must serialize DATA exactly once (got ' + serCount + ')');
+    assert(/localStorage\.setItem\(LSKEY,\s*_ser\)/.test(body),
+      'localStorage write must reuse the single serialized string');
+    assert(/_scheduleAutoCloudBackup\(typeof _ser === 'string' \? _ser : undefined\)/.test(body),
+      'saveLocal must pass the serialized string to the scheduler');
+  });
+
+  test('1F.6D boot-gate: gate is released ONLY in _hydrateCloudBackupStatus, after the activeId guard', function() {
+    // The gate must open exactly once, and only when the workspace is known — never
+    // blindly elsewhere (which would re-introduce false pending before hydration).
+    var releaseCount = (_rendererSrc.match(/_autoBackupBootGate\s*=\s*false/g) || []).length;
+    assert(releaseCount === 1, 'boot gate must be released exactly once (got ' + releaseCount + ')');
+    var hydFn = _rendererSrc.match(/function _hydrateCloudBackupStatus\(\)([\s\S]*?)\n\}/);
+    assert(hydFn, '_hydrateCloudBackupStatus body must be found');
+    var body = hydFn[1];
+    var guardIdx   = body.indexOf('if (!WS_UI.activeId) return');
+    var releaseIdx = body.indexOf('_autoBackupBootGate = false');
+    assert(guardIdx >= 0, 'hydrate must keep the activeId guard');
+    assert(releaseIdx > guardIdx, 'gate must be released only AFTER the activeId guard (workspace known)');
+  });
+
+  test('1F.6D boot-gate: does not weaken Apply — gate release does not clear pending blindly', function() {
+    // Releasing the gate must not by itself null pendingHash; pending is only cleared
+    // when the DATA fingerprint matches the marker (existing reconciliation path).
+    var hydFn = _rendererSrc.match(/function _hydrateCloudBackupStatus\(\)([\s\S]*?)\n\}/);
+    assert(hydFn, '_hydrateCloudBackupStatus body must be found');
+    var body = hydFn[1];
+    var releaseIdx = body.indexOf('_autoBackupBootGate = false');
+    var matchBranchIdx = body.indexOf('hash === AUTO_BACKUP_UI.lastUploadedHash');
+    var clearIdx = body.indexOf('AUTO_BACKUP_UI.pendingHash   = null');
+    assert(matchBranchIdx > releaseIdx, 'fingerprint comparison must still gate the pending clear');
+    assert(clearIdx > matchBranchIdx, 'pendingHash is cleared only inside the hash-matches-marker branch');
+  });
+
+  test('1F.6D perf marks: gated behind __KTP_BOOT_PERF and never log DATA/hashes/secrets', function() {
+    assert(/function _perfMark\(label\)/.test(_rendererSrc), '_perfMark instrumentation must exist');
+    var pf = _rendererSrc.match(/function _perfMark\(label\)\s*\{([\s\S]*?)\n\}/);
+    assert(pf, '_perfMark body must be found');
+    var body = pf[1];
+    assert(/if\s*\(!window\.__KTP_BOOT_PERF/.test(body),
+      '_perfMark must be silent unless __KTP_BOOT_PERF is enabled');
+    // Must only log a label + a millisecond delta — never DATA/hashes/tokens.
+    assert(!/JSON\.stringify|DATA|AUTO_BACKUP_UI|token|hash|rendererState/.test(body),
+      '_perfMark must never reference DATA, hashes, tokens, or backup state');
+  });
+
+  test('1F.6D regression: real DATA edits still schedule after the gate opens', function() {
+    // After hydration opens the gate, the unchanged debounce/pending machinery still
+    // applies — the scheduler still records pendingHash for changed fingerprints.
+    var schedFn = _rendererSrc.match(/function _scheduleAutoCloudBackup\([^)]*\)([\s\S]{0,3800})/);
+    assert(schedFn, '_scheduleAutoCloudBackup must be found');
+    var body = schedFn[1].slice(0, schedFn[1].indexOf('async function wsAutoBackupTick'));
+    assert(/AUTO_BACKUP_UI\.pendingHash = hash/.test(body),
+      'scheduler must still record a new pendingHash for changed DATA');
+    assert(/setTimeout\(wsAutoBackupTick, AUTO_BACKUP_DEBOUNCE_MS\)/.test(body),
+      'scheduler must still arm the debounce timer for changed DATA');
+  });
+
+  // ── 1F.6D runtime navigation hardening (render is view-only) ────────────────
+
+  test('1F.6D render-decouple: active render override does NOT call full saveLocal()', function() {
+    var rfn = _rendererSrc.match(/window\.render = render = function\(\)\{([\s\S]*?)\n  \};/);
+    assert(rfn, 'active render override must be found');
+    var body = rfn[1];
+    assert(!/[^_a-zA-Z]saveLocal\(/.test(body),
+      'render must NOT call saveLocal() — navigation must not serialize+write the whole DATA blob');
+    assert(/_persistSelectedMonth\(\)/.test(body),
+      'render must persist only the selected month (cheap IPC) instead of saveLocal()');
+  });
+
+  test('1F.6D render-decouple: no render tail still calls full saveLocal for autoSave', function() {
+    // None of the render definitions may keep the old "autoSave) saveLocal()" tail.
+    assert(!/autoSave\)\s*saveLocal\(\)/.test(_rendererSrc),
+      'no render function may persist the whole DATA blob on the autoSave path');
+    assert(!/autoSave\)\s*\{\s*saveLocal\(\)/.test(_rendererSrc),
+      'no render function may persist the whole DATA blob on the autoSave path');
+  });
+
+  test('1F.6D persist-helper: _persistSelectedMonth is cheap — no DATA serialize or LSKEY write', function() {
+    assert(/function _persistSelectedMonth\(\)/.test(_rendererSrc),
+      '_persistSelectedMonth must be defined');
+    var pf = _rendererSrc.match(/function _persistSelectedMonth\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(pf, '_persistSelectedMonth body must be found');
+    var body = pf[1];
+    assert(/setSetting\('selected_month'/.test(body),
+      '_persistSelectedMonth must persist the selected month setting');
+    assert(!/JSON\.stringify/.test(body), '_persistSelectedMonth must NOT serialize DATA');
+    assert(!/localStorage\.setItem/.test(body), '_persistSelectedMonth must NOT write localStorage DATA');
+  });
+
+  test('1F.6D change-gate: saveLocal skips localStorage write when serialized DATA is unchanged', function() {
+    assert(/var _lastPersistedSer\s*=\s*null/.test(_rendererSrc),
+      '_lastPersistedSer cache must be declared (starts null so the first save always writes)');
+    var save = _rendererSrc.match(/window\.saveLocal = saveLocal = function\(\)\{([\s\S]*?)\n  \};/);
+    assert(save, 'active saveLocal override must be found');
+    var body = save[1];
+    // The write must be gated by a change comparison against the cache.
+    assert(/_changed\s*=\s*\(_ser !== _lastPersistedSer\)/.test(body),
+      'saveLocal must compute _changed by comparing serialized DATA to the cache');
+    var changedIdx = body.indexOf('if(_changed)');
+    var writeIdx   = body.indexOf('localStorage.setItem(LSKEY');
+    assert(changedIdx >= 0 && writeIdx > changedIdx,
+      'localStorage write must be inside the _changed guard');
+    // Cache is updated only after a real write.
+    assert(/_lastPersistedSer = _ser/.test(body),
+      'saveLocal must update the cache after a write');
+  });
+
+  test('1F.6D change-gate: saveLocal schedules auto-backup only when DATA changed', function() {
+    var save = _rendererSrc.match(/window\.saveLocal = saveLocal = function\(\)\{([\s\S]*?)\n  \};/);
+    assert(save, 'active saveLocal override must be found');
+    var body = save[1];
+    var schedIdx   = body.indexOf('_scheduleAutoCloudBackup(');
+    // Find the LAST _changed guard that wraps the scheduler call.
+    var guardIdx   = body.lastIndexOf('if(_changed)', schedIdx);
+    assert(schedIdx >= 0 && guardIdx >= 0 && guardIdx < schedIdx,
+      'auto-backup scheduling must be guarded by _changed (no schedule on unchanged save)');
+  });
+
+  test('1F.6D regression: saveLocal still schedules + persists on a real (changed) save', function() {
+    var save = _rendererSrc.match(/window\.saveLocal = saveLocal = function\(\)\{([\s\S]*?)\n  \};/);
+    assert(save, 'active saveLocal override must be found');
+    var body = save[1];
+    // The changed path must both write and schedule (auto-backup stays active after edits).
+    assert(/localStorage\.setItem\(LSKEY,\s*_ser\)/.test(body),
+      'changed save must write the serialized DATA to localStorage');
+    assert(/_scheduleAutoCloudBackup\(typeof _ser === 'string' \? _ser : undefined\)/.test(body),
+      'changed save must still schedule the auto cloud backup');
+  });
+
+  test('1F.6D profiler: runtime profiler is gated and never logs DATA/secrets', function() {
+    assert(/function _perfStart\(\)/.test(_rendererSrc), '_perfStart must exist');
+    assert(/function _perfEnd\(label, t0\)/.test(_rendererSrc), '_perfEnd must exist');
+    assert(/window\.__ktpPerfReport/.test(_rendererSrc), '__ktpPerfReport dump must exist');
+    // Both timers gate on __KTP_PERF_DEBUG.
+    var ps = _rendererSrc.match(/function _perfStart\(\)\s*\{([\s\S]*?)\n\}/);
+    var pe = _rendererSrc.match(/function _perfEnd\(label, t0\)\s*\{([\s\S]*?)\n\}/);
+    assert(ps && /__KTP_PERF_DEBUG/.test(ps[1]), '_perfStart must gate on __KTP_PERF_DEBUG');
+    assert(pe && /__KTP_PERF_DEBUG/.test(pe[1]), '_perfEnd must gate on __KTP_PERF_DEBUG');
+    // The aggregator stores only label/count/total/worst — never DATA or content.
+    assert(!/_PERF_STATS\[[^\]]*\]\s*=\s*\{[^}]*(DATA|tenant|payment|token|rendererState)/.test(_rendererSrc),
+      'profiler stats must not capture DATA, tenants, payments, tokens, or rendererState');
   });
 
   // ── 1F.6C UX polish: render order + reload behavior ─────────────────────────
@@ -1617,11 +1800,11 @@ function register(test, assert, assertEqual) {
   // ── 1F.4F: Automatic cloud backup checks ───────────────────────────────────
 
   test('1F.4F: _scheduleAutoCloudBackup is called from the active saveLocal (HOTFIX version)', function() {
-    assert(/_scheduleAutoCloudBackup\(\)/.test(_rendererSrc),
+    assert(/_scheduleAutoCloudBackup\(/.test(_rendererSrc),
       '_scheduleAutoCloudBackup must be defined');
     // The active saveLocal HOTFIX uses setSetting('selected_month') — unique to it.
     // The 1F.4F hook must appear within a small window after that call.
-    assert(/setSetting\('selected_month'[\s\S]{0,800}_scheduleAutoCloudBackup\(\)/.test(_rendererSrc),
+    assert(/setSetting\('selected_month'[\s\S]{0,800}_scheduleAutoCloudBackup\(/.test(_rendererSrc),
       '_scheduleAutoCloudBackup hook must be present after setSetting in the active saveLocal');
   });
 
@@ -1648,7 +1831,7 @@ function register(test, assert, assertEqual) {
     // ROOT CAUSE FIX: the scheduler must NOT require cloud auth state.
     // Auth checks happen in wsAutoBackupTick(), not in _scheduleAutoCloudBackup().
     // Extract scheduler body by stopping at the async tick function that follows it.
-    var schedFn = _rendererSrc.match(/function _scheduleAutoCloudBackup\(\)([\s\S]*?)async function wsAutoBackupTick/);
+    var schedFn = _rendererSrc.match(/function _scheduleAutoCloudBackup\([^)]*\)([\s\S]*?)async function wsAutoBackupTick/);
     assert(schedFn, '_scheduleAutoCloudBackup must be extractable before wsAutoBackupTick');
     var body = schedFn[1];
     // The scheduler body must not contain any CLOUD_UI reference
