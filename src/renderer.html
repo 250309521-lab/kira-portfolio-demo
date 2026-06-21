@@ -4108,6 +4108,7 @@ tbody tr[onclick] { cursor: pointer; }
 .ws-status-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
 .ws-status-dot.ok{background:var(--emerald);box-shadow:0 0 5px var(--emerald)}
 .ws-status-dot.warn{background:#f59e0b;box-shadow:0 0 4px rgba(245,158,11,.5)}
+.ws-status-dot.neutral{background:var(--i4);box-shadow:none}
 .ws-active-name-lbl{font-size:13px;font-weight:600;color:var(--i0);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ws-role-badge{display:inline-block;font-size:10px;font-weight:600;padding:2px 7px;border-radius:10px;background:rgba(99,102,241,.12);color:#818cf8;flex-shrink:0}
 .ws-role-badge[data-role="owner"]{background:rgba(245,158,11,.12);color:#f59e0b}
@@ -4115,6 +4116,10 @@ tbody tr[onclick] { cursor: pointer; }
 .ws-sync-note{font-size:10.5px;color:var(--i4);margin-top:5px}
 .ws-restored-note{font-size:10.5px;color:var(--amber);margin-top:2px;margin-bottom:2px}
 .ws-sync-status-section{margin-top:8px;padding-top:8px;border-top:1px solid var(--bd-1)}
+/* 1G.8A read-only Sync status section — visually separate from Cloud Backup */
+.ws-sync-section{margin-top:8px;padding:8px 10px;border:1px solid var(--bd-1);border-radius:8px;background:rgba(99,102,241,.04)}
+.ws-sx-status{display:flex;align-items:center;gap:6px;margin-top:4px}
+[data-theme="light"] .ws-sync-section{border-color:rgba(30,50,100,.12)!important;background:rgba(99,102,241,.05)!important}
 .ws-sync-status-hdr{display:flex;align-items:center;justify-content:space-between;gap:6px}
 .ws-sync-hdr-lbl{font-size:11px;font-weight:600;color:var(--i3);text-transform:uppercase;letter-spacing:.02em}
 .ws-sync-summary{font-size:11.5px;color:var(--i2);margin-top:4px}
@@ -5124,6 +5129,15 @@ var STRINGS={
     syncCloudNewer:'Bulutta daha yeni değişiklikler var',
     syncConflict:'Bu cihaz ve bulut ayrı ayrı değişti — yerel değişiklikleriniz korundu',
     syncViewOnly:'Yalnızca görüntüleme (eşitleme izni yok)',
+    // 1G.8A — read-only Sync status section (title + detail per state)
+    sxSyncHdr:'SENKRONİZASYON',
+    sxSyncedT:'Senkronize edildi',          sxSyncedD:'Çalışma alanınız güncel.',
+    sxPendingT:'Senkronizasyon bekliyor',   sxPendingD:'Yerel değişiklikleriniz otomatik olarak senkronize edilecek.',
+    sxCloudT:'Bulutta daha yeni bir sürüm var', sxCloudD:'Daha yeni bir bulut sürümü mevcut.',
+    sxConflictT:'Senkronizasyon çakışması', sxConflictD:'Bu cihazda ve bulutta farklı değişiklikler var. Hangi sürümü tutacağınızı seçin.',
+    sxViewT:'Sadece görüntüleme',           sxViewD:'Bu çalışma alanını görüntüleyebilirsiniz, ancak değişiklikleri senkronize edemezsiniz.',
+    sxPausedT:'Senkronizasyon duraklatıldı', sxPausedD:'Çevrimdışısınız veya buluta ulaşılamıyor. Yerel verileriniz güvende.',
+    sxSyncingT:'Senkronize ediliyor…',      sxSyncingD:'Senkronizasyon devam ediyor.',
     wsRole_editor:'Editör',wsRole_viewer:'Görüntüleyici',
     wsBackupHdr:'Bulut Yedek',
     wsBackupChecking:'Hazırlık kontrol ediliyor…',
@@ -5698,6 +5712,15 @@ var STRINGS={
     syncCloudNewer:'Cloud has newer changes',
     syncConflict:'This device and the cloud both changed — your local changes are kept',
     syncViewOnly:'View only (no sync permission)',
+    // 1G.8A — read-only Sync status section (title + detail per state)
+    sxSyncHdr:'SYNC',
+    sxSyncedT:'Synced',                  sxSyncedD:'Your workspace is up to date.',
+    sxPendingT:'Sync pending',           sxPendingD:'Your local changes will sync automatically.',
+    sxCloudT:'Cloud version available',  sxCloudD:'A newer cloud version is available.',
+    sxConflictT:'Sync conflict',         sxConflictD:'This device and the cloud both have changes. Choose which version to keep.',
+    sxViewT:'View only',                 sxViewD:'You can view this workspace, but cannot sync changes.',
+    sxPausedT:'Sync paused',             sxPausedD:'You’re offline or the cloud is unavailable. Your local data is safe.',
+    sxSyncingT:'Syncing…',          sxSyncingD:'Sync is in progress.',
     wsRole_editor:'Editor',wsRole_viewer:'Viewer',
     wsBackupHdr:'Cloud Backup',
     wsBackupChecking:'Checking readiness…',
@@ -8749,6 +8772,29 @@ function _syncStatusKey() {
   }
 }
 
+// ── 1G.8A: read-only Sync status section view-model ───────────────────────────
+// Pure mapping from SYNC_PUSH_UI.state to the plain-copy i18n keys + dot class.
+// READ-ONLY: no DATA/network/DOM access, no state mutation, no secrets. Returns
+// { show:false } when the section should be hidden (sync flags off, or an unsettled
+// 'idle' state). The dot is intentionally never aggressive red — local data is safe.
+function _syncSectionView() {
+  // Gate behind the existing real-sync flags. If neither push nor pull is enabled,
+  // sync is inert for this user → do not surface the section at all (1G.8A gating).
+  if (!_realSyncPushEnabled() && !_realSyncPullEnabled()) return { show: false };
+  switch (SYNC_PUSH_UI.state) {
+    case 'synced':        return { show: true, dot: 'ok',      titleKey: 'sxSyncedT',   detailKey: 'sxSyncedD' };
+    case 'local_pending': return { show: true, dot: 'warn',    titleKey: 'sxPendingT',  detailKey: 'sxPendingD' };
+    case 'syncing':       return { show: true, dot: 'warn',    titleKey: 'sxSyncingT',  detailKey: 'sxSyncingD' };
+    case 'cloud_newer':   return { show: true, dot: 'warn',    titleKey: 'sxCloudT',    detailKey: 'sxCloudD' };
+    case 'conflict':      return { show: true, dot: 'warn',    titleKey: 'sxConflictT', detailKey: 'sxConflictD' };
+    case 'view_only':     return { show: true, dot: 'neutral', titleKey: 'sxViewT',     detailKey: 'sxViewD' };
+    case 'offline':       return { show: true, dot: 'neutral', titleKey: 'sxPausedT',   detailKey: 'sxPausedD' };
+    case 'error':         return { show: true, dot: 'neutral', titleKey: 'sxPausedT',   detailKey: 'sxPausedD' };
+    // 'idle' (and any unknown) — real sync has not settled yet → hide (no churn).
+    default:              return { show: false };
+  }
+}
+
 // ── 1G.3: proactive detection of a newer cloud revision on other devices ─────
 // READ-ONLY. Compares the cloud workspace currentRevision (from the already-
 // sanitized getSyncStatus, which returns only currentRevision/lockFree/
@@ -10257,10 +10303,23 @@ function renderWorkspaceCard() {
         '</div>' +
         (WS_UI.restored ? '<div id="ws-restored-note" class="ws-restored-note"></div>' : '') +
         '<div id="ws-sync-note" class="ws-sync-note"></div>' +
-        // Sync Status section is not shown in the main panel (1F.5B).
-        // Real sync/apply is not yet implemented; labels like "not synced yet"
-        // and "local changes not tracked" would confuse normal users.
-        // wsRefreshSyncStatus() and SYNC_UI state remain available for future use.
+        // ── 1G.8A: read-only Sync status section ───────────────────────────────
+        // Visually SEPARATE from Cloud Backup below (own container/class/header).
+        // Read-only: status dot + title + detail. NO action buttons, NO apply/
+        // restore controls, NO backup history. Gated by _syncSectionView() (real
+        // sync flags); hidden entirely when sync is off or unsettled (idle).
+        (function () {
+          var _sv = _syncSectionView();
+          if (!_sv.show) return '';
+          return '<div class="ws-sync-section">' +
+            '<div class="ws-sync-status-hdr"><span id="ws-sx-hdr" class="ws-sync-hdr-lbl"></span></div>' +
+            '<div class="ws-sx-status">' +
+              '<div class="ws-status-dot ' + _sv.dot + '" id="ws-sx-dot"></div>' +
+              '<span id="ws-sx-title" class="ws-sync-summary"></span>' +
+            '</div>' +
+            '<div id="ws-sx-detail" class="ws-sync-detail"></div>' +
+          '</div>';
+        })() +
         // ── Cloud Backup — simplified main view + Advanced section (1F.4E) ──────
         '<div class="ws-sync-status-section ws-backup-section">' +
           '<div class="ws-sync-status-hdr"><span id="ws-backup-hdr" class="ws-sync-hdr-lbl"></span></div>' +
@@ -10458,7 +10517,13 @@ function renderWorkspaceCard() {
       if (_ar) { _ar.textContent = _wsRoleLabel(WS_UI.activeRole); _ar.dataset.role = WS_UI.activeRole || ''; }
       var _sn = document.getElementById('ws-sync-note'); if (_sn) _sn.textContent = t('wsSyncNote');
       if (WS_UI.restored) { var _rn = document.getElementById('ws-restored-note'); if (_rn) _rn.textContent = t('wsRestored'); }
-      // Sync Status elements removed in 1F.5B — no auto-trigger, no sync labels in main panel.
+      // ── 1G.8A: read-only Sync status text (all values via t()/textContent) ─────
+      var _sxv = _syncSectionView();
+      if (_sxv.show) {
+        var _sxh = document.getElementById('ws-sx-hdr');    if (_sxh) _sxh.textContent = t('sxSyncHdr');
+        var _sxt = document.getElementById('ws-sx-title');  if (_sxt) _sxt.textContent = t(_sxv.titleKey);
+        var _sxd = document.getElementById('ws-sx-detail'); if (_sxd) _sxd.textContent = t(_sxv.detailKey);
+      }
 
       // ── Cloud Backup — simplified + Advanced text (1F.4E) ─────────────────────
       var _bkh = document.getElementById('ws-backup-hdr'); if (_bkh) _bkh.textContent = t('wsBackupHdr');

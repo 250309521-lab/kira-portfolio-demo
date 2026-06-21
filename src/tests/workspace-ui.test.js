@@ -2285,6 +2285,102 @@ function register(test, assert, assertEqual) {
     assert(!/pushInFlight|pullInFlight/.test(body), 'marker must not persist in-flight flags');
   });
 
+  // ── 1G.8A read-only Sync status UI ───────────────────────────────────────────
+
+  // Markup region of the Sync status section: from its own container opening tag up
+  // to (but excluding) the Cloud Backup container. Used to prove it is self-contained
+  // + separate. Index-based (renderer.html is CRLF; greedy regex spanning the file is
+  // fragile, and "read-only Sync status section" also appears in a JS comment).
+  function _sxMarkup() {
+    var start = _rendererSrc.indexOf('class="ws-sync-section"');
+    var end   = _rendererSrc.indexOf('ws-sync-status-section ws-backup-section', start);
+    assert(start > -1 && end > start, '1G.8A Sync section markup region must be found');
+    return _rendererSrc.slice(start, end);
+  }
+  function _sxViewBody() {
+    var m = _rendererSrc.match(/function _syncSectionView\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(m, '_syncSectionView body must be found');
+    return m[1];
+  }
+
+  test('1G.8A: Sync section renders inside the workspace card before Cloud Backup', function() {
+    var sIdx = _rendererSrc.indexOf('class="ws-sync-section"');
+    var bIdx = _rendererSrc.indexOf('ws-sync-status-section ws-backup-section');
+    assert(sIdx > -1, 'ws-sync-section markup must exist');
+    assert(bIdx > -1, 'ws-backup-section markup must exist');
+    assert(sIdx < bIdx, 'Sync section must render BEFORE the Cloud Backup section');
+    // and it lives inside the active-workspace card markup
+    var card = _rendererSrc.indexOf("'<div class=\"ws-active-card\">'");
+    assert(card > -1 && card < sIdx, 'Sync section must be inside the active workspace card');
+  });
+
+  test('1G.8A: Sync section is visually separate from Cloud Backup (own container, no backup controls)', function() {
+    var sx = _sxMarkup();
+    assert(/class="ws-sync-section"/.test(sx), 'Sync section uses its own ws-sync-section container');
+    assert(!/ws-backup/.test(sx),        'Sync section must not include backup container classes');
+    assert(!/wsStartApply|wsConfirmApply|wsDownloadBackup|wsRefreshBackupList/.test(sx),
+      'Sync section must not include any Cloud Backup history/apply/download controls');
+    assert(!/restoreFromCloud|applyPulledSnapshot|wsApplyBackup/.test(sx),
+      'Sync section must not reference any restore/apply path');
+  });
+
+  test('1G.8A: state-to-copy mapping exists for every displayed state', function() {
+    var b = _sxViewBody();
+    ['synced','local_pending','syncing','cloud_newer','conflict','view_only','offline','error'].forEach(function(st) {
+      assert(new RegExp("case '" + st + "':").test(b), 'mapping must handle state: ' + st);
+    });
+    // each maps to a title + detail key
+    ['sxSyncedT','sxSyncedD','sxPendingT','sxPendingD','sxCloudT','sxCloudD','sxConflictT','sxConflictD',
+     'sxViewT','sxViewD','sxPausedT','sxPausedD','sxSyncingT','sxSyncingD'].forEach(function(k) {
+      assert(b.indexOf(k) > -1, '_syncSectionView must reference key ' + k);
+    });
+    // 'idle'/unknown hides the section (no churn / no unsettled label)
+    assert(/default:\s*return \{ show: false \}/.test(b), "idle/unknown must hide the section");
+  });
+
+  test('1G.8A: EN and TR i18n keys exist for all displayed Sync strings', function() {
+    ['sxSyncHdr','sxSyncedT','sxSyncedD','sxPendingT','sxPendingD','sxCloudT','sxCloudD',
+     'sxConflictT','sxConflictD','sxViewT','sxViewD','sxPausedT','sxPausedD','sxSyncingT','sxSyncingD']
+    .forEach(function(k) {
+      var n = (_rendererSrc.match(new RegExp('\\b' + k + ':', 'g')) || []).length;
+      assert(n >= 2, 'i18n key ' + k + ' must be defined in both TR and EN (found ' + n + ')');
+    });
+  });
+
+  test('1G.8A: Sync section has NO action buttons (read-only)', function() {
+    var sx = _sxMarkup();
+    assert(!/<button/.test(sx), 'Sync section must contain no buttons in 1G.8A');
+    assert(!/onclick=/.test(sx), 'Sync section must contain no onclick handlers in 1G.8A');
+    assert(!/Use cloud version|Keep my version|Take Cloud|Keep Mine/i.test(sx),
+      'no conflict action labels in 1G.8A');
+  });
+
+  test('1G.8A: workspace card UI does not call conflict resolvers', function() {
+    var ci = _rendererSrc.indexOf('function renderWorkspaceCard()');
+    assert(ci > -1, 'renderWorkspaceCard must be found');
+    var cj = _rendererSrc.indexOf('\nfunction ', ci + 20);
+    var b  = _rendererSrc.slice(ci, cj > -1 ? cj : _rendererSrc.length);
+    assert(!/_takeCloudConflict\s*\(/.test(b), 'renderWorkspaceCard must not call _takeCloudConflict');
+    assert(!/_keepMineConflict\s*\(/.test(b), 'renderWorkspaceCard must not call _keepMineConflict');
+  });
+
+  test('1G.8A: Sync view-model is read-only (no engine/IPC/secret access)', function() {
+    var b = _sxViewBody();
+    assert(!/ipcRenderer|invoke\(|bridge|fetch\(/.test(b), '_syncSectionView must not touch IPC/bridge/network');
+    assert(!/localStorage|JSON\.stringify\(DATA\)|rendererState|storage_path|signed|snapshot_hash|deviceId|token/.test(b),
+      '_syncSectionView must not access DATA/secrets/paths');
+    // gating: hidden when both real-sync flags are off
+    assert(/if \(!_realSyncPushEnabled\(\) && !_realSyncPullEnabled\(\)\) return \{ show: false \}/.test(b),
+      'Sync section must be gated behind the real-sync flags');
+  });
+
+  test('1G.8A: no new IPC/preload bridge introduced; Cloud Backup remains separate', function() {
+    assert(!/ipcRenderer/.test(_rendererSrc), 'renderer must still never reference ipcRenderer directly');
+    // Cloud Backup apply path still present and untouched (separate from Sync)
+    assert(/wsStartApply\(/.test(_rendererSrc), 'Cloud Backup apply (wsStartApply) must still exist');
+    assert(/ws-sync-status-section ws-backup-section/.test(_rendererSrc), 'Cloud Backup section must still exist');
+  });
+
   // ── 1F.6C UX polish: render order + reload behavior ─────────────────────────
 
   test('1F.6C render: wsConfirmManualBackup calls renderAutoBackupIndicator before renderWorkspaceCard', function() {
