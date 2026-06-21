@@ -4124,7 +4124,11 @@ tbody tr[onclick] { cursor: pointer; }
 .ws-sx-action-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .ws-sx-help{margin-top:0;flex:1;min-width:0}
 .ws-sx-actmsg{margin-top:0;font-weight:600;color:var(--i2)}
+/* 1G.9B local opt-in panel */
+.ws-sx-optin{margin-top:8px;padding-top:8px;border-top:1px solid var(--bd-1);display:flex;flex-direction:column;gap:6px}
+.ws-sx-confirm{padding:8px 10px;border:1px solid rgba(245,158,11,.25);border-radius:8px;background:rgba(245,158,11,.06);border-top:1px solid rgba(245,158,11,.25)}
 [data-theme="light"] .ws-sync-section{border-color:rgba(30,50,100,.12)!important;background:rgba(99,102,241,.05)!important}
+[data-theme="light"] .ws-sx-optin{border-top-color:rgba(30,50,100,.12)!important}
 .ws-sync-status-hdr{display:flex;align-items:center;justify-content:space-between;gap:6px}
 .ws-sync-hdr-lbl{font-size:11px;font-weight:600;color:var(--i3);text-transform:uppercase;letter-spacing:.02em}
 .ws-sync-summary{font-size:11.5px;color:var(--i2);margin-top:4px}
@@ -5151,6 +5155,20 @@ var STRINGS={
     sxKeepMineProg:'Sürümünüz tutuluyor…',  sxKeepMineOk:'Sürümünüz tutuldu',
     sxKeepMineFail:'Sürümünüz tutulamadı — hiçbir şey değişmedi',
     sxCloudChanged:'Bulut yeniden değişti — seçim yapmadan önce tekrar kontrol edin.',
+    // 1G.9B — local Sync opt-in (state + UI only; engine still gated)
+    sxOffTitle:'Senkronizasyon kapalı',
+    sxOffDetail:'Bu cihaz henüz bu çalışma alanını senkronize etmiyor.',
+    sxEnableBtn:'Senkronizasyonu etkinleştir',
+    sxEnableHelp:'Bu cihaz değişiklikleri paylaşmaya başlamadan önce onay vereceksiniz.',
+    sxConfirmTitle:'Senkronizasyon etkinleştirilsin mi?',
+    sxConfirmWhat:'Bu cihaz ve bu bulut çalışma alanı değişiklikleri paylaşacak. Buradaki düzenlemeler yüklenebilir ve daha yeni bulut değişiklikleri indirilebilir.',
+    sxConfirmSafety:'Gerçek senkronizasyon etkinleştirilmeden önce yerel bir yedek alınacak. İki tarafta da değişiklik varsa “Bulut sürümünü kullan” veya “Benim sürümümü tut” seçimini yaparsınız. Hiçbir şey sessizce üzerine yazılmaz.',
+    sxConfirmBtn:'Senkronizasyonu etkinleştir',
+    sxConfirmCancel:'Şimdi değil',
+    sxOptInSaved:'Senkronizasyon tercihi kaydedildi. Gerçek senkronizasyon etkinleştirmesi hâlâ kapalı.',
+    sxDisableBtn:'Senkronizasyonu kapat',
+    sxDisableHelp:'Bu cihaz bu çalışma alanını senkronize etmeyi durduracak. Yerel verileriniz olduğu gibi kalır.',
+    sxDisableOk:'Senkronizasyon kapatıldı',
     wsRole_editor:'Editör',wsRole_viewer:'Görüntüleyici',
     wsBackupHdr:'Bulut Yedek',
     wsBackupChecking:'Hazırlık kontrol ediliyor…',
@@ -5742,6 +5760,20 @@ var STRINGS={
     sxKeepMineProg:'Keeping your version…', sxKeepMineOk:'Your version was kept',
     sxKeepMineFail:'Couldn’t keep your version — nothing changed',
     sxCloudChanged:'The cloud changed again — please review before choosing.',
+    // 1G.9B — local Sync opt-in (state + UI only; engine still gated)
+    sxOffTitle:'Sync is off',
+    sxOffDetail:'This device is not syncing this workspace yet.',
+    sxEnableBtn:'Enable Sync',
+    sxEnableHelp:'You’ll confirm before this device starts exchanging changes.',
+    sxConfirmTitle:'Enable Sync?',
+    sxConfirmWhat:'This device and this cloud workspace will exchange changes. Edits here can upload, and newer cloud changes can download.',
+    sxConfirmSafety:'A local backup will be made before real sync is enabled. If both sides change, you’ll choose “Use cloud version” or “Keep my version”. Nothing is overwritten silently.',
+    sxConfirmBtn:'Enable Sync',
+    sxConfirmCancel:'Not now',
+    sxOptInSaved:'Sync opt-in saved. Real sync activation is still gated.',
+    sxDisableBtn:'Turn off Sync',
+    sxDisableHelp:'This device will stop syncing this workspace. Your local data stays as-is.',
+    sxDisableOk:'Sync turned off',
     wsRole_editor:'Editor',wsRole_viewer:'Viewer',
     wsBackupHdr:'Cloud Backup',
     wsBackupChecking:'Checking readiness…',
@@ -8597,6 +8629,19 @@ var SYNC_ACTION_UI = {
   phase:  null,         // 'progress' | 'success' | 'failure' | 'cloud_changed'
   msgKey: null,         // i18n key for the message line (never raw text/data)
 };
+// 1G.9B: device-local, workspace-scoped Sync OPT-IN marker. This records the user's
+// INTENT to sync this workspace on this device. It is persisted (survives reload)
+// but is NOT yet honored by _realSyncPushEnabled()/_realSyncPullEnabled() — the real
+// behavior flip is 1G.9C. The marker holds NO secrets/DATA/rendererState/paths/URLs/
+// hashes/tokens/device ids/lease tokens — only { workspaceId, enabled, enabledAt,
+// emergencyDisabled }.
+var SYNC_OPTIN_KEY = 'ktp_sync_optin_v1';
+// Renderer-local UI state for the opt-in panel (confirm step + transient message).
+// UI-ONLY, never persisted.
+var SYNC_OPTIN_UI = {
+  confirming: false,    // inline confirm panel is open
+  msgKey:     null,     // transient message key (saved / turned off) — never raw text
+};
 var _autoSyncPushTimer = null;
 var _autoSyncRetryTimer = null;
 var AUTO_SYNC_DEBOUNCE_MS = 3000;          // quiet period after an edit before push
@@ -8623,6 +8668,59 @@ function _saveSyncState() {
       lastPushAt:     SYNC_PUSH_UI.lastPushAt,
     }));
   } catch (_) {}
+}
+
+// ── 1G.9B: device-local Sync OPT-IN marker (intent only; NOT wired to engine) ─
+// All read/write of the per-workspace opt-in intent goes through these helpers.
+// They store ONLY { workspaceId, enabled, enabledAt, emergencyDisabled } — never
+// DATA/secrets/paths/URLs/hashes/tokens/device ids. NONE of these are used by
+// _realSyncPushEnabled()/_realSyncPullEnabled() in 1G.9B (that is 1G.9C).
+function _loadSyncOptInState() {
+  try { var raw = localStorage.getItem(SYNC_OPTIN_KEY); return raw ? JSON.parse(raw) : null; }
+  catch (_) { return null; }
+}
+function _saveSyncOptInState(state) {
+  if (!WS_UI.activeId) return;
+  if (!state || typeof state !== 'object') return;
+  try {
+    localStorage.setItem(SYNC_OPTIN_KEY, JSON.stringify({
+      workspaceId:       WS_UI.activeId,
+      enabled:           state.enabled === true,
+      enabledAt:         state.enabledAt || null,
+      emergencyDisabled: state.emergencyDisabled === true,
+    }));
+  } catch (_) {}
+}
+function _clearSyncOptInState() {
+  try { localStorage.removeItem(SYNC_OPTIN_KEY); } catch (_) {}
+}
+// True only when a saved, enabled, non-emergency-disabled marker matches the ACTIVE
+// workspace. (1G.9B: read for display only — NOT consulted by the real-sync gates.)
+function _isSyncOptedInForActiveWorkspace() {
+  if (!WS_UI.activeId) return false;
+  var s = _loadSyncOptInState();
+  return !!(s && s.workspaceId === WS_UI.activeId && s.enabled === true && s.emergencyDisabled !== true);
+}
+// Eligibility to OFFER opt-in: authenticated + active workspace + writer role
+// (owner/admin/editor). Viewer/member are never eligible. Pure, no side effects.
+function _canOfferSyncOptIn() {
+  if (CLOUD_UI.state !== 'authenticated') return false;
+  if (!WS_UI.activeId) return false;
+  var role = WS_UI.activeRole;
+  return role === 'owner' || role === 'admin' || role === 'editor';
+}
+// Record the user's intent to ENABLE sync for the active workspace (marker only).
+// 1G.9B: this does NOT enable the engine, set runtime flags, or run push/pull/detect.
+function _enableSyncOptInIntent() {
+  if (!_canOfferSyncOptIn()) return false;
+  _saveSyncOptInState({ enabled: true, enabledAt: new Date().toISOString(), emergencyDisabled: false });
+  return true;
+}
+// Record the user's intent to DISABLE sync for the active workspace. Clears the
+// marker. Never deletes business data; never touches Local/Cloud Backup.
+function _disableSyncOptInIntent() {
+  _clearSyncOptInState();
+  return true;
 }
 
 // Reconcile in-memory sync state from the persisted marker once the workspace is
@@ -9381,6 +9479,33 @@ async function wsSyncKeepMine() {
     SYNC_ACTION_UI.phase = 'failure'; SYNC_ACTION_UI.msgKey = 'sxKeepMineFail';
   }
   SYNC_ACTION_UI.busy = false;
+  renderWorkspaceCard();
+}
+
+// ── 1G.9B: Sync opt-in UI wrappers (intent + display only; NO engine flip) ────
+// These ONLY toggle the inline confirm panel and persist the opt-in marker. They
+// do NOT set runtime KTP_REAL_SYNC_* flags and do NOT run push/pull/detect/apply.
+function wsSyncShowEnable() {
+  if (!_canOfferSyncOptIn()) return;
+  SYNC_OPTIN_UI.confirming = true;
+  SYNC_OPTIN_UI.msgKey = null;
+  renderWorkspaceCard();
+}
+function wsSyncCancelEnable() {
+  SYNC_OPTIN_UI.confirming = false;   // Cancel ("Not now") — no marker saved
+  renderWorkspaceCard();
+}
+function wsSyncConfirmEnable() {
+  // Save the opt-in marker ONLY. Real sync stays gated until 1G.9C.
+  var ok = _enableSyncOptInIntent();
+  SYNC_OPTIN_UI.confirming = false;
+  SYNC_OPTIN_UI.msgKey = ok ? 'sxOptInSaved' : null;
+  renderWorkspaceCard();
+}
+function wsSyncTurnOff() {
+  _disableSyncOptInIntent();          // clears marker; never deletes data/backups
+  SYNC_OPTIN_UI.confirming = false;
+  SYNC_OPTIN_UI.msgKey = 'sxDisableOk';
   renderWorkspaceCard();
 }
 
@@ -10422,36 +10547,86 @@ function renderWorkspaceCard() {
         // _syncSectionView() (real sync flags); hidden entirely when off/idle.
         (function () {
           var _sv = _syncSectionView();
-          if (!_sv.show) return '';
-          var _act = _syncConflictActions();
-          var _disabled = SYNC_ACTION_UI.busy || SYNC_PUSH_UI.pushInFlight || SYNC_PUSH_UI.pullInFlight;
-          var _btns = '';
-          if (_act.showUseCloud || _act.showKeepMine) {
-            _btns = '<div class="ws-sx-actions">' +
-              ((_syncActionMsgKey())
-                ? '<div id="ws-sx-actmsg" class="ws-sync-detail ws-sx-actmsg"></div>' : '') +
-              (_act.showUseCloud
-                ? '<div class="ws-sx-action-row">' +
-                    '<button class="btn btn-secondary btn-xs" id="ws-sx-usecloud"' +
-                      (_disabled ? ' disabled' : '') + ' onclick="wsSyncUseCloud()"></button>' +
-                    '<span id="ws-sx-usecloud-help" class="ws-sync-detail ws-sx-help"></span>' +
-                  '</div>' : '') +
-              (_act.showKeepMine
-                ? '<div class="ws-sx-action-row">' +
-                    '<button class="btn btn-secondary btn-xs" id="ws-sx-keepmine"' +
-                      (_disabled ? ' disabled' : '') + ' onclick="wsSyncKeepMine()"></button>' +
-                    '<span id="ws-sx-keepmine-help" class="ws-sync-detail ws-sx-help"></span>' +
-                  '</div>' : '') +
-            '</div>';
+          var _offerOptIn = _canOfferSyncOptIn();   // 1G.9B: writers only
+          // Render the section when the status is shown (real-sync flags ON) OR when
+          // an eligible writer can be offered the local opt-in (flags OFF).
+          if (!_sv.show && !_offerOptIn) return '';
+
+          // ── status + inline conflict actions (1G.8A/1G.8B), only when shown ─────
+          var _status = '';
+          if (_sv.show) {
+            var _act = _syncConflictActions();
+            var _disabled = SYNC_ACTION_UI.busy || SYNC_PUSH_UI.pushInFlight || SYNC_PUSH_UI.pullInFlight;
+            var _btns = '';
+            if (_act.showUseCloud || _act.showKeepMine) {
+              _btns = '<div class="ws-sx-actions">' +
+                ((_syncActionMsgKey())
+                  ? '<div id="ws-sx-actmsg" class="ws-sync-detail ws-sx-actmsg"></div>' : '') +
+                (_act.showUseCloud
+                  ? '<div class="ws-sx-action-row">' +
+                      '<button class="btn btn-secondary btn-xs" id="ws-sx-usecloud"' +
+                        (_disabled ? ' disabled' : '') + ' onclick="wsSyncUseCloud()"></button>' +
+                      '<span id="ws-sx-usecloud-help" class="ws-sync-detail ws-sx-help"></span>' +
+                    '</div>' : '') +
+                (_act.showKeepMine
+                  ? '<div class="ws-sx-action-row">' +
+                      '<button class="btn btn-secondary btn-xs" id="ws-sx-keepmine"' +
+                        (_disabled ? ' disabled' : '') + ' onclick="wsSyncKeepMine()"></button>' +
+                      '<span id="ws-sx-keepmine-help" class="ws-sync-detail ws-sx-help"></span>' +
+                    '</div>' : '') +
+              '</div>';
+            }
+            _status =
+              '<div class="ws-sx-status">' +
+                '<div class="ws-status-dot ' + _sv.dot + '" id="ws-sx-dot"></div>' +
+                '<span id="ws-sx-title" class="ws-sync-summary"></span>' +
+              '</div>' +
+              '<div id="ws-sx-detail" class="ws-sync-detail"></div>' +
+              _btns;
           }
+
+          // ── 1G.9B: local opt-in panel (intent only; engine still gated) ────────
+          // Shown to eligible writers. Three states: opted-in (Turn off Sync),
+          // confirming (inline confirm), or off ("Sync is off" + Enable Sync).
+          // NONE of these flip the engine — that is 1G.9C.
+          var _optin = '';
+          if (_offerOptIn) {
+            var _optedIn = _isSyncOptedInForActiveWorkspace();
+            var _msg = SYNC_OPTIN_UI.msgKey
+              ? '<div id="ws-sx-optin-msg" class="ws-sync-detail ws-sx-actmsg"></div>' : '';
+            if (_optedIn) {
+              _optin = '<div class="ws-sx-optin">' + _msg +
+                '<div class="ws-sx-action-row">' +
+                  '<button class="btn btn-ghost btn-xs" id="ws-sx-disable-btn" onclick="wsSyncTurnOff()"></button>' +
+                  '<span id="ws-sx-disable-help" class="ws-sync-detail ws-sx-help"></span>' +
+                '</div>' +
+              '</div>';
+            } else if (SYNC_OPTIN_UI.confirming) {
+              _optin = '<div class="ws-sx-optin ws-sx-confirm">' +
+                '<div id="ws-sx-cf-title" class="ws-sync-summary"></div>' +
+                '<div id="ws-sx-cf-what" class="ws-sync-detail"></div>' +
+                '<div id="ws-sx-cf-safety" class="ws-sync-detail"></div>' +
+                '<div class="ws-sx-action-row">' +
+                  '<button class="btn btn-primary btn-xs" id="ws-sx-cf-confirm" onclick="wsSyncConfirmEnable()"></button>' +
+                  '<button class="btn btn-ghost btn-xs" id="ws-sx-cf-cancel" onclick="wsSyncCancelEnable()"></button>' +
+                '</div>' +
+              '</div>';
+            } else {
+              _optin = '<div class="ws-sx-optin">' + _msg +
+                '<div id="ws-sx-off-title" class="ws-sync-summary"></div>' +
+                '<div id="ws-sx-off-detail" class="ws-sync-detail"></div>' +
+                '<div class="ws-sx-action-row">' +
+                  '<button class="btn btn-secondary btn-xs" id="ws-sx-enable-btn" onclick="wsSyncShowEnable()"></button>' +
+                  '<span id="ws-sx-enable-help" class="ws-sync-detail ws-sx-help"></span>' +
+                '</div>' +
+              '</div>';
+            }
+          }
+
           return '<div class="ws-sync-section">' +
             '<div class="ws-sync-status-hdr"><span id="ws-sx-hdr" class="ws-sync-hdr-lbl"></span></div>' +
-            '<div class="ws-sx-status">' +
-              '<div class="ws-status-dot ' + _sv.dot + '" id="ws-sx-dot"></div>' +
-              '<span id="ws-sx-title" class="ws-sync-summary"></span>' +
-            '</div>' +
-            '<div id="ws-sx-detail" class="ws-sync-detail"></div>' +
-            _btns +
+            _status +
+            _optin +
           '</div>';
         })() +
         // ── Cloud Backup — simplified main view + Advanced section (1F.4E) ──────
@@ -10653,8 +10828,12 @@ function renderWorkspaceCard() {
       if (WS_UI.restored) { var _rn = document.getElementById('ws-restored-note'); if (_rn) _rn.textContent = t('wsRestored'); }
       // ── 1G.8A: read-only Sync status text (all values via t()/textContent) ─────
       var _sxv = _syncSectionView();
+      var _sxOffer = _canOfferSyncOptIn();
+      // Header binds whenever the section renders (status shown OR opt-in offered).
+      if (_sxv.show || _sxOffer) {
+        var _sxh = document.getElementById('ws-sx-hdr'); if (_sxh) _sxh.textContent = t('sxSyncHdr');
+      }
       if (_sxv.show) {
-        var _sxh = document.getElementById('ws-sx-hdr');    if (_sxh) _sxh.textContent = t('sxSyncHdr');
         var _sxt = document.getElementById('ws-sx-title');  if (_sxt) _sxt.textContent = t(_sxv.titleKey);
         var _sxd = document.getElementById('ws-sx-detail'); if (_sxd) _sxd.textContent = t(_sxv.detailKey);
         // ── 1G.8B: inline conflict action button labels + message (via t()) ─────
@@ -10673,6 +10852,25 @@ function renderWorkspaceCard() {
         var _sxam = document.getElementById('ws-sx-actmsg');
         var _amKey = _syncActionMsgKey();
         if (_sxam && _amKey) _sxam.textContent = t(_amKey);
+      }
+      // ── 1G.9B: local Sync opt-in panel text (all via t()/textContent) ──────────
+      if (_sxOffer) {
+        var _sxom = document.getElementById('ws-sx-optin-msg');
+        if (_sxom && SYNC_OPTIN_UI.msgKey) _sxom.textContent = t(SYNC_OPTIN_UI.msgKey);
+        // Off panel
+        var _sxot = document.getElementById('ws-sx-off-title');  if (_sxot) _sxot.textContent = t('sxOffTitle');
+        var _sxod = document.getElementById('ws-sx-off-detail'); if (_sxod) _sxod.textContent = t('sxOffDetail');
+        var _sxeb = document.getElementById('ws-sx-enable-btn'); if (_sxeb) _sxeb.textContent = t('sxEnableBtn');
+        var _sxeh = document.getElementById('ws-sx-enable-help');if (_sxeh) _sxeh.textContent = t('sxEnableHelp');
+        // Confirm panel
+        var _sxct = document.getElementById('ws-sx-cf-title');   if (_sxct) _sxct.textContent = t('sxConfirmTitle');
+        var _sxcw = document.getElementById('ws-sx-cf-what');    if (_sxcw) _sxcw.textContent = t('sxConfirmWhat');
+        var _sxcs = document.getElementById('ws-sx-cf-safety');  if (_sxcs) _sxcs.textContent = t('sxConfirmSafety');
+        var _sxcc = document.getElementById('ws-sx-cf-confirm'); if (_sxcc) _sxcc.textContent = t('sxConfirmBtn');
+        var _sxcx = document.getElementById('ws-sx-cf-cancel');  if (_sxcx) _sxcx.textContent = t('sxConfirmCancel');
+        // Opted-in (disable) panel
+        var _sxdb = document.getElementById('ws-sx-disable-btn');  if (_sxdb) _sxdb.textContent = t('sxDisableBtn');
+        var _sxdh = document.getElementById('ws-sx-disable-help'); if (_sxdh) _sxdh.textContent = t('sxDisableHelp');
       }
 
       // ── Cloud Backup — simplified + Advanced text (1F.4E) ─────────────────────

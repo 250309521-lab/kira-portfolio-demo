@@ -2490,6 +2490,118 @@ function register(test, assert, assertEqual) {
     assert(/ws-sync-status-section ws-backup-section/.test(_rendererSrc), 'Cloud Backup section must still exist');
   });
 
+  // ── 1G.9B local Sync opt-in state + UI (NOT wired to engine) ─────────────────
+
+  function _fnBodyOf(name) {
+    var m = _rendererSrc.match(new RegExp('function ' + name + '\\([^)]*\\)\\s*\\{([\\s\\S]*?)\\n\\}'));
+    assert(m, name + ' body must be found');
+    return m[1];
+  }
+
+  test('1G.9B: opt-in marker helpers exist and use the ktp_sync_optin_v1 key', function() {
+    ['_loadSyncOptInState','_saveSyncOptInState','_clearSyncOptInState',
+     '_isSyncOptedInForActiveWorkspace','_canOfferSyncOptIn',
+     '_enableSyncOptInIntent','_disableSyncOptInIntent'].forEach(function(fn) {
+      assert(new RegExp('function ' + fn + '\\(').test(_rendererSrc), 'helper must exist: ' + fn);
+    });
+    assert(/var SYNC_OPTIN_KEY = 'ktp_sync_optin_v1'/.test(_rendererSrc), 'opt-in marker key must be ktp_sync_optin_v1');
+  });
+
+  test('1G.9B: opt-in marker is workspace-scoped and persists enabled state', function() {
+    var sv = _fnBodyOf('_saveSyncOptInState');
+    assert(/workspaceId:\s*WS_UI\.activeId/.test(sv), 'marker stamps active workspaceId');
+    assert(/enabled:\s*state\.enabled === true/.test(sv), 'marker persists enabled flag');
+    assert(/emergencyDisabled:\s*state\.emergencyDisabled === true/.test(sv), 'marker persists emergencyDisabled');
+    var isIn = _fnBodyOf('_isSyncOptedInForActiveWorkspace');
+    assert(/s\.workspaceId === WS_UI\.activeId/.test(isIn), 'opt-in check is workspace-scoped');
+    assert(/s\.emergencyDisabled !== true/.test(isIn), 'emergency-disabled marker is not treated as opted-in');
+  });
+
+  test('1G.9B: opt-in marker carries no secrets/DATA/paths/tokens', function() {
+    var sv = _fnBodyOf('_saveSyncOptInState');
+    assert(!/JSON\.stringify\(DATA\)|rendererState|storage_path|signed|snapshot_hash|token|deviceId|lease|pin/i.test(sv),
+      'opt-in marker must hold no secrets/DATA/paths/tokens');
+    // only the four agreed fields are written
+    assert(/workspaceId/.test(sv) && /enabled/.test(sv) && /enabledAt/.test(sv) && /emergencyDisabled/.test(sv),
+      'marker writes the agreed fields only');
+  });
+
+  test('1G.9B: real-sync gates remain UNCHANGED (opt-in not wired in)', function() {
+    var push = _fnBodyOf('_realSyncPushEnabled');
+    var pull = _fnBodyOf('_realSyncPullEnabled');
+    assert(/window\.KTP_REAL_SYNC_PUSH_ENABLED/.test(push), 'push gate still reads the runtime flag');
+    assert(/window\.KTP_REAL_SYNC_PULL_ENABLED/.test(pull), 'pull gate still reads the runtime flag');
+    // the opt-in marker / helpers must NOT be consulted by the gates in 1G.9B
+    assert(!/OptIn|SYNC_OPTIN|ktp_sync_optin/i.test(push), 'push gate must not honor opt-in in 1G.9B');
+    assert(!/OptIn|SYNC_OPTIN|ktp_sync_optin/i.test(pull), 'pull gate must not honor opt-in in 1G.9B');
+  });
+
+  test('1G.9B: eligibility is writers-only (owner/admin/editor); viewer/member excluded', function() {
+    var b = _fnBodyOf('_canOfferSyncOptIn');
+    assert(/CLOUD_UI\.state !== 'authenticated'/.test(b), 'requires authenticated cloud');
+    assert(/!WS_UI\.activeId/.test(b), 'requires active workspace');
+    assert(/role === 'owner' \|\| role === 'admin' \|\| role === 'editor'/.test(b), 'writers only');
+    assert(!/'viewer'|'member'/.test(b), 'viewer/member are not eligible (no allow-list entry)');
+  });
+
+  test('1G.9B: confirm step exists; cancel saves nothing; confirm saves marker only (no engine flip)', function() {
+    var show = _fnBodyOf('wsSyncShowEnable');
+    assert(/SYNC_OPTIN_UI\.confirming = true/.test(show), 'Enable Sync opens the confirm panel');
+    var cancel = _fnBodyOf('wsSyncCancelEnable');
+    assert(/SYNC_OPTIN_UI\.confirming = false/.test(cancel), 'Cancel closes confirm');
+    assert(!/_saveSyncOptInState|_enableSyncOptInIntent/.test(cancel), 'Cancel must NOT save the marker');
+    var confirm = _fnBodyOf('wsSyncConfirmEnable');
+    assert(/_enableSyncOptInIntent\(\)/.test(confirm), 'Confirm saves the opt-in marker');
+    // confirm must NOT enable the engine / set flags / run sync
+    assert(!/KTP_REAL_SYNC_PUSH_ENABLED|KTP_REAL_SYNC_PULL_ENABLED/.test(confirm), 'confirm must not set runtime flags');
+    assert(!/wsAutoSyncPushTick|_detectCloudNewer|_preflightPullSnapshot|_applyPulledSnapshot|_takeCloudConflict|_keepMineConflict/.test(confirm),
+      'confirm must not run push/pull/detect/apply');
+  });
+
+  test('1G.9B: enable intent does not flip engine; disable clears marker without deleting data', function() {
+    var en = _fnBodyOf('_enableSyncOptInIntent');
+    assert(/_canOfferSyncOptIn\(\)/.test(en), 'enable intent re-checks eligibility');
+    assert(/_saveSyncOptInState/.test(en), 'enable intent saves the marker');
+    assert(!/KTP_REAL_SYNC_|wsAutoSyncPushTick|_detectCloudNewer/.test(en), 'enable intent must not flip engine');
+    var dis = _fnBodyOf('_disableSyncOptInIntent');
+    assert(/_clearSyncOptInState\(\)/.test(dis), 'disable clears the marker');
+    assert(!/DATA|removeItem\(LSKEY|buildFullBackup|restoreFromCloud/.test(dis), 'disable must not touch data/backup');
+  });
+
+  test('1G.9B: opt-in UI lives in the Sync section, not Cloud Backup; no backup apply path', function() {
+    var card = _rendererSrc.indexOf('function renderWorkspaceCard()');
+    var optBtn = _rendererSrc.indexOf('onclick="wsSyncShowEnable()"');
+    var sIdx = _rendererSrc.indexOf('class="ws-sync-section"', card);
+    var bIdx = _rendererSrc.indexOf('ws-sync-status-section ws-backup-section', card);
+    assert(optBtn > -1, 'Enable Sync button must exist');
+    assert(sIdx > -1 && bIdx > sIdx, 'opt-in renders within Sync section, before Cloud Backup');
+    // no Cloud Backup apply/restore reused by opt-in wrappers
+    var wrap = _fnBodyOf('wsSyncConfirmEnable') + _fnBodyOf('wsSyncTurnOff') + _fnBodyOf('wsSyncShowEnable');
+    assert(!/wsStartApply|wsConfirmApply|restoreFromCloud|applyPulledSnapshot/.test(wrap),
+      'opt-in wrappers must not use Cloud Backup apply/restore');
+  });
+
+  test('1G.9B: SYNC_OPTIN_UI is UI-only (not persisted in sync markers)', function() {
+    var ss = _rendererSrc.match(/function _saveSyncState\(\)\s*\{([\s\S]*?)\n\}/)[1];
+    assert(!/SYNC_OPTIN_UI|confirming/.test(ss), 'sync-state marker must not persist opt-in UI state');
+  });
+
+  test('1G.9B: EN and TR i18n keys exist for all opt-in strings', function() {
+    ['sxOffTitle','sxOffDetail','sxEnableBtn','sxEnableHelp','sxConfirmTitle','sxConfirmWhat',
+     'sxConfirmSafety','sxConfirmBtn','sxConfirmCancel','sxOptInSaved','sxDisableBtn','sxDisableHelp','sxDisableOk']
+    .forEach(function(k) {
+      var n = (_rendererSrc.match(new RegExp('\\b' + k + ':', 'g')) || []).length;
+      assert(n >= 2, 'i18n key ' + k + ' must be defined in both TR and EN (found ' + n + ')');
+    });
+  });
+
+  test('1G.9B: no new IPC/RPC/preload bridge introduced by opt-in', function() {
+    assert(!/ipcRenderer/.test(_rendererSrc), 'renderer must still never reference ipcRenderer directly');
+    // opt-in persistence is localStorage only (device-local marker)
+    var sv = _fnBodyOf('_saveSyncOptInState');
+    assert(/localStorage\.setItem\(SYNC_OPTIN_KEY/.test(sv), 'marker persisted via localStorage only');
+  });
+
   // ── 1F.6C UX polish: render order + reload behavior ─────────────────────────
 
   test('1F.6C render: wsConfirmManualBackup calls renderAutoBackupIndicator before renderWorkspaceCard', function() {
