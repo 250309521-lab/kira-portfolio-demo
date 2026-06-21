@@ -5122,6 +5122,7 @@ var STRINGS={
     syncLocalPending:'Yerel değişiklikler bekliyor',
     syncOffline:'Çevrimdışı — bağlanınca eşitlenecek',
     syncCloudNewer:'Bulutta daha yeni değişiklikler var',
+    syncConflict:'Bu cihaz ve bulut ayrı ayrı değişti — yerel değişiklikleriniz korundu',
     syncViewOnly:'Yalnızca görüntüleme (eşitleme izni yok)',
     wsRole_editor:'Editör',wsRole_viewer:'Görüntüleyici',
     wsBackupHdr:'Bulut Yedek',
@@ -5695,6 +5696,7 @@ var STRINGS={
     syncLocalPending:'Local changes pending',
     syncOffline:'Offline — changes will sync when online',
     syncCloudNewer:'Cloud has newer changes',
+    syncConflict:'This device and the cloud both changed — your local changes are kept',
     syncViewOnly:'View only (no sync permission)',
     wsRole_editor:'Editor',wsRole_viewer:'Viewer',
     wsBackupHdr:'Cloud Backup',
@@ -8504,6 +8506,29 @@ function _realSyncPullEnabled() {
   return typeof window !== 'undefined' && !!window.KTP_REAL_SYNC_PULL_ENABLED;
 }
 
+// ── 1G.5B: restart-safe dirty truth ──────────────────────────────────────────
+// The in-memory pendingHash is reset on reload, so it cannot be the sole dirty
+// signal. The authoritative, restart-safe definition of "dirty" is: the current
+// business DATA fingerprint differs from the last successfully synced fingerprint.
+// (lastSyncedHash is persisted in the marker and rehydrated, so this survives a
+// restart.) These helpers are read-only and never log DATA.
+function _getCurrentDataHash() {
+  return _djb2Hash(JSON.stringify(DATA));
+}
+function _isLocalSyncDirty() {
+  if (SYNC_PUSH_UI.pendingHash != null) return true;            // runtime: unsynced edit pending
+  if (!SYNC_PUSH_UI.lastSyncedHash) return false;               // never synced → nothing to diverge from
+  return _getCurrentDataHash() !== SYNC_PUSH_UI.lastSyncedHash; // restart-safe fingerprint divergence
+}
+// If the fingerprint says dirty but pendingHash was reset (e.g. after a restart),
+// restore the dirty awareness so the pendingHash-based guards also fire.
+function _ensurePendingFromFingerprint() {
+  if (SYNC_PUSH_UI.pendingHash == null && SYNC_PUSH_UI.lastSyncedHash) {
+    var h = _getCurrentDataHash();
+    if (h !== SYNC_PUSH_UI.lastSyncedHash) SYNC_PUSH_UI.pendingHash = h;
+  }
+}
+
 var SYNC_STATE_KEY = 'ktp_sync_state_v1';
 
 // In-memory sync state. baseRevision/lastSyncedHash also persisted to the marker.
@@ -8570,6 +8595,12 @@ function _hydrateSyncState() {
       SYNC_PUSH_UI.state         = 'synced';
       SYNC_PUSH_UI.cloudRevision = SYNC_PUSH_UI.baseRevision;
       SYNC_PUSH_UI.pendingHash   = null;
+    } else {
+      // 1G.5B: DATA diverges from the last synced fingerprint → local is dirty.
+      // pendingHash was reset by the restart; restore dirty awareness so the
+      // pendingHash-based guards fire and detection can surface 'conflict' (not a
+      // clean 'cloud_newer'). No DATA write, no resolution.
+      _ensurePendingFromFingerprint();
     }
   } else {
     // Different/absent workspace — reset to a safe base. base 0 can only be
@@ -8592,7 +8623,14 @@ function _markSyncDirty(serialized) {
   var hash = _djb2Hash(typeof serialized === 'string' ? serialized : JSON.stringify(DATA));
   if (hash === SYNC_PUSH_UI.lastSyncedHash) return; // already synced this state
   SYNC_PUSH_UI.pendingHash = hash;
-  if (SYNC_PUSH_UI.state !== 'cloud_newer' && SYNC_PUSH_UI.state !== 'view_only') {
+  // 1G.5B: dirty + cloud already newer = CONFLICT (editing locally while the cloud
+  // advanced). Do not downgrade an existing conflict/view_only; otherwise mark
+  // local_pending. Auto-push is suppressed for conflict (see wsAutoSyncPushTick).
+  var _cloudNewer = (typeof SYNC_PUSH_UI.cloudRevision === 'number' &&
+                     SYNC_PUSH_UI.cloudRevision > SYNC_PUSH_UI.baseRevision);
+  if (_cloudNewer || SYNC_PUSH_UI.state === 'cloud_newer') {
+    if (SYNC_PUSH_UI.state !== 'view_only') SYNC_PUSH_UI.state = 'conflict';
+  } else if (SYNC_PUSH_UI.state !== 'conflict' && SYNC_PUSH_UI.state !== 'view_only') {
     SYNC_PUSH_UI.state = 'local_pending';
   }
   _scheduleAutoSyncPush();
@@ -8620,7 +8658,8 @@ async function wsAutoSyncPushTick() {
   // 1G.3: suppress auto-push while the cloud is known to be newer. Pushing now
   // would be a guaranteed-stale CAS attempt (churn). Local changes are preserved
   // (pendingHash untouched); reconciliation is 1G.4 (pull) / 1G.5 (conflict).
-  if (SYNC_PUSH_UI.state === 'cloud_newer') return;
+  // 1G.5B: also suppress while in an explicit conflict (dirty + cloud newer).
+  if (SYNC_PUSH_UI.state === 'cloud_newer' || SYNC_PUSH_UI.state === 'conflict') return;
 
   var ser = JSON.stringify(DATA);
   var hash = _djb2Hash(ser);
@@ -8695,6 +8734,7 @@ function _syncStatusKey() {
     case 'local_pending': return 'syncLocalPending';
     case 'offline':       return 'syncOffline';
     case 'cloud_newer':   return 'syncCloudNewer';
+    case 'conflict':      return 'syncConflict';
     case 'view_only':     return 'syncViewOnly';
     default:              return 'syncIdle';
   }
@@ -8760,21 +8800,39 @@ async function _detectCloudNewer(opts) {
   // DOM-free, so detection matches it. State is read via __ktpDetectCloudNewer /
   // SYNC_PUSH_UI and will drive a targeted indicator in the dedicated UX phase.
   if (cloudRev > SYNC_PUSH_UI.baseRevision) {
-    // Cloud is ahead. Mark cloud_newer (precedence over local_pending). NEVER
-    // clear pendingHash, NEVER pull/apply/overwrite. baseRevision is NOT changed.
+    // Cloud is ahead. NEVER clear pendingHash, NEVER pull/apply/overwrite,
+    // baseRevision is NOT changed.
     SYNC_PUSH_UI.cloudRevision = cloudRev;                   // non-authoritative hint only
-    SYNC_PUSH_UI.state = (WS_UI.activeRole === 'viewer') ? 'view_only' : 'cloud_newer';
+    if (WS_UI.activeRole === 'viewer') {
+      SYNC_PUSH_UI.state = 'view_only';
+    } else if (_isLocalSyncDirty()) {
+      // 1G.5B: dirty + cloud newer = CONFLICT. Restore dirty awareness from the
+      // fingerprint (pendingHash may have been reset by a restart) so the dirty
+      // guards fire, then surface the explicit conflict state. No resolution here.
+      _ensurePendingFromFingerprint();
+      SYNC_PUSH_UI.state = 'conflict';
+    } else {
+      // Clean local + cloud newer = the safe auto-pull candidate (1G.4).
+      SYNC_PUSH_UI.state = 'cloud_newer';
+    }
     return;
   }
 
   if (cloudRev === SYNC_PUSH_UI.baseRevision) {
-    // We are current. Keep cloudRevision consistent (== base) so no stale value can
-    // leave the invariant "synced while cloudRevision > baseRevision" violated.
+    // We are current — the cloud is NOT ahead. Keep cloudRevision consistent (== base).
     SYNC_PUSH_UI.cloudRevision = cloudRev;
-    // Only lower to 'synced' when truly clean and not mid-work — never override
-    // local_pending / syncing / offline, never mark synced if dirty.
-    if (SYNC_PUSH_UI.pendingHash == null &&
-        (SYNC_PUSH_UI.state === 'cloud_newer' || SYNC_PUSH_UI.state === 'idle' || SYNC_PUSH_UI.state === 'synced')) {
+    // 1G.5B: the cloud is no longer newer, so any prior 'conflict'/'cloud_newer'
+    // is resolved by detection: dirty → local_pending (still need to push),
+    // clean → synced. Never override an in-flight 'syncing' or 'offline'.
+    if (_isLocalSyncDirty()) {
+      if (SYNC_PUSH_UI.state === 'cloud_newer' || SYNC_PUSH_UI.state === 'conflict' ||
+          SYNC_PUSH_UI.state === 'idle') {
+        _ensurePendingFromFingerprint();
+        SYNC_PUSH_UI.state = (WS_UI.activeRole === 'viewer') ? 'view_only' : 'local_pending';
+      }
+    } else if (SYNC_PUSH_UI.pendingHash == null &&
+        (SYNC_PUSH_UI.state === 'cloud_newer' || SYNC_PUSH_UI.state === 'conflict' ||
+         SYNC_PUSH_UI.state === 'idle' || SYNC_PUSH_UI.state === 'synced')) {
       SYNC_PUSH_UI.state = (WS_UI.activeRole === 'viewer') ? 'view_only' : 'synced';
     }
   }
@@ -8816,7 +8874,8 @@ async function _preflightPullSnapshot() {
   if (!WS_UI.activeId)                         return { ok: false, error: 'no_workspace' };
   if (SYNC_PUSH_UI.pushInFlight)               return { ok: false, error: 'blocked_push_in_flight' };
   if (SYNC_PUSH_UI.pullInFlight)               return { ok: false, error: 'blocked_pull_in_flight' };
-  if (SYNC_PUSH_UI.pendingHash != null)        return { ok: false, error: 'blocked_dirty' };
+  if (SYNC_PUSH_UI.state === 'conflict')       return { ok: false, error: 'blocked_conflict' };
+  if (_isLocalSyncDirty())                     return { ok: false, error: 'blocked_dirty' };  // restart-safe
   if (SYNC_PUSH_UI.state === 'local_pending' ||
       SYNC_PUSH_UI.state === 'syncing')        return { ok: false, error: 'blocked_dirty' };
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return { ok: false, error: 'offline' };
@@ -8856,7 +8915,8 @@ async function _applyPulledSnapshot() {
   if (!WS_UI.activeId)                         return { ok: false, error: 'no_workspace' };
   if (SYNC_PUSH_UI.pushInFlight)               return { ok: false, error: 'blocked_push_in_flight' };
   if (SYNC_PUSH_UI.pullInFlight)               return { ok: false, error: 'blocked_pull_in_flight' };
-  if (SYNC_PUSH_UI.pendingHash != null)        return { ok: false, error: 'blocked_dirty' };
+  if (SYNC_PUSH_UI.state === 'conflict')       return { ok: false, error: 'blocked_conflict' };
+  if (_isLocalSyncDirty())                     return { ok: false, error: 'blocked_dirty' };  // restart-safe
   if (SYNC_PUSH_UI.state === 'local_pending' ||
       SYNC_PUSH_UI.state === 'syncing')        return { ok: false, error: 'blocked_dirty' };
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return { ok: false, error: 'offline' };

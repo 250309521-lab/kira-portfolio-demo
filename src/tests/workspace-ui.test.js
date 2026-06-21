@@ -1496,8 +1496,11 @@ function register(test, assert, assertEqual) {
   test('1G.3 detect: sets cloud_newer when currentRevision > baseRevision', function() {
     var body = _detectBody();
     assert(/cloudRev > SYNC_PUSH_UI\.baseRevision/.test(body), 'must compare cloud vs base revision');
-    assert(/SYNC_PUSH_UI\.state = \(WS_UI\.activeRole === 'viewer'\) \? 'view_only' : 'cloud_newer'/.test(body),
-      'newer cloud must set cloud_newer (view_only for viewer)');
+    // 1G.5B: clean → cloud_newer, dirty → conflict, viewer → view_only.
+    var newerSeg = body.slice(body.indexOf('cloudRev > SYNC_PUSH_UI.baseRevision'),
+                             body.indexOf('cloudRev === SYNC_PUSH_UI.baseRevision'));
+    assert(/'cloud_newer'/.test(newerSeg), 'clean + newer cloud must set cloud_newer');
+    assert(/'view_only'/.test(newerSeg), 'viewer must map to view_only');
   });
 
   test('1G.3 detect: clean + current can return to synced; never while dirty', function() {
@@ -1550,7 +1553,7 @@ function register(test, assert, assertEqual) {
     var tick = _rendererSrc.match(/async function wsAutoSyncPushTick\(\)([\s\S]*?)\n\}/);
     assert(tick, 'wsAutoSyncPushTick body must be found');
     var body = tick[1];
-    assert(/if \(SYNC_PUSH_UI\.state === 'cloud_newer'\) return;/.test(body),
+    assert(/SYNC_PUSH_UI\.state === 'cloud_newer'[\s\S]{0,80}return;/.test(body),
       'tick must return early while cloud_newer (no guaranteed-stale churn)');
     // Suppression must come after the viewer check and before the push call.
     var supIdx  = body.indexOf("state === 'cloud_newer'");
@@ -1653,8 +1656,8 @@ function register(test, assert, assertEqual) {
     var body = _preflightBody();
     assert(/^\s*if\s*\(!_realSyncPullEnabled\(\)\)\s*return\s*\{ ok: false, error: 'pull_disabled' \};/.test(body),
       'first statement must be the pull-flag gate');
-    assert(/pendingHash != null\)\s*return \{ ok: false, error: 'blocked_dirty' \}/.test(body),
-      'dirty (pendingHash) must block preflight');
+    assert(/_isLocalSyncDirty\(\)\)\s*return \{ ok: false, error: 'blocked_dirty' \}/.test(body),
+      'restart-safe dirty must block preflight');
     assert(/cloudRevision <= SYNC_PUSH_UI\.baseRevision\) return \{ ok: false, error: 'not_newer' \}/.test(body),
       'must block when not strictly newer');
     assert(/pushInFlight\)\s*return \{ ok: false, error: 'blocked_push_in_flight' \}/.test(body),
@@ -1717,7 +1720,7 @@ function register(test, assert, assertEqual) {
     var body = _applyBody();
     assert(/^\s*if\s*\(!_realSyncPullEnabled\(\)\)\s*return \{ ok: false, error: 'pull_disabled' \};/.test(body),
       'first statement must be the pull-flag gate');
-    assert(/pendingHash != null\)\s*return \{ ok: false, error: 'blocked_dirty' \}/.test(body), 'dirty blocks apply');
+    assert(/_isLocalSyncDirty\(\)\)\s*return \{ ok: false, error: 'blocked_dirty' \}/.test(body), 'restart-safe dirty blocks apply');
     assert(/cloudRevision <= SYNC_PUSH_UI\.baseRevision\) return \{ ok: false, error: 'not_newer' \}/.test(body), 'not-newer blocks');
     assert(/pushInFlight\)\s*return \{ ok: false, error: 'blocked_push_in_flight' \}/.test(body), 'push-in-flight blocks');
     assert(/pullInFlight\)\s*return \{ ok: false, error: 'blocked_pull_in_flight' \}/.test(body), 'pull-in-flight blocks');
@@ -1883,6 +1886,97 @@ function register(test, assert, assertEqual) {
       assert(/_wsReadSavedId\(\)/.test(restore[1]), 'wsRestore must restore by the saved cloud workspace id');
       assert(!/DATA\.workspaceId/.test(restore[1]), 'wsRestore must NOT key on local DATA.workspaceId');
     }
+  });
+
+  // ── 1G.5B restart-safe dirty + explicit conflict state (no resolution) ───────
+
+  test('1G.5B dirty: _isLocalSyncDirty derives dirty from the fingerprint (restart-safe)', function() {
+    assert(/function _isLocalSyncDirty\(\)/.test(_rendererSrc), '_isLocalSyncDirty must exist');
+    var fn = _rendererSrc.match(/function _isLocalSyncDirty\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(fn, '_isLocalSyncDirty body must be found');
+    var body = fn[1];
+    assert(/SYNC_PUSH_UI\.pendingHash != null/.test(body), 'dirty if a runtime pendingHash exists');
+    assert(/_getCurrentDataHash\(\) !== SYNC_PUSH_UI\.lastSyncedHash/.test(body),
+      'dirty if current DATA fingerprint diverges from lastSyncedHash (restart-safe)');
+    assert(/function _getCurrentDataHash\(\)/.test(_rendererSrc), '_getCurrentDataHash must exist');
+    assert(/function _ensurePendingFromFingerprint\(\)/.test(_rendererSrc), '_ensurePendingFromFingerprint must exist');
+  });
+
+  test('1G.5B detect: dirty + cloud newer → conflict; clean + cloud newer → cloud_newer', function() {
+    var body = _detectBody();
+    var newerIdx = body.indexOf('cloudRev > SYNC_PUSH_UI.baseRevision');
+    var seg = body.slice(newerIdx, body.indexOf('cloudRev === SYNC_PUSH_UI.baseRevision'));
+    assert(/_isLocalSyncDirty\(\)/.test(seg), 'cloud-newer branch must check dirty');
+    assert(/'conflict'/.test(seg), 'dirty + cloud newer must set conflict');
+    assert(/'cloud_newer'/.test(seg), 'clean + cloud newer must still set cloud_newer');
+    // conflict branch must restore dirty awareness and must NOT advance base/synced hashes.
+    assert(/_ensurePendingFromFingerprint\(\)/.test(seg), 'conflict must restore dirty awareness');
+    assert(!/SYNC_PUSH_UI\.baseRevision\s*=[^=]/.test(seg), 'detection must not change baseRevision');
+    assert(!/SYNC_PUSH_UI\.lastSyncedHash\s*=[^=]/.test(seg), 'detection must not change lastSyncedHash');
+  });
+
+  test('1G.5B suppress: auto-push tick early-returns on conflict', function() {
+    var tick = _rendererSrc.match(/async function wsAutoSyncPushTick\(\)([\s\S]*?)\n\}/);
+    assert(tick, 'wsAutoSyncPushTick body must be found');
+    assert(/state === 'cloud_newer' \|\| SYNC_PUSH_UI\.state === 'conflict'\) return;/.test(tick[1]),
+      'auto-push must be suppressed for both cloud_newer and conflict');
+  });
+
+  test('1G.5B block: preflight + apply block conflict and restart-safe dirty', function() {
+    var pf = _preflightBody();
+    var ap = _applyBody();
+    [pf, ap].forEach(function(body) {
+      assert(/state === 'conflict'\)\s*return \{ ok: false, error: 'blocked_conflict' \}/.test(body),
+        'conflict must be blocked with blocked_conflict');
+      assert(/if \(_isLocalSyncDirty\(\)\)\s*return \{ ok: false, error: 'blocked_dirty' \}/.test(body),
+        'restart-safe dirty must block (not just pendingHash)');
+    });
+  });
+
+  test('1G.5B mark-dirty: editing while cloud newer promotes to conflict', function() {
+    var fn = _rendererSrc.match(/function _markSyncDirty\(serialized\)\s*\{([\s\S]*?)\n\}/);
+    assert(fn, '_markSyncDirty body must be found');
+    var body = fn[1];
+    assert(/cloudRevision > SYNC_PUSH_UI\.baseRevision/.test(body), 'must detect cloud-newer while editing');
+    assert(/SYNC_PUSH_UI\.state = 'conflict'/.test(body), 'editing while cloud newer must set conflict');
+    assert(/SYNC_PUSH_UI\.state = 'local_pending'/.test(body), 'editing while cloud current stays local_pending');
+  });
+
+  test('1G.5B hydrate: restores dirty awareness from fingerprint after restart', function() {
+    var hs = _rendererSrc.match(/function _hydrateSyncState\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(hs, '_hydrateSyncState body must be found');
+    var body = hs[1];
+    assert(/_ensurePendingFromFingerprint\(\)/.test(body),
+      'hydration must restore dirty awareness when DATA diverges from lastSyncedHash');
+    // Must NOT mark synced when DATA differs (that path is the else of the match).
+    var matchIdx = body.indexOf('=== SYNC_PUSH_UI.lastSyncedHash');
+    var ensureIdx = body.indexOf('_ensurePendingFromFingerprint()');
+    assert(matchIdx >= 0 && ensureIdx > matchIdx, 'dirty restore must be in the DATA-differs (else) path');
+  });
+
+  test('1G.5B resolve: equal cloud revision downgrades conflict (no stale conflict)', function() {
+    var body = _detectBody();
+    var eqIdx = body.indexOf('cloudRev === SYNC_PUSH_UI.baseRevision');
+    var seg = body.slice(eqIdx);
+    assert(/SYNC_PUSH_UI\.state === 'conflict'/.test(seg),
+      'equal-revision branch must be able to clear a stale conflict');
+    assert(/'local_pending'/.test(seg) && /'synced'/.test(seg),
+      'resolves to local_pending (dirty) or synced (clean) when cloud no longer newer');
+  });
+
+  test('1G.5B labels: truthful conflict status key exists (TR + EN); mapped from state', function() {
+    var occurrences = (_rendererSrc.match(/syncConflict:/g) || []).length;
+    assert(occurrences >= 2, 'syncConflict label must exist in both languages');
+    assert(/case 'conflict':\s*return 'syncConflict'/.test(_rendererSrc),
+      'conflict state must map to the syncConflict label');
+    assert(!/Sync now|CAS|revision hash/i.test(_rendererSrc.match(/syncConflict:'[^']*'/g)?.join(' ') || ''),
+      'conflict copy must avoid developer jargon');
+  });
+
+  test('1G.5B safety: conflict path does no DATA write / reload / apply', function() {
+    var body = _detectBody();
+    assert(!/localStorage\.setItem|location\.reload|\bDATA\s*=|restoreBackupFromCloud|_applyArchive|pushWorkspaceSnapshot|preflightPullSnapshot|applyPulledSnapshot/.test(body),
+      'detection/conflict path must never write/reload/apply/push/pull');
   });
 
   // ── 1F.6C UX polish: render order + reload behavior ─────────────────────────
