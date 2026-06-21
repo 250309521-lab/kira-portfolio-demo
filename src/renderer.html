@@ -8581,6 +8581,11 @@ function _saveSyncState() {
 // 1G.4C-FIX: previously gated by _realSyncPushEnabled(), which reset on reload.
 function _hydrateSyncState() {
   if (!WS_UI.activeId) return;
+  // 1G.5E-H3: in-flight flags are runtime-only and never persisted; clear them on
+  // hydrate so a stale in-session flag (e.g. across a workspace switch) can never
+  // wedge sync/push/pull operations.
+  SYNC_PUSH_UI.pushInFlight = false;
+  SYNC_PUSH_UI.pullInFlight = false;
   var saved = _loadSyncState();
   if (saved && saved.workspaceId === WS_UI.activeId) {
     SYNC_PUSH_UI.baseRevision   = (typeof saved.baseRevision === 'number') ? saved.baseRevision : 0;
@@ -8667,6 +8672,9 @@ async function wsAutoSyncPushTick() {
 
   SYNC_PUSH_UI.pushInFlight = true;
   SYNC_PUSH_UI.state = 'syncing';
+  // 1G.5E-H2: defensive — guarantee pushInFlight is cleared on every exit path,
+  // including an unexpected throw, so the flag can never wedge for the session.
+  try {
   var res;
   try {
     res = await bridge.pushWorkspaceSnapshot({
@@ -8716,6 +8724,7 @@ async function wsAutoSyncPushTick() {
   // Any other category — keep changes, retry later, never lose data.
   SYNC_PUSH_UI.state = 'local_pending';
   _scheduleAutoSyncRetry();
+  } finally { SYNC_PUSH_UI.pushInFlight = false; }
 }
 
 function _scheduleAutoSyncRetry() {
@@ -8932,6 +8941,8 @@ async function _applyPulledSnapshot() {
   var preHash  = _djb2Hash(preState);            // to re-verify clean immediately before write
 
   SYNC_PUSH_UI.pullInFlight = true;
+  // 1G.5E-H2: defensive — clear pullInFlight on every exit path (including throw).
+  try {
   var res;
   try {
     res = await bridge.applyPulledSnapshot({
@@ -9004,6 +9015,7 @@ async function _applyPulledSnapshot() {
   try { setTimeout(function () { try { location.reload(); } catch (_) {} }, 300); _reloaded = true; } catch (_) {}
 
   return { ok: true, revision: res.revision, reloaded: _reloaded };
+  } finally { SYNC_PUSH_UI.pullInFlight = false; }
 }
 
 // ── 1G.5C: Take Cloud — explicit conflict resolution (dirty + cloud newer) ───
@@ -9036,6 +9048,8 @@ async function _takeCloudConflict() {
   var preHash  = _djb2Hash(preState);                // detect a NEW edit landing during the await
 
   SYNC_PUSH_UI.pullInFlight = true;
+  // 1G.5E-H2: defensive — clear pullInFlight on every exit path (including throw).
+  try {
   var res;
   try {
     res = await bridge.applyPulledSnapshot({
@@ -9104,6 +9118,7 @@ async function _takeCloudConflict() {
   try { setTimeout(function () { try { location.reload(); } catch (_) {} }, 300); _reloaded = true; } catch (_) {}
 
   return { ok: true, revision: res.revision, reloaded: _reloaded, safetyBackupCreated: res.safetyBackupCreated === true };
+  } finally { SYNC_PUSH_UI.pullInFlight = false; }
 }
 
 // ── 1G.5D: Keep Mine — explicit conflict resolution (rebase + CAS push) ──────
@@ -9135,6 +9150,8 @@ async function _keepMineConflict() {
   var localHash  = _djb2Hash(localState);
 
   SYNC_PUSH_UI.pushInFlight = true;
+  // 1G.5E-H2: defensive — clear pushInFlight on every exit path (including throw).
+  try {
 
   // Fast pre-check: re-fetch the current cloud revision. If it advanced since the
   // conflict was shown, do NOT push — re-surface the conflict for the new revision.
@@ -9171,16 +9188,29 @@ async function _keepMineConflict() {
   if (WS_UI.activeId !== reqWorkspaceId) return { ok: false, error: 'stale_workspace' };
 
   if (res && res.ok === true) {
-    // SUCCESS — local DATA was pushed as the new cloud revision. Local DATA is
-    // unchanged (we only pushed up), so NO reload. Advance state to synced.
+    // SUCCESS — the captured localState was pushed as the new cloud revision. We
+    // recorded it under that revision (lastSyncedHash = localHash). Local DATA is
+    // never overwritten and there is NO reload.
     var _newRev = (typeof res.newRevision === 'number') ? res.newRevision : (reqCloudRevision + 1);
     SYNC_PUSH_UI.baseRevision      = _newRev;
     SYNC_PUSH_UI.cloudRevision     = _newRev;
-    SYNC_PUSH_UI.lastSyncedHash    = localHash;
-    SYNC_PUSH_UI.pendingHash       = null;
+    SYNC_PUSH_UI.lastSyncedHash    = localHash;   // fingerprint of the version we pushed
     SYNC_PUSH_UI.lastErrorCategory = null;
-    SYNC_PUSH_UI.state             = 'synced';
-    _saveSyncState();
+    // 1G.5E-H1: if the user edited DURING the push await, the current DATA differs
+    // from what we pushed → it is genuinely dirty (new unsynced edit). Do NOT claim
+    // synced and do NOT clobber that edit's pending awareness; mark local_pending
+    // so the next push covers it (mirrors the 1G.2 push-tick re-check).
+    var _curHash = _getCurrentDataHash();
+    if (_curHash !== localHash) {
+      SYNC_PUSH_UI.pendingHash = _curHash;
+      SYNC_PUSH_UI.state       = 'local_pending';
+      _saveSyncState();
+      _scheduleAutoSyncPush();   // schedule the follow-up push for the newer edit
+    } else {
+      SYNC_PUSH_UI.pendingHash = null;
+      SYNC_PUSH_UI.state       = 'synced';
+      _saveSyncState();
+    }
     return { ok: true, newRevision: _newRev, safetyBackupCreated: res.safetyBackupCreated === true };
   }
 
@@ -9194,6 +9224,7 @@ async function _keepMineConflict() {
   // Any other failure — local dirty + conflict preserved.
   SYNC_PUSH_UI.lastErrorCategory = err;
   return { ok: false, error: err };
+  } finally { SYNC_PUSH_UI.pushInFlight = false; }
 }
 
 // Event triggers (focus/online) + the periodic interval. Each path is gated by

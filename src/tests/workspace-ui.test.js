@@ -2213,6 +2213,78 @@ function register(test, assert, assertEqual) {
       'helper must not expose content/storage path/hash/signed URL/device id/lease token');
   });
 
+  // ── 1G.5E conflict-resolution hardening ──────────────────────────────────────
+
+  test('1G.5E-H1: Keep Mine success re-validates local hash (no false synced on concurrent edit)', function() {
+    var body = _keepMineBody();
+    var okIdx = body.indexOf('res.ok === true');
+    var seg = body.slice(okIdx);
+    // Always records the pushed version's hash + advances revision.
+    assert(/SYNC_PUSH_UI\.lastSyncedHash\s*=\s*localHash/.test(seg), 'lastSyncedHash = pushed localHash');
+    assert(/SYNC_PUSH_UI\.baseRevision\s*=\s*_newRev/.test(seg) && /SYNC_PUSH_UI\.cloudRevision\s*=\s*_newRev/.test(seg),
+      'baseRevision/cloudRevision advance to newRevision');
+    // Re-check current DATA vs the pushed snapshot.
+    assert(/_getCurrentDataHash\(\)/.test(seg), 'must compute the current DATA hash after the push');
+    assert(/_curHash !== localHash/.test(seg), 'must compare current DATA to the pushed version');
+    // Concurrent-edit branch: local_pending + pendingHash (NOT synced); clean branch: synced.
+    var dirtyIdx  = seg.indexOf('_curHash !== localHash');
+    var dirtySeg  = seg.slice(dirtyIdx, dirtyIdx + 260);
+    assert(/SYNC_PUSH_UI\.pendingHash = _curHash/.test(dirtySeg) && /'local_pending'/.test(dirtySeg),
+      'concurrent edit → local_pending with pendingHash, not synced');
+    assert(/SYNC_PUSH_UI\.pendingHash = null/.test(seg) && /'synced'/.test(seg),
+      'unchanged DATA → synced with pendingHash cleared');
+    // Keep Mine never overwrites local DATA / never reloads.
+    assert(!/localStorage\.setItem\(LSKEY/.test(body), 'Keep Mine must not write local DATA');
+    assert(!/location\.reload/.test(body), 'Keep Mine must not reload');
+  });
+
+  test('1G.5E-H2: each resolver clears its in-flight flag in a finally', function() {
+    function bodyOf(name) {
+      var m = _rendererSrc.match(new RegExp('async function ' + name + '\\(\\)\\s*\\{([\\s\\S]*?)\\n\\}'));
+      assert(m, name + ' body must be found');
+      return m[1];
+    }
+    assert(/\} finally \{ SYNC_PUSH_UI\.pushInFlight = false; \}/.test(bodyOf('wsAutoSyncPushTick')),
+      'wsAutoSyncPushTick must clear pushInFlight in finally');
+    assert(/\} finally \{ SYNC_PUSH_UI\.pullInFlight = false; \}/.test(bodyOf('_applyPulledSnapshot')),
+      '_applyPulledSnapshot must clear pullInFlight in finally');
+    assert(/\} finally \{ SYNC_PUSH_UI\.pullInFlight = false; \}/.test(bodyOf('_takeCloudConflict')),
+      '_takeCloudConflict must clear pullInFlight in finally');
+    assert(/\} finally \{ SYNC_PUSH_UI\.pushInFlight = false; \}/.test(bodyOf('_keepMineConflict')),
+      '_keepMineConflict must clear pushInFlight in finally');
+  });
+
+  test('1G.5E-H2: existing explicit in-flight resets are preserved (no false synced on failure)', function() {
+    // Take Cloud / apply still reset pullInFlight on their typed-error returns.
+    var ap = _applyBody(); var tc = _takeCloudBody();
+    [ap, tc].forEach(function(b) {
+      assert(/SYNC_PUSH_UI\.pullInFlight = false; return \{ ok: false, error: 'stale_workspace' \}/.test(b),
+        'stale-workspace path resets pullInFlight');
+    });
+    // Keep Mine resets pushInFlight on its cloud_changed pre-check.
+    var km = _keepMineBody();
+    assert(/SYNC_PUSH_UI\.pushInFlight = false;\s*\n?\s*return \{ ok: false, error: 'cloud_changed'/.test(km),
+      'keep-mine cloud_changed pre-check resets pushInFlight');
+    // Failure branches must not set synced.
+    assert((km.match(/SYNC_PUSH_UI\.state\s*=\s*'synced'/g) || []).length === 1, 'keep-mine: only one synced transition');
+    assert((tc.match(/SYNC_PUSH_UI\.state\s*=\s*'synced'/g) || []).length === 1, 'take-cloud: only one synced transition');
+  });
+
+  test('1G.5E-H3: _hydrateSyncState clears runtime in-flight flags', function() {
+    var hs = _rendererSrc.match(/function _hydrateSyncState\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(hs, '_hydrateSyncState body must be found');
+    var body = hs[1];
+    assert(/SYNC_PUSH_UI\.pushInFlight = false/.test(body), 'hydrate clears pushInFlight');
+    assert(/SYNC_PUSH_UI\.pullInFlight = false/.test(body), 'hydrate clears pullInFlight');
+  });
+
+  test('1G.5E: in-flight flags are NOT persisted in the sync marker', function() {
+    var sv = _rendererSrc.match(/function _saveSyncState\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(sv, '_saveSyncState body must be found');
+    var body = sv[1];
+    assert(!/pushInFlight|pullInFlight/.test(body), 'marker must not persist in-flight flags');
+  });
+
   // ── 1F.6C UX polish: render order + reload behavior ─────────────────────────
 
   test('1F.6C render: wsConfirmManualBackup calls renderAutoBackupIndicator before renderWorkspaceCard', function() {
