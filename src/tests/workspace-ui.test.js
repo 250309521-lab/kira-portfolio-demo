@@ -1979,6 +1979,116 @@ function register(test, assert, assertEqual) {
       'detection/conflict path must never write/reload/apply/push/pull');
   });
 
+  // ── 1G.5C Take Cloud explicit conflict resolution ───────────────────────────
+
+  function _takeCloudBody() {
+    var m = _rendererSrc.match(/async function _takeCloudConflict\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(m, '_takeCloudConflict body must be found');
+    return m[1];
+  }
+
+  test('1G.5C take-cloud: exists, gated by pull flag, requires conflict + dirty', function() {
+    assert(/async function _takeCloudConflict\(\)/.test(_rendererSrc), '_takeCloudConflict must exist');
+    var body = _takeCloudBody();
+    assert(/^\s*if\s*\(!_realSyncPullEnabled\(\)\)\s*return \{ ok: false, error: 'pull_disabled' \};/.test(body),
+      'first statement must be the pull-flag gate');
+    assert(/state !== 'conflict'\)\s*return \{ ok: false, error: 'not_conflict' \}/.test(body), 'must require conflict state');
+    assert(/if \(!_isLocalSyncDirty\(\)\)\s*return \{ ok: false, error: 'not_dirty' \}/.test(body), 'must require local dirty');
+    assert(/cloudRevision <= SYNC_PUSH_UI\.baseRevision\) return \{ ok: false, error: 'not_newer' \}/.test(body), 'must require cloud newer');
+    assert(/pushInFlight\)\s*return \{ ok: false, error: 'blocked_push_in_flight' \}/.test(body), 'blocks push in flight');
+    assert(/pullInFlight\)\s*return \{ ok: false, error: 'blocked_pull_in_flight' \}/.test(body), 'blocks pull in flight');
+  });
+
+  test('1G.5C take-cloud: revalidates — cloud changed since conflict → cloud_changed (no write)', function() {
+    var body = _takeCloudBody();
+    assert(/var reqCloudRevision = SYNC_PUSH_UI\.cloudRevision/.test(body), 'must capture the conflict revision');
+    assert(/res\.revision !== reqCloudRevision/.test(body), 'must compare applied revision to the conflict revision');
+    var cmpIdx   = body.indexOf('res.revision !== reqCloudRevision');
+    var writeIdx = body.indexOf('localStorage.setItem(LSKEY');
+    assert(cmpIdx >= 0 && cmpIdx < writeIdx, 'cloud_changed check must precede the write');
+    assert(/error: 'cloud_changed'/.test(body), 'must return cloud_changed when cloud advanced');
+  });
+
+  test('1G.5C take-cloud: pre-write guard aborts on a NEW edit but tolerates the conflict dirty', function() {
+    var body = _takeCloudBody();
+    // Abort if DATA changed again during await; must NOT abort merely because pendingHash is set.
+    assert(/_djb2Hash\(JSON\.stringify\(DATA\)\) !== preHash\)\s*\{[\s\S]{0,160}error: 'blocked_dirty'/.test(body),
+      'must abort only on a NEW edit during await (preHash mismatch)');
+    var guardIdx = body.indexOf('!== preHash');
+    var seg = body.slice(guardIdx - 40, guardIdx + 120);
+    assert(!/pendingHash != null/.test(seg), 'pre-write guard must NOT treat the expected conflict dirty as abort');
+  });
+
+  test('1G.5C take-cloud: mandatory safety backup of the dirty local state', function() {
+    var body = _takeCloudBody();
+    // The dirty local state is captured (preState) and passed to main for the safety backup.
+    assert(/var preState = JSON\.stringify\(DATA\)/.test(body), 'must capture dirty local state');
+    assert(/preRestoreRendererState: preState/.test(body), 'must pass dirty state to main for the safety backup');
+    assert(/safetyBackupCreated: res\.safetyBackupCreated === true/.test(body), 'must surface safety-backup status');
+  });
+
+  test('1G.5C take-cloud: preserves local users + workspaceId; writes merged; advances after write', function() {
+    var body = _takeCloudBody();
+    assert(/_incoming\.users\s*=\s*_localPrev\.users/.test(body), 'preserves local users');
+    assert(/_incoming\.workspaceId\s*=\s*_localPrev\.workspaceId/.test(body), 'preserves local workspaceId');
+    assert(/localStorage\.setItem\(LSKEY,\s*_applyStr\)/.test(body), 'writes the merged string');
+    assert(/SYNC_PUSH_UI\.lastSyncedHash\s*=\s*_djb2Hash\(_applyStr\)/.test(body), 'lastSyncedHash from merged written DATA');
+    var writeIdx  = body.indexOf('localStorage.setItem(LSKEY');
+    var baseIdx   = body.indexOf('= res.revision');
+    var syncedIdx = body.indexOf("= 'synced'");
+    var okGuard   = body.indexOf('res.ok !== true');
+    assert(okGuard >= 0 && okGuard < writeIdx, 'failure guard precedes the write');
+    assert(baseIdx > writeIdx && syncedIdx > writeIdx, 'baseRevision/synced advance only after the write');
+  });
+
+  test('1G.5C take-cloud: failure leaves conflict intact (state synced only on success)', function() {
+    var body = _takeCloudBody();
+    // The only state='synced' assignment is in the success tail (after the write).
+    var syncedCount = (body.match(/SYNC_PUSH_UI\.state\s*=\s*'synced'/g) || []).length;
+    assert(syncedCount === 1, "exactly one synced transition (success only)");
+    // No pendingHash clearing before the write/success.
+    var clearIdx = body.search(/SYNC_PUSH_UI\.pendingHash\s*=\s*null/);
+    var writeIdx = body.indexOf('localStorage.setItem(LSKEY');
+    assert(clearIdx > writeIdx, 'pendingHash cleared only after the successful write');
+  });
+
+  test('1G.5C take-cloud: explicit only — not triggered by detection/preflight/listeners', function() {
+    assert(!/_takeCloudConflict\(/.test(_detectBody()), 'detection must not invoke take-cloud');
+    assert(!/_takeCloudConflict\(/.test(_preflightBody()), 'preflight must not invoke take-cloud');
+    assert(!/addEventListener\('(focus|online)'[^)]*_takeCloudConflict/.test(_rendererSrc),
+      'focus/online must not invoke take-cloud');
+    var hs = _rendererSrc.match(/function _hydrateSyncState\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(hs && !/_takeCloudConflict\(/.test(hs[1]), 'hydrate must not invoke take-cloud');
+  });
+
+  test('1G.5C take-cloud: reuses the apply IPC (no new RPC, no Cloud Backup Apply path)', function() {
+    var body = _takeCloudBody();
+    assert(/bridge\.applyPulledSnapshot\(/.test(body), 'must reuse the existing applyPulledSnapshot bridge');
+    assert(!/restoreBackupFromCloud|restoreFullBackup|_applyArchive|createManualBackup/.test(body),
+      'must not use Cloud Backup Apply / emergency restore');
+  });
+
+  test('1G.5C clean apply still blocks conflict (1G.4C unchanged)', function() {
+    var ap = _applyBody();
+    assert(/state === 'conflict'\)\s*return \{ ok: false, error: 'blocked_conflict' \}/.test(ap),
+      'clean apply path must still block conflict');
+  });
+
+  test('1G.5C manual helper: __ktpTakeCloudConflict gated; returns safe fields only', function() {
+    assert(/window\.__ktpTakeCloudConflict = function \(\)/.test(_rendererSrc), 'manual take-cloud helper must exist');
+    var m = _rendererSrc.match(/window\.__ktpTakeCloudConflict = function \(\)\s*\{([\s\S]*?)\n  \};/);
+    assert(m, 'helper body must be found');
+    var body = m[1];
+    assert(/if \(!_realSyncPullEnabled\(\)\) return Promise\.resolve\(\{ enabled: false \}\);/.test(body), 'gated by pull flag');
+    assert(/safetyBackupCreated:/.test(body) && /scheduledReload:/.test(body), 'returns safety/reload status');
+    assert(!/rendererState|content|storage|snapshotHash|snapshot_hash|signedUrl|leaseToken|lease_token|deviceId|device_id|checksum/i.test(body),
+      'helper must not expose content/storage path/hash/signed URL/device id/lease token');
+  });
+
+  test('1G.5C: Keep Mine is NOT implemented in this phase', function() {
+    assert(!/_keepMine|keepMineConflict|__ktpKeepMine/i.test(_rendererSrc), 'Keep Mine must not exist yet');
+  });
+
   // ── 1F.6C UX polish: render order + reload behavior ─────────────────────────
 
   test('1F.6C render: wsConfirmManualBackup calls renderAutoBackupIndicator before renderWorkspaceCard', function() {

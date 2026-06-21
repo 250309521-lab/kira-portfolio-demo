@@ -9006,6 +9006,106 @@ async function _applyPulledSnapshot() {
   return { ok: true, revision: res.revision, reloaded: _reloaded };
 }
 
+// ── 1G.5C: Take Cloud — explicit conflict resolution (dirty + cloud newer) ───
+// SEPARATE from the clean-apply path (_applyPulledSnapshot stays conflict-blocked).
+// This is the ONLY path that may apply the cloud snapshot while local is dirty,
+// and ONLY when explicitly invoked (never from detection/focus/online/interval).
+// It requires state==='conflict', re-validates the snapshot, requires a MANDATORY
+// safety backup of the dirty local state (created in main before content is
+// returned), preserves device-local users/workspaceId, and advances state ONLY
+// after a successful LSKEY write. The user's dirty work is preserved in the
+// safety backup; on any failure local DATA + conflict state are left intact.
+async function _takeCloudConflict() {
+  if (!_realSyncPullEnabled())                 return { ok: false, error: 'pull_disabled' };
+  if (!WS_UI.activeId)                         return { ok: false, error: 'no_workspace' };
+  if (SYNC_PUSH_UI.pushInFlight)               return { ok: false, error: 'blocked_push_in_flight' };
+  if (SYNC_PUSH_UI.pullInFlight)               return { ok: false, error: 'blocked_pull_in_flight' };
+  if (SYNC_PUSH_UI.state !== 'conflict')       return { ok: false, error: 'not_conflict' };
+  if (!_isLocalSyncDirty())                    return { ok: false, error: 'not_dirty' };
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return { ok: false, error: 'offline' };
+  if (typeof SYNC_PUSH_UI.baseRevision !== 'number') return { ok: false, error: 'invalid_base_revision' };
+  if (typeof SYNC_PUSH_UI.cloudRevision !== 'number' ||
+      SYNC_PUSH_UI.cloudRevision <= SYNC_PUSH_UI.baseRevision) return { ok: false, error: 'not_newer' };
+  var bridge = _pullBridge();
+  if (!bridge || typeof bridge.applyPulledSnapshot !== 'function') return { ok: false, error: 'no_bridge' };
+
+  var reqWorkspaceId   = WS_UI.activeId;             // stamp the request
+  var reqBaseRevision  = SYNC_PUSH_UI.baseRevision;
+  var reqCloudRevision = SYNC_PUSH_UI.cloudRevision; // the revision the user is resolving against
+  var preState = JSON.stringify(DATA);               // dirty local DATA → captured in the safety backup
+  var preHash  = _djb2Hash(preState);                // detect a NEW edit landing during the await
+
+  SYNC_PUSH_UI.pullInFlight = true;
+  var res;
+  try {
+    res = await bridge.applyPulledSnapshot({
+      workspaceId:             reqWorkspaceId,
+      baseRevision:            reqBaseRevision,
+      preRestoreRendererState: preState,   // safety backup captures the dirty local state
+    });
+  } catch (_) {
+    res = { ok: false, error: 'apply_failed' };
+  }
+
+  // Workspace switched mid-resolution → discard, do NOT write (state stays conflict).
+  if (WS_UI.activeId !== reqWorkspaceId) { SYNC_PUSH_UI.pullInFlight = false; return { ok: false, error: 'stale_workspace' }; }
+  if (!res || res.ok !== true)           { SYNC_PUSH_UI.pullInFlight = false; return res || { ok: false, error: 'unknown_error' }; }
+  if (typeof res.rendererState !== 'string' || !res.rendererState) {
+    SYNC_PUSH_UI.pullInFlight = false; return { ok: false, error: 'apply_failed' };
+  }
+
+  // Cloud advanced past the revision shown at conflict → do NOT silently apply a
+  // different version. Re-surface the conflict for the new revision instead.
+  if (res.revision !== reqCloudRevision) {
+    SYNC_PUSH_UI.pullInFlight = false;
+    return { ok: false, error: 'cloud_changed' };
+  }
+
+  // Pre-write guard: only abort if local DATA changed AGAIN during the await (a NEW
+  // edit). Being dirty (pendingHash set) is expected here — that's the conflict.
+  if (_djb2Hash(JSON.stringify(DATA)) !== preHash) {
+    SYNC_PUSH_UI.pullInFlight = false;
+    return { ok: false, error: 'blocked_dirty' };   // safety backup exists; conflict preserved
+  }
+
+  // Preserve device-local identity + linkage; apply only shared business data
+  // (same scoping as 1G.4C clean apply).
+  var _applyStr = res.rendererState;
+  try {
+    var _incoming = JSON.parse(res.rendererState);
+    var _localPrev = JSON.parse(preState);
+    if (_incoming && typeof _incoming === 'object' && _localPrev && typeof _localPrev === 'object') {
+      if (_localPrev.users !== undefined)       _incoming.users       = _localPrev.users;
+      if (_localPrev.workspaceId !== undefined) _incoming.workspaceId = _localPrev.workspaceId;
+      _applyStr = JSON.stringify(_incoming);
+    }
+  } catch (_) { _applyStr = res.rendererState; }
+
+  try {
+    localStorage.setItem(LSKEY, _applyStr);
+    _lastPersistedSer = _applyStr;
+  } catch (_) {
+    SYNC_PUSH_UI.pullInFlight = false;
+    return { ok: false, error: 'local_write_failed' };   // safety backup exists; conflict preserved
+  }
+
+  // SUCCESS — discard local dirty changes (they live in the safety backup) and
+  // adopt the cloud version. Advance state ONLY after the write.
+  SYNC_PUSH_UI.baseRevision      = res.revision;
+  SYNC_PUSH_UI.cloudRevision     = res.revision;
+  SYNC_PUSH_UI.lastSyncedHash    = _djb2Hash(_applyStr);
+  SYNC_PUSH_UI.pendingHash       = null;
+  SYNC_PUSH_UI.lastErrorCategory = null;
+  SYNC_PUSH_UI.state             = 'synced';
+  SYNC_PUSH_UI.pullInFlight      = false;
+  _saveSyncState();
+
+  var _reloaded = false;
+  try { setTimeout(function () { try { location.reload(); } catch (_) {} }, 300); _reloaded = true; } catch (_) {}
+
+  return { ok: true, revision: res.revision, reloaded: _reloaded, safetyBackupCreated: res.safetyBackupCreated === true };
+}
+
 // Event triggers (focus/online) + the periodic interval. Each path is gated by
 // _scheduleDetectCloudNewer/_detectCloudNewer, so this is inert when disabled.
 if (typeof window !== 'undefined') {
@@ -9066,6 +9166,30 @@ if (typeof window !== 'undefined') {
         activeRole:      WS_UI.activeRole || null,      // role label (not a secret)
         hasPending:      SYNC_PUSH_UI.pendingHash != null,
         pullInFlight:    SYNC_PUSH_UI.pullInFlight,
+      };
+    });
+  };
+
+  // Gated, explicit manual smoke helper for 1G.5C TAKE CLOUD conflict resolution.
+  // Applies the cloud version over a dirty conflict (mandatory safety backup of the
+  // dirty local state in main, then LSKEY write + reload on success). Returns ONLY
+  // safe state fields — never content/hash/path/url/DATA. App reloads on success.
+  window.__ktpTakeCloudConflict = function () {
+    if (!_realSyncPullEnabled()) return Promise.resolve({ enabled: false });
+    return _takeCloudConflict().then(function (r) {
+      return {
+        ok:                  r.ok === true,
+        error:               (r.ok === true) ? null : (r.error || 'unknown_error'),
+        revision:            (r.ok === true) ? (r.revision || null) : null,
+        scheduledReload:     (r.ok === true) && (r.reloaded === true),
+        safetyBackupCreated: r.safetyBackupCreated === true,
+        state:               SYNC_PUSH_UI.state,
+        baseRevision:        SYNC_PUSH_UI.baseRevision,
+        cloudRevision:       SYNC_PUSH_UI.cloudRevision,
+        activeId:            WS_UI.activeId || null,
+        activeRole:          WS_UI.activeRole || null,
+        hasPending:          SYNC_PUSH_UI.pendingHash != null,
+        pullInFlight:        SYNC_PUSH_UI.pullInFlight,
       };
     });
   };
