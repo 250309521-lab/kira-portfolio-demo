@@ -2085,8 +2085,132 @@ function register(test, assert, assertEqual) {
       'helper must not expose content/storage path/hash/signed URL/device id/lease token');
   });
 
-  test('1G.5C: Keep Mine is NOT implemented in this phase', function() {
-    assert(!/_keepMine|keepMineConflict|__ktpKeepMine/i.test(_rendererSrc), 'Keep Mine must not exist yet');
+  // ── 1G.5D Keep Mine explicit conflict resolution (rebase + CAS push) ─────────
+
+  function _keepMineBody() {
+    var m = _rendererSrc.match(/async function _keepMineConflict\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(m, '_keepMineConflict body must be found');
+    return m[1];
+  }
+
+  test('1G.5D keep-mine: exists; PUSH-flag gated; requires conflict + dirty + cloud newer', function() {
+    assert(/async function _keepMineConflict\(\)/.test(_rendererSrc), '_keepMineConflict must exist');
+    var body = _keepMineBody();
+    assert(/^\s*if\s*\(!_realSyncPushEnabled\(\)\)\s*return \{ ok: false, error: 'push_disabled' \};/.test(body),
+      'first statement must be the PUSH-flag gate (Keep Mine is a push)');
+    assert(/state !== 'conflict'\)\s*return \{ ok: false, error: 'not_conflict' \}/.test(body), 'requires conflict');
+    assert(/if \(!_isLocalSyncDirty\(\)\)\s*return \{ ok: false, error: 'not_dirty' \}/.test(body), 'requires dirty');
+    assert(/cloudRevision <= SYNC_PUSH_UI\.baseRevision\) return \{ ok: false, error: 'not_newer' \}/.test(body), 'requires cloud newer');
+    assert(/activeRole === 'viewer'\)\s*return \{ ok: false, error: 'permission_denied' \}/.test(body), 'viewer blocked');
+    assert(/pushInFlight\)\s*return \{ ok: false, error: 'blocked_push_in_flight' \}/.test(body), 'blocks push in flight');
+    assert(/pullInFlight\)\s*return \{ ok: false, error: 'blocked_pull_in_flight' \}/.test(body), 'blocks pull in flight');
+  });
+
+  test('1G.5D keep-mine: push flag controls it; pull flag alone does not', function() {
+    var body = _keepMineBody();
+    assert(/_realSyncPushEnabled\(\)/.test(body), 'must gate on the push flag');
+    assert(!/_realSyncPullEnabled\(\)/.test(body), 'must NOT gate on the pull flag');
+  });
+
+  test('1G.5D keep-mine: re-fetches cloud revision; cloud_changed when it advanced (no push)', function() {
+    var body = _keepMineBody();
+    assert(/var reqCloudRevision = SYNC_PUSH_UI\.cloudRevision/.test(body), 'captures the conflict revision');
+    assert(/getSyncStatus\(\{ workspaceId: reqWorkspaceId \}\)/.test(body), 'must re-fetch current revision');
+    assert(/st\.currentRevision !== reqCloudRevision/.test(body), 'must compare to the conflict revision');
+    var preIdx  = body.indexOf('st.currentRevision !== reqCloudRevision');
+    var pushIdx = body.indexOf('bridge.keepMineResolve(');
+    assert(preIdx >= 0 && pushIdx > preIdx, 'pre-check must precede the push');
+    var seg = body.slice(preIdx, pushIdx);
+    assert(/error: 'cloud_changed'/.test(seg), 'mismatch returns cloud_changed before pushing');
+  });
+
+  test('1G.5D keep-mine: rebase push uses baseRevision = conflict cloud revision', function() {
+    var body = _keepMineBody();
+    assert(/bridge\.keepMineResolve\(\{[\s\S]{0,160}baseRevision:\s*reqCloudRevision/.test(body),
+      'push must rebase onto the current cloud head (baseRevision = reqCloudRevision)');
+    assert(/rendererState: localState/.test(body), 'pushes the kept local state');
+  });
+
+  test('1G.5D keep-mine: success advances only after push; no reload; no local DATA write', function() {
+    var body = _keepMineBody();
+    var okIdx     = body.indexOf('res.ok === true');
+    var baseIdx   = body.search(/SYNC_PUSH_UI\.baseRevision\s*=\s*_newRev/);
+    var syncedIdx = body.indexOf("= 'synced'");
+    assert(okIdx >= 0 && baseIdx > okIdx && syncedIdx > okIdx, 'state advances only in the success branch');
+    assert(/SYNC_PUSH_UI\.lastSyncedHash\s*=\s*localHash/.test(body), 'lastSyncedHash = pushed local hash');
+    assert(!/localStorage\.setItem\(LSKEY/.test(body), 'Keep Mine must not write local DATA');
+    assert(!/location\.reload/.test(body), 'Keep Mine must not reload');
+  });
+
+  test('1G.5D keep-mine: CAS stale / failure stays conflict (no overwrite)', function() {
+    var body = _keepMineBody();
+    assert(/err === 'cloud_changed'/.test(body), 'handles cloud_changed (CAS stale) result');
+    // Only one synced transition (success only); state never forced synced on failure.
+    var syncedCount = (body.match(/SYNC_PUSH_UI\.state\s*=\s*'synced'/g) || []).length;
+    assert(syncedCount === 1, 'exactly one synced transition (success only)');
+    // pendingHash cleared only in success branch.
+    var clearIdx = body.search(/SYNC_PUSH_UI\.pendingHash\s*=\s*null/);
+    var okIdx    = body.indexOf('res.ok === true');
+    assert(clearIdx > okIdx, 'pendingHash cleared only after a successful push');
+  });
+
+  test('1G.5D keep-mine: explicit only; not triggered by detection/preflight/listeners/hydrate', function() {
+    assert(!/_keepMineConflict\(/.test(_detectBody()), 'detection must not invoke keep-mine');
+    assert(!/_keepMineConflict\(/.test(_preflightBody()), 'preflight must not invoke keep-mine');
+    assert(!/_keepMineConflict\(/.test(_applyBody()), 'apply must not invoke keep-mine');
+    assert(!/addEventListener\('(focus|online)'[^)]*_keepMineConflict/.test(_rendererSrc), 'focus/online must not invoke keep-mine');
+    var hs = _rendererSrc.match(/function _hydrateSyncState\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(hs && !/_keepMineConflict\(/.test(hs[1]), 'hydrate must not invoke keep-mine');
+    // auto-push tick must not call keep-mine; conflict suppression remains.
+    var tick = _rendererSrc.match(/async function wsAutoSyncPushTick\(\)([\s\S]*?)\n\}/);
+    assert(tick && !/_keepMineConflict\(/.test(tick[1]), 'auto-push must not invoke keep-mine');
+  });
+
+  test('1G.5D keep-mine: reuses push bridge; no Cloud Backup Apply path', function() {
+    var body = _keepMineBody();
+    assert(/bridge\.keepMineResolve\(/.test(body), 'uses the push-bridge keepMineResolve');
+    assert(!/restoreBackupFromCloud|restoreFullBackup|_applyArchive|createManualBackup|applyPulledSnapshot/.test(body),
+      'must not use Cloud Backup Apply / Take Cloud path');
+  });
+
+  test('1G.5D main: keepMineResolve safety-backups before push; reuses pushWorkspaceSnapshot; maps stale→cloud_changed', function() {
+    var fs = require('fs'); var path = require('path');
+    var mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r/g, '');
+    var h = mainSrc.match(/ipcMain\.handle\('cloud:keepMineResolve'[\s\S]*?\n  \}\);/);
+    assert(h, 'cloud:keepMineResolve handler must exist');
+    var body = h[0];
+    assert(/buildFullBackup\(rendererState, null, 'pre-keep-mine'\)/.test(body), 'mandatory pre-keep-mine safety backup');
+    assert(/atomicWriteJSON\(/.test(body), 'safety backup written to disk');
+    assert(/error: 'safety_backup_failed'/.test(body), 'safety-backup failure blocks push');
+    var backupIdx = body.indexOf('buildFullBackup(');
+    var pushIdx   = body.indexOf('cloudSyncModule.pushWorkspaceSnapshot(');
+    assert(backupIdx >= 0 && pushIdx > backupIdx, 'safety backup precedes the push');
+    assert(/baseRevision:\s*baseRevision/.test(body), 'push uses the provided (conflict cloud) baseRevision');
+    assert(/error: 'cloud_changed'/.test(body) && /stale_revision/.test(body), 'maps stale_revision → cloud_changed');
+    // No new SQL RPC / no force override.
+    assert(!/force|override/i.test(body), 'must not use a force-override path');
+    // Must not log rendererState/content.
+    assert(!/log\([^)]*rendererState|console\.[a-z]+\([^)]*rendererState/.test(body), 'must not log renderer state');
+  });
+
+  test('1G.5D preload: keepMineResolve exposed on the push bridge', function() {
+    var fs = require('fs'); var path = require('path');
+    var preloadSrc = fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8');
+    assert(/exposeInMainWorld\(\s*'cloudSyncPush'[\s\S]{0,260}keepMineResolve/.test(preloadSrc),
+      'keepMineResolve must be exposed on cloudSyncPush');
+    assert(/cloud:keepMineResolve/.test(preloadSrc), 'must invoke the cloud:keepMineResolve channel');
+  });
+
+  test('1G.5D manual helper: __ktpKeepMineConflict gated; safe fields only', function() {
+    assert(/window\.__ktpKeepMineConflict = function \(\)/.test(_rendererSrc), 'manual keep-mine helper must exist');
+    var m = _rendererSrc.match(/window\.__ktpKeepMineConflict = function \(\)\s*\{([\s\S]*?)\n  \};/);
+    assert(m, 'helper body must be found');
+    var body = m[1];
+    assert(/if \(!_realSyncPushEnabled\(\)\) return Promise\.resolve\(\{ enabled: false \}\);/.test(body), 'gated by push flag');
+    assert(/newRevision:/.test(body) && /safetyBackupCreated:/.test(body) && /scheduledReload:\s*false/.test(body),
+      'returns newRevision/safety/scheduledReload:false');
+    assert(!/rendererState|content|storage|snapshotHash|snapshot_hash|signedUrl|leaseToken|lease_token|deviceId|device_id|checksum/i.test(body),
+      'helper must not expose content/storage path/hash/signed URL/device id/lease token');
   });
 
   // ── 1F.6C UX polish: render order + reload behavior ─────────────────────────

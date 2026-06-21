@@ -875,6 +875,65 @@ function setupIPC() {
     }
   });
 
+  // ── cloud:keepMineResolve (1G.5D) — explicit "Keep my version" conflict push ─
+  // Pushes the dirty local snapshot as the next cloud revision via the existing
+  // CAS RPC (baseRevision = the conflict cloud revision). It first creates a
+  // MANDATORY local safety backup of the local state being kept (local backup
+  // mechanism — NOT Cloud Backup Apply). CAS is authoritative: if the cloud moved
+  // again the push is rejected (stale → cloud_changed); local DATA is never
+  // overwritten and the superseded cloud revision stays in append-only history.
+  // Never logs/returns rendererState/content/storage_path/hash/device id/lease.
+  ipcMain.handle('cloud:keepMineResolve', async (_, payload) => {
+    if (!licenseGuard().ok) return { ok: false, error: 'license_required' };
+    try {
+      const { workspaceId, baseRevision, rendererState } = payload || {};
+      if (!workspaceId || typeof workspaceId !== 'string') return { ok: false, error: 'invalid_input' };
+      if (typeof baseRevision !== 'number' || !isFinite(baseRevision) ||
+          baseRevision < 0 || Math.floor(baseRevision) !== baseRevision) return { ok: false, error: 'invalid_input' };
+      if (!rendererState || typeof rendererState !== 'string') return { ok: false, error: 'invalid_input' };
+
+      // 1) MANDATORY local safety backup of the kept (dirty) local state BEFORE the
+      //    push. Failure blocks the push. Uses the local backup-file mechanism.
+      try {
+        if (!store) initDatabase();
+        saveStore();
+        const preArchive = buildFullBackup(rendererState, null, 'pre-keep-mine');
+        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const prePath = path.join(BACKUP_DIR, `backup-${ts}-pre-keep-mine.ktpbackup`);
+        atomicWriteJSON(prePath, preArchive);
+        log('INFO', 'Pre-keep-mine safety backup created', { path: prePath });
+      } catch (e) {
+        log('WARN', 'Pre-keep-mine safety backup failed — blocking push', { error: e.message });
+        return { ok: false, error: 'safety_backup_failed' };
+      }
+
+      // 2) CAS-push local snapshot as the next revision (base_revision = cloud head).
+      let deviceId = null;
+      try { deviceId = await require('./cloud/cloud-workspace').getOrCreateDeviceId(); } catch (_) { deviceId = null; }
+      const result = await cloudSyncModule.pushWorkspaceSnapshot({
+        workspaceId:  workspaceId,
+        baseRevision: baseRevision,
+        snapshotStr:  rendererState,
+        byteSize:     Buffer.byteLength(rendererState, 'utf8'),
+        snapshotHash: cloudSyncModule.computeSnapshotHash(rendererState),
+        deviceId:     deviceId,
+        appVersion:   APP_VER,
+      });
+
+      // 3) Sanitized result. stale_revision = the cloud advanced again → cloud_changed.
+      if (result && result.ok === true) {
+        return { ok: true, newRevision: (typeof result.newRevision === 'number' ? result.newRevision : null), safetyBackupCreated: true };
+      }
+      if (result && result.error === 'stale_revision') {
+        return { ok: false, error: 'cloud_changed', currentRevision: (typeof result.currentRevision === 'number' ? result.currentRevision : null), safetyBackupCreated: true };
+      }
+      return { ok: false, error: (result && typeof result.error === 'string') ? result.error : 'push_failed', safetyBackupCreated: true };
+    } catch (err) {
+      log('ERROR', 'Cloud sync keep-mine failed', { error: err.message });
+      return { ok: false, error: 'keep_mine_failed' };
+    }
+  });
+
   // ── Cloud Auth (CLOUD-FOUNDATION-1B.2c) ──────────────────────────────────
   require('./cloud/cloud-ipc').register(ipcMain, licenseGuard, log);
 

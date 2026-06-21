@@ -9106,6 +9106,96 @@ async function _takeCloudConflict() {
   return { ok: true, revision: res.revision, reloaded: _reloaded, safetyBackupCreated: res.safetyBackupCreated === true };
 }
 
+// ── 1G.5D: Keep Mine — explicit conflict resolution (rebase + CAS push) ──────
+// SEPARATE from Take Cloud. Pushes the dirty LOCAL snapshot as the next cloud
+// revision (base_revision = the conflict cloud revision). Explicit-only (never
+// detection/focus/online/interval/hydrate). Keep Mine is a PUSH → gated by the
+// PUSH flag. It NEVER overwrites local DATA and NEVER reloads. CAS is the
+// authoritative guard: if the cloud advanced again the push is rejected
+// (stale → cloud_changed) and local stays in conflict. A mandatory local safety
+// backup of the kept state is created in main before the push.
+async function _keepMineConflict() {
+  if (!_realSyncPushEnabled())                 return { ok: false, error: 'push_disabled' };
+  if (!WS_UI.activeId)                         return { ok: false, error: 'no_workspace' };
+  if (SYNC_PUSH_UI.pushInFlight)               return { ok: false, error: 'blocked_push_in_flight' };
+  if (SYNC_PUSH_UI.pullInFlight)               return { ok: false, error: 'blocked_pull_in_flight' };
+  if (SYNC_PUSH_UI.state !== 'conflict')       return { ok: false, error: 'not_conflict' };
+  if (!_isLocalSyncDirty())                    return { ok: false, error: 'not_dirty' };
+  if (WS_UI.activeRole === 'viewer')           return { ok: false, error: 'permission_denied' };
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return { ok: false, error: 'offline' };
+  if (typeof SYNC_PUSH_UI.baseRevision !== 'number') return { ok: false, error: 'invalid_base_revision' };
+  if (typeof SYNC_PUSH_UI.cloudRevision !== 'number' ||
+      SYNC_PUSH_UI.cloudRevision <= SYNC_PUSH_UI.baseRevision) return { ok: false, error: 'not_newer' };
+  var bridge = _syncBridge();
+  if (!bridge || typeof bridge.keepMineResolve !== 'function') return { ok: false, error: 'no_bridge' };
+
+  var reqWorkspaceId   = WS_UI.activeId;
+  var reqCloudRevision = SYNC_PUSH_UI.cloudRevision;  // the cloud head shown at conflict
+  var localState = JSON.stringify(DATA);              // the version being kept (pushed up)
+  var localHash  = _djb2Hash(localState);
+
+  SYNC_PUSH_UI.pushInFlight = true;
+
+  // Fast pre-check: re-fetch the current cloud revision. If it advanced since the
+  // conflict was shown, do NOT push — re-surface the conflict for the new revision.
+  // (CAS at push time is still the authoritative guard against the TOCTOU window.)
+  var readBridge = _wsReadBridge();
+  if (readBridge) {
+    var st;
+    try { st = await readBridge.getSyncStatus({ workspaceId: reqWorkspaceId }); }
+    catch (_) { st = null; }
+    if (WS_UI.activeId !== reqWorkspaceId) { SYNC_PUSH_UI.pushInFlight = false; return { ok: false, error: 'stale_workspace' }; }
+    if (!st || st.ok !== true || typeof st.currentRevision !== 'number') {
+      SYNC_PUSH_UI.pushInFlight = false; return { ok: false, error: 'offline' };
+    }
+    if (st.currentRevision !== reqCloudRevision) {
+      SYNC_PUSH_UI.cloudRevision = st.currentRevision;  // cloud moved — stay conflict, re-ask
+      SYNC_PUSH_UI.pushInFlight = false;
+      return { ok: false, error: 'cloud_changed', currentRevision: st.currentRevision };
+    }
+  }
+
+  var res;
+  try {
+    res = await bridge.keepMineResolve({
+      workspaceId:   reqWorkspaceId,
+      baseRevision:  reqCloudRevision,   // rebase onto the current cloud head
+      rendererState: localState,
+    });
+  } catch (_) {
+    res = { ok: false, error: 'keep_mine_failed' };
+  }
+  SYNC_PUSH_UI.pushInFlight = false;
+
+  // Workspace switched mid-operation → discard, no state mutation.
+  if (WS_UI.activeId !== reqWorkspaceId) return { ok: false, error: 'stale_workspace' };
+
+  if (res && res.ok === true) {
+    // SUCCESS — local DATA was pushed as the new cloud revision. Local DATA is
+    // unchanged (we only pushed up), so NO reload. Advance state to synced.
+    var _newRev = (typeof res.newRevision === 'number') ? res.newRevision : (reqCloudRevision + 1);
+    SYNC_PUSH_UI.baseRevision      = _newRev;
+    SYNC_PUSH_UI.cloudRevision     = _newRev;
+    SYNC_PUSH_UI.lastSyncedHash    = localHash;
+    SYNC_PUSH_UI.pendingHash       = null;
+    SYNC_PUSH_UI.lastErrorCategory = null;
+    SYNC_PUSH_UI.state             = 'synced';
+    _saveSyncState();
+    return { ok: true, newRevision: _newRev, safetyBackupCreated: res.safetyBackupCreated === true };
+  }
+
+  // CAS stale / cloud advanced in the window → stay conflict, never overwrite.
+  var err = (res && res.error) || 'unknown_error';
+  if (err === 'cloud_changed') {
+    if (typeof res.currentRevision === 'number') SYNC_PUSH_UI.cloudRevision = res.currentRevision;
+    SYNC_PUSH_UI.lastErrorCategory = 'cloud_changed';
+    return { ok: false, error: 'cloud_changed', currentRevision: (typeof res.currentRevision === 'number' ? res.currentRevision : null) };
+  }
+  // Any other failure — local dirty + conflict preserved.
+  SYNC_PUSH_UI.lastErrorCategory = err;
+  return { ok: false, error: err };
+}
+
 // Event triggers (focus/online) + the periodic interval. Each path is gated by
 // _scheduleDetectCloudNewer/_detectCloudNewer, so this is inert when disabled.
 if (typeof window !== 'undefined') {
@@ -9189,6 +9279,32 @@ if (typeof window !== 'undefined') {
         activeId:            WS_UI.activeId || null,
         activeRole:          WS_UI.activeRole || null,
         hasPending:          SYNC_PUSH_UI.pendingHash != null,
+        pullInFlight:        SYNC_PUSH_UI.pullInFlight,
+      };
+    });
+  };
+
+  // Gated, explicit manual smoke helper for 1G.5D KEEP MINE conflict resolution.
+  // Pushes the dirty local version as the next cloud revision (rebase + CAS). Keep
+  // Mine is a PUSH → gated by the push flag. Returns ONLY safe state fields — never
+  // content/hash/path/url/DATA. No reload (local DATA unchanged).
+  window.__ktpKeepMineConflict = function () {
+    if (!_realSyncPushEnabled()) return Promise.resolve({ enabled: false });
+    return _keepMineConflict().then(function (r) {
+      return {
+        ok:                  r.ok === true,
+        error:               (r.ok === true) ? null : (r.error || 'unknown_error'),
+        newRevision:         (r.ok === true) ? (r.newRevision || null) : null,
+        currentRevision:     (typeof r.currentRevision === 'number') ? r.currentRevision : null,
+        safetyBackupCreated: r.safetyBackupCreated === true,
+        scheduledReload:     false,
+        state:               SYNC_PUSH_UI.state,
+        baseRevision:        SYNC_PUSH_UI.baseRevision,
+        cloudRevision:       SYNC_PUSH_UI.cloudRevision,
+        activeId:            WS_UI.activeId || null,
+        activeRole:          WS_UI.activeRole || null,
+        hasPending:          SYNC_PUSH_UI.pendingHash != null,
+        pushInFlight:        SYNC_PUSH_UI.pushInFlight,
         pullInFlight:        SYNC_PUSH_UI.pullInFlight,
       };
     });

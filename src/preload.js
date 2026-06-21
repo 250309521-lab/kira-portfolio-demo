@@ -99,6 +99,8 @@ contextBridge.exposeInMainWorld('cloudBackup', {
 // 'cloudSync' would collide with it and break the whole renderer script parse.
 contextBridge.exposeInMainWorld('cloudSyncPush', {
   pushWorkspaceSnapshot:            (payload) => ipcRenderer.invoke('cloud:pushWorkspaceSnapshot', payload),
+  // 1G.5D: explicit "Keep my version" conflict resolution (rebase + CAS push).
+  keepMineResolve:                  (payload) => ipcRenderer.invoke('cloud:keepMineResolve', payload),
 });
 
 // ── Real Sync PULL preflight (CLOUD-FOUNDATION-1G.4B) ───────────────────────
