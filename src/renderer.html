@@ -4119,6 +4119,11 @@ tbody tr[onclick] { cursor: pointer; }
 /* 1G.8A read-only Sync status section — visually separate from Cloud Backup */
 .ws-sync-section{margin-top:8px;padding:8px 10px;border:1px solid var(--bd-1);border-radius:8px;background:rgba(99,102,241,.04)}
 .ws-sx-status{display:flex;align-items:center;gap:6px;margin-top:4px}
+/* 1G.8B inline conflict actions */
+.ws-sx-actions{margin-top:8px;display:flex;flex-direction:column;gap:6px}
+.ws-sx-action-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ws-sx-help{margin-top:0;flex:1;min-width:0}
+.ws-sx-actmsg{margin-top:0;font-weight:600;color:var(--i2)}
 [data-theme="light"] .ws-sync-section{border-color:rgba(30,50,100,.12)!important;background:rgba(99,102,241,.05)!important}
 .ws-sync-status-hdr{display:flex;align-items:center;justify-content:space-between;gap:6px}
 .ws-sync-hdr-lbl{font-size:11px;font-weight:600;color:var(--i3);text-transform:uppercase;letter-spacing:.02em}
@@ -5138,6 +5143,14 @@ var STRINGS={
     sxViewT:'Sadece görüntüleme',           sxViewD:'Bu çalışma alanını görüntüleyebilirsiniz, ancak değişiklikleri senkronize edemezsiniz.',
     sxPausedT:'Senkronizasyon duraklatıldı', sxPausedD:'Çevrimdışısınız veya buluta ulaşılamıyor. Yerel verileriniz güvende.',
     sxSyncingT:'Senkronize ediliyor…',      sxSyncingD:'Senkronizasyon devam ediyor.',
+    // 1G.8B — inline conflict action buttons (copy)
+    sxUseCloudBtn:'Bulut sürümünü kullan',  sxUseCloudHelp:'Yerel değişiklikleriniz önce yedeklenecek.',
+    sxUseCloudProg:'Bulut sürümü uygulanıyor…', sxUseCloudOk:'Bulut sürümü uygulandı',
+    sxUseCloudFail:'Bulut sürümü uygulanamadı — hiçbir şey değişmedi',
+    sxKeepMineBtn:'Benim sürümümü tut',     sxKeepMineHelp:'Mevcut sürümünüz yeni bulut sürümü olacak.',
+    sxKeepMineProg:'Sürümünüz tutuluyor…',  sxKeepMineOk:'Sürümünüz tutuldu',
+    sxKeepMineFail:'Sürümünüz tutulamadı — hiçbir şey değişmedi',
+    sxCloudChanged:'Bulut yeniden değişti — seçim yapmadan önce tekrar kontrol edin.',
     wsRole_editor:'Editör',wsRole_viewer:'Görüntüleyici',
     wsBackupHdr:'Bulut Yedek',
     wsBackupChecking:'Hazırlık kontrol ediliyor…',
@@ -5721,6 +5734,14 @@ var STRINGS={
     sxViewT:'View only',                 sxViewD:'You can view this workspace, but cannot sync changes.',
     sxPausedT:'Sync paused',             sxPausedD:'You’re offline or the cloud is unavailable. Your local data is safe.',
     sxSyncingT:'Syncing…',          sxSyncingD:'Sync is in progress.',
+    // 1G.8B — inline conflict action buttons (copy)
+    sxUseCloudBtn:'Use cloud version',   sxUseCloudHelp:'Your local changes will be backed up first.',
+    sxUseCloudProg:'Applying cloud version…', sxUseCloudOk:'Cloud version applied',
+    sxUseCloudFail:'Couldn’t apply cloud version — nothing changed',
+    sxKeepMineBtn:'Keep my version',     sxKeepMineHelp:'Your current version will become the new cloud version.',
+    sxKeepMineProg:'Keeping your version…', sxKeepMineOk:'Your version was kept',
+    sxKeepMineFail:'Couldn’t keep your version — nothing changed',
+    sxCloudChanged:'The cloud changed again — please review before choosing.',
     wsRole_editor:'Editor',wsRole_viewer:'Viewer',
     wsBackupHdr:'Cloud Backup',
     wsBackupChecking:'Checking readiness…',
@@ -8567,6 +8588,15 @@ var SYNC_PUSH_UI = {
   retryAt:          null,
   cloudRevision:    null,    // last known server revision (set on stale CAS)
 };
+// 1G.8B: renderer-local UI state for the inline conflict action buttons. UI-ONLY —
+// never persisted, NEVER written to ktp_sync_state_v1, holds no DATA/secrets/paths/
+// revisions. Tracks only the busy flag, which action is running, and the message key.
+var SYNC_ACTION_UI = {
+  busy:   false,        // an action is awaiting a resolver → disable both buttons
+  op:     null,         // 'use_cloud' | 'keep_mine'
+  phase:  null,         // 'progress' | 'success' | 'failure' | 'cloud_changed'
+  msgKey: null,         // i18n key for the message line (never raw text/data)
+};
 var _autoSyncPushTimer = null;
 var _autoSyncRetryTimer = null;
 var AUTO_SYNC_DEBOUNCE_MS = 3000;          // quiet period after an edit before push
@@ -9271,6 +9301,87 @@ async function _keepMineConflict() {
   SYNC_PUSH_UI.lastErrorCategory = err;
   return { ok: false, error: err };
   } finally { SYNC_PUSH_UI.pushInFlight = false; }
+}
+
+// ── 1G.8B: inline conflict action button visibility (pure, read-only) ─────────
+// Decides which conflict buttons to render. Buttons exist ONLY in 'conflict'.
+//   Use cloud version: pull flag ON + role is not viewer.
+//   Keep my version:   push flag ON + role is owner/admin/editor (NOT viewer/member).
+// No DATA/network/secret access, no mutation.
+function _syncConflictActions() {
+  if (SYNC_PUSH_UI.state !== 'conflict' || !WS_UI.activeId) {
+    return { showUseCloud: false, showKeepMine: false };
+  }
+  var role = WS_UI.activeRole;
+  var showUseCloud = _realSyncPullEnabled() && role !== 'viewer';
+  var showKeepMine = _realSyncPushEnabled() &&
+                     (role === 'owner' || role === 'admin' || role === 'editor');
+  return { showUseCloud: showUseCloud, showKeepMine: showKeepMine };
+}
+
+// Map the current SYNC_ACTION_UI phase to its i18n message key for the message line.
+// Returns null when there is nothing to show. Never returns raw text/data/revisions.
+function _syncActionMsgKey() {
+  if (!SYNC_ACTION_UI.op || !SYNC_ACTION_UI.phase) return null;
+  if (SYNC_ACTION_UI.phase === 'cloud_changed') return 'sxCloudChanged';
+  var isUse = SYNC_ACTION_UI.op === 'use_cloud';
+  if (SYNC_ACTION_UI.phase === 'progress') return isUse ? 'sxUseCloudProg' : 'sxKeepMineProg';
+  if (SYNC_ACTION_UI.phase === 'success')  return isUse ? 'sxUseCloudOk'   : 'sxKeepMineOk';
+  if (SYNC_ACTION_UI.phase === 'failure')  return isUse ? 'sxUseCloudFail' : 'sxKeepMineFail';
+  return null;
+}
+
+// ── 1G.8B: "Use cloud version" — thin UI wrapper over _takeCloudConflict() ────
+// Explicit-only. No engine redesign, no new IPC. On success the existing engine
+// reload (1G.5C) is left intact. cloud_changed → review message, stay conflict, no
+// retry. Any other failure → generic action failure (engine guarantees no change).
+async function wsSyncUseCloud() {
+  if (SYNC_ACTION_UI.busy) return;                 // double-click guard
+  if (SYNC_PUSH_UI.pushInFlight || SYNC_PUSH_UI.pullInFlight) return;
+  SYNC_ACTION_UI.busy = true; SYNC_ACTION_UI.op = 'use_cloud'; SYNC_ACTION_UI.phase = 'progress';
+  SYNC_ACTION_UI.msgKey = 'sxUseCloudProg';
+  renderWorkspaceCard();
+  var res;
+  try { res = await _takeCloudConflict(); }
+  catch (_) { res = { ok: false, error: 'apply_failed' }; }
+  if (res && res.ok === true) {
+    SYNC_ACTION_UI.phase = 'success'; SYNC_ACTION_UI.msgKey = 'sxUseCloudOk';
+    // engine reload (if any) proceeds as 1G.5C defines — do not alter it here.
+  } else if (res && res.error === 'cloud_changed') {
+    SYNC_ACTION_UI.phase = 'cloud_changed'; SYNC_ACTION_UI.msgKey = 'sxCloudChanged';
+  } else {
+    SYNC_ACTION_UI.phase = 'failure'; SYNC_ACTION_UI.msgKey = 'sxUseCloudFail';
+  }
+  SYNC_ACTION_UI.busy = false;
+  renderWorkspaceCard();
+}
+
+// ── 1G.8B: "Keep my version" — thin UI wrapper over _keepMineConflict() ───────
+// Explicit-only. No engine redesign, no new IPC. _keepMineConflict NEVER reloads
+// and never overwrites local DATA. On success the state becomes synced (or
+// local_pending if a new edit landed during the await, 1G.5E-H1); the success
+// message clears on the next settled (non-conflict) render. cloud_changed → review
+// message, stay conflict, no retry. Other failure → generic action failure.
+async function wsSyncKeepMine() {
+  if (SYNC_ACTION_UI.busy) return;                 // double-click guard
+  if (SYNC_PUSH_UI.pushInFlight || SYNC_PUSH_UI.pullInFlight) return;
+  SYNC_ACTION_UI.busy = true; SYNC_ACTION_UI.op = 'keep_mine'; SYNC_ACTION_UI.phase = 'progress';
+  SYNC_ACTION_UI.msgKey = 'sxKeepMineProg';
+  renderWorkspaceCard();
+  var res;
+  try { res = await _keepMineConflict(); }
+  catch (_) { res = { ok: false, error: 'keep_mine_failed' }; }
+  if (res && res.ok === true) {
+    SYNC_ACTION_UI.phase = 'success'; SYNC_ACTION_UI.msgKey = 'sxKeepMineOk';
+    // No reload (1G.5D). State is now synced or local_pending; the settled render
+    // below clears the message when state is no longer 'conflict'.
+  } else if (res && res.error === 'cloud_changed') {
+    SYNC_ACTION_UI.phase = 'cloud_changed'; SYNC_ACTION_UI.msgKey = 'sxCloudChanged';
+  } else {
+    SYNC_ACTION_UI.phase = 'failure'; SYNC_ACTION_UI.msgKey = 'sxKeepMineFail';
+  }
+  SYNC_ACTION_UI.busy = false;
+  renderWorkspaceCard();
 }
 
 // Event triggers (focus/online) + the periodic interval. Each path is gated by
@@ -10303,14 +10414,36 @@ function renderWorkspaceCard() {
         '</div>' +
         (WS_UI.restored ? '<div id="ws-restored-note" class="ws-restored-note"></div>' : '') +
         '<div id="ws-sync-note" class="ws-sync-note"></div>' +
-        // ── 1G.8A: read-only Sync status section ───────────────────────────────
+        // ── 1G.8A/1G.8B: Sync status section + inline conflict actions ──────────
         // Visually SEPARATE from Cloud Backup below (own container/class/header).
-        // Read-only: status dot + title + detail. NO action buttons, NO apply/
-        // restore controls, NO backup history. Gated by _syncSectionView() (real
-        // sync flags); hidden entirely when sync is off or unsettled (idle).
+        // Status: dot + title + detail. 1G.8B adds inline conflict action buttons
+        // ONLY when state==='conflict' (Use cloud version / Keep my version) — no
+        // apply/restore/backup controls, no backup history. Gated by
+        // _syncSectionView() (real sync flags); hidden entirely when off/idle.
         (function () {
           var _sv = _syncSectionView();
           if (!_sv.show) return '';
+          var _act = _syncConflictActions();
+          var _disabled = SYNC_ACTION_UI.busy || SYNC_PUSH_UI.pushInFlight || SYNC_PUSH_UI.pullInFlight;
+          var _btns = '';
+          if (_act.showUseCloud || _act.showKeepMine) {
+            _btns = '<div class="ws-sx-actions">' +
+              ((_syncActionMsgKey())
+                ? '<div id="ws-sx-actmsg" class="ws-sync-detail ws-sx-actmsg"></div>' : '') +
+              (_act.showUseCloud
+                ? '<div class="ws-sx-action-row">' +
+                    '<button class="btn btn-secondary btn-xs" id="ws-sx-usecloud"' +
+                      (_disabled ? ' disabled' : '') + ' onclick="wsSyncUseCloud()"></button>' +
+                    '<span id="ws-sx-usecloud-help" class="ws-sync-detail ws-sx-help"></span>' +
+                  '</div>' : '') +
+              (_act.showKeepMine
+                ? '<div class="ws-sx-action-row">' +
+                    '<button class="btn btn-secondary btn-xs" id="ws-sx-keepmine"' +
+                      (_disabled ? ' disabled' : '') + ' onclick="wsSyncKeepMine()"></button>' +
+                    '<span id="ws-sx-keepmine-help" class="ws-sync-detail ws-sx-help"></span>' +
+                  '</div>' : '') +
+            '</div>';
+          }
           return '<div class="ws-sync-section">' +
             '<div class="ws-sync-status-hdr"><span id="ws-sx-hdr" class="ws-sync-hdr-lbl"></span></div>' +
             '<div class="ws-sx-status">' +
@@ -10318,6 +10451,7 @@ function renderWorkspaceCard() {
               '<span id="ws-sx-title" class="ws-sync-summary"></span>' +
             '</div>' +
             '<div id="ws-sx-detail" class="ws-sync-detail"></div>' +
+            _btns +
           '</div>';
         })() +
         // ── Cloud Backup — simplified main view + Advanced section (1F.4E) ──────
@@ -10523,6 +10657,22 @@ function renderWorkspaceCard() {
         var _sxh = document.getElementById('ws-sx-hdr');    if (_sxh) _sxh.textContent = t('sxSyncHdr');
         var _sxt = document.getElementById('ws-sx-title');  if (_sxt) _sxt.textContent = t(_sxv.titleKey);
         var _sxd = document.getElementById('ws-sx-detail'); if (_sxd) _sxd.textContent = t(_sxv.detailKey);
+        // ── 1G.8B: inline conflict action button labels + message (via t()) ─────
+        var _sxuc = document.getElementById('ws-sx-usecloud');
+        if (_sxuc) _sxuc.textContent = t('sxUseCloudBtn');
+        var _sxuch = document.getElementById('ws-sx-usecloud-help');
+        if (_sxuch) _sxuch.textContent = t('sxUseCloudHelp');
+        var _sxkm = document.getElementById('ws-sx-keepmine');
+        if (_sxkm) _sxkm.textContent = t('sxKeepMineBtn');
+        var _sxkmh = document.getElementById('ws-sx-keepmine-help');
+        if (_sxkmh) _sxkmh.textContent = t('sxKeepMineHelp');
+        // Message line: clear once the conflict is resolved (settled, non-conflict).
+        if (SYNC_PUSH_UI.state !== 'conflict' && !SYNC_ACTION_UI.busy) {
+          SYNC_ACTION_UI.op = null; SYNC_ACTION_UI.phase = null; SYNC_ACTION_UI.msgKey = null;
+        }
+        var _sxam = document.getElementById('ws-sx-actmsg');
+        var _amKey = _syncActionMsgKey();
+        if (_sxam && _amKey) _sxam.textContent = t(_amKey);
       }
 
       // ── Cloud Backup — simplified + Advanced text (1F.4E) ─────────────────────

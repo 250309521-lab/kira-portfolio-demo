@@ -2381,6 +2381,115 @@ function register(test, assert, assertEqual) {
     assert(/ws-sync-status-section ws-backup-section/.test(_rendererSrc), 'Cloud Backup section must still exist');
   });
 
+  // ── 1G.8B inline conflict action buttons ─────────────────────────────────────
+
+  // The Sync section IIFE body (includes the 1G.8B conflict-action markup, which is
+  // built before the 'ws-sync-section' container string). Index-based (CRLF file).
+  function _sxIife() {
+    var start = _rendererSrc.indexOf('var _act = _syncConflictActions()');
+    var end   = _rendererSrc.indexOf('})() +', start);
+    assert(start > -1 && end > start, 'Sync section IIFE (1G.8B) must be found');
+    return _rendererSrc.slice(start, end);
+  }
+  function _fnBody(name) {
+    var m = _rendererSrc.match(new RegExp('async function ' + name + '\\(\\)\\s*\\{([\\s\\S]*?)\\n\\}'));
+    assert(m, name + ' body must be found');
+    return m[1];
+  }
+  function _actionsBody() {
+    var m = _rendererSrc.match(/function _syncConflictActions\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(m, '_syncConflictActions body must be found');
+    return m[1];
+  }
+
+  test('1G.8B: conflict buttons render only in conflict (gated by _syncConflictActions)', function() {
+    var b = _actionsBody();
+    assert(/SYNC_PUSH_UI\.state !== 'conflict'/.test(b), 'actions must require state === conflict');
+    assert(/showUseCloud: false, showKeepMine: false/.test(b), 'non-conflict returns no actions');
+    var iife = _sxIife();
+    assert(/_act\.showUseCloud \|\| _act\.showKeepMine/.test(iife), 'button block gated on action visibility');
+    assert(/onclick="wsSyncUseCloud\(\)"/.test(iife), 'Use cloud button wired');
+    assert(/onclick="wsSyncKeepMine\(\)"/.test(iife), 'Keep mine button wired');
+  });
+
+  test('1G.8B: Use cloud requires pull flag + non-viewer; Keep mine requires push flag + owner/admin/editor', function() {
+    var b = _actionsBody();
+    assert(/showUseCloud\s*=\s*_realSyncPullEnabled\(\) && role !== 'viewer'/.test(b),
+      'Use cloud: pull flag + not viewer');
+    assert(/showKeepMine\s*=\s*_realSyncPushEnabled\(\) &&/.test(b), 'Keep mine: push flag');
+    assert(/role === 'owner' \|\| role === 'admin' \|\| role === 'editor'/.test(b),
+      'Keep mine: owner/admin/editor only');
+    assert(!/role === 'member'/.test(b), 'member must NOT be allowed Keep mine');
+  });
+
+  test('1G.8B: wsSyncUseCloud calls _takeCloudConflict only; wsSyncKeepMine calls _keepMineConflict only', function() {
+    var u = _fnBody('wsSyncUseCloud');
+    assert(/await _takeCloudConflict\(\)/.test(u), 'wsSyncUseCloud awaits _takeCloudConflict');
+    assert(!/_keepMineConflict/.test(u), 'wsSyncUseCloud must not call _keepMineConflict');
+    var k = _fnBody('wsSyncKeepMine');
+    assert(/await _keepMineConflict\(\)/.test(k), 'wsSyncKeepMine awaits _keepMineConflict');
+    assert(!/_takeCloudConflict/.test(k), 'wsSyncKeepMine must not call _takeCloudConflict');
+  });
+
+  test('1G.8B: wrappers never touch Cloud Backup apply/restore paths', function() {
+    var both = _fnBody('wsSyncUseCloud') + _fnBody('wsSyncKeepMine') + _sxIife();
+    assert(!/wsStartApply|wsConfirmApply|restoreFromCloud|applyPulledSnapshot|wsApplyBackup|getCloudBackupContent/.test(both),
+      'no Cloud Backup apply/restore path may be referenced by the Sync conflict UI');
+  });
+
+  test('1G.8B: double-click guard + busy disables both buttons', function() {
+    var u = _fnBody('wsSyncUseCloud');
+    var k = _fnBody('wsSyncKeepMine');
+    assert(/if \(SYNC_ACTION_UI\.busy\) return;/.test(u), 'wsSyncUseCloud early-returns when busy');
+    assert(/if \(SYNC_ACTION_UI\.busy\) return;/.test(k), 'wsSyncKeepMine early-returns when busy');
+    // also respect engine in-flight flags
+    assert(/SYNC_PUSH_UI\.pushInFlight \|\| SYNC_PUSH_UI\.pullInFlight/.test(u), 'use-cloud respects in-flight');
+    assert(/SYNC_PUSH_UI\.pushInFlight \|\| SYNC_PUSH_UI\.pullInFlight/.test(k), 'keep-mine respects in-flight');
+    var iife = _sxIife();
+    assert(/var _disabled = SYNC_ACTION_UI\.busy \|\| SYNC_PUSH_UI\.pushInFlight \|\| SYNC_PUSH_UI\.pullInFlight/.test(iife),
+      'disabled computed from busy + in-flight');
+    assert((iife.match(/_disabled \? ' disabled' : ''/g) || []).length >= 2, 'both buttons honor _disabled');
+  });
+
+  test('1G.8B: cloud_changed → review message, no auto-retry; success/failure map per action', function() {
+    var u = _fnBody('wsSyncUseCloud');
+    var k = _fnBody('wsSyncKeepMine');
+    // cloud_changed mapping
+    assert(/error === 'cloud_changed'[\s\S]*?'sxCloudChanged'/.test(u), 'use-cloud maps cloud_changed');
+    assert(/error === 'cloud_changed'[\s\S]*?'sxCloudChanged'/.test(k), 'keep-mine maps cloud_changed');
+    // no automatic retry of the action / no scheduling
+    assert(!/_scheduleAutoSyncRetry|setTimeout|wsSyncUseCloud\(\)/.test(u), 'use-cloud must not auto-retry');
+    assert(!/_scheduleAutoSyncRetry|setTimeout|wsSyncKeepMine\(\)/.test(k), 'keep-mine must not auto-retry');
+    // success + failure per action
+    assert(/'sxUseCloudOk'/.test(u) && /'sxUseCloudFail'/.test(u), 'use-cloud success+failure keys');
+    assert(/'sxKeepMineOk'/.test(k) && /'sxKeepMineFail'/.test(k), 'keep-mine success+failure keys');
+  });
+
+  test('1G.8B: SYNC_ACTION_UI is UI-only (not persisted) and exposes no secrets/revisions', function() {
+    var sv = _rendererSrc.match(/function _saveSyncState\(\)\s*\{([\s\S]*?)\n\}/)[1];
+    assert(!/SYNC_ACTION_UI|busy|phase|msgKey/.test(sv), 'sync marker must not persist SYNC_ACTION_UI');
+    var msg = _rendererSrc.match(/function _syncActionMsgKey\(\)\s*\{([\s\S]*?)\n\}/)[1];
+    assert(!/revision|Revision/.test(msg), 'message mapping must not expose revision numbers');
+    var u = _fnBody('wsSyncUseCloud') + _fnBody('wsSyncKeepMine');
+    assert(!/storage_path|signed|snapshot_hash|rendererState|JSON\.stringify\(DATA\)|deviceId|lease/.test(u),
+      'wrappers must not reference secrets/paths/raw DATA');
+  });
+
+  test('1G.8B: EN and TR i18n keys exist for all conflict-action strings', function() {
+    ['sxUseCloudBtn','sxUseCloudHelp','sxUseCloudProg','sxUseCloudOk','sxUseCloudFail',
+     'sxKeepMineBtn','sxKeepMineHelp','sxKeepMineProg','sxKeepMineOk','sxKeepMineFail','sxCloudChanged']
+    .forEach(function(k) {
+      var n = (_rendererSrc.match(new RegExp('\\b' + k + ':', 'g')) || []).length;
+      assert(n >= 2, 'i18n key ' + k + ' must be defined in both TR and EN (found ' + n + ')');
+    });
+  });
+
+  test('1G.8B: no new IPC/preload bridge; Cloud Backup section remains separate', function() {
+    assert(!/ipcRenderer/.test(_rendererSrc), 'renderer must still never reference ipcRenderer directly');
+    assert(/wsStartApply\(/.test(_rendererSrc), 'Cloud Backup apply must still exist (separate)');
+    assert(/ws-sync-status-section ws-backup-section/.test(_rendererSrc), 'Cloud Backup section must still exist');
+  });
+
   // ── 1F.6C UX polish: render order + reload behavior ─────────────────────────
 
   test('1F.6C render: wsConfirmManualBackup calls renderAutoBackupIndicator before renderWorkspaceCard', function() {
