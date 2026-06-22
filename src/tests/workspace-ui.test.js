@@ -2861,6 +2861,138 @@ function register(test, assert, assertEqual) {
     assert(!/exposeInMainWorld|ipcRenderer\.invoke/.test(b), 'no new bridge/invoke introduced');
   });
 
+  // ── OPTIONAL-PIN-1A: optional first-start PIN + PIN-less boot/login ───────────
+
+  // Extract a named function's full source (handles `async`/multi-line bodies) by
+  // brace-free non-greedy match to the first column-0 closing brace.
+  function _srcFn(name) {
+    var m = _rendererSrc.match(new RegExp('function ' + name + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}'));
+    assert(m, name + ' source must be found');
+    return m[0];
+  }
+
+  test('OPTIONAL-PIN-1A: onboarding security step offers Set PIN + Skip, no confirm/repeat field', function() {
+    var b = _srcFn('obStepPin');
+    assert(/obSecSetPin\(\)/.test(b), 'security card offers Set PIN');
+    assert(/obSecSkip\(\)/.test(b), 'security card offers Skip for now');
+    assert(/sxOff|obSecTitle/.test(b) && /obSecTitle/.test(b), 'uses the optional security title');
+    // single-entry PIN: the confirm/repeat input is gone everywhere
+    assert(!/ob-pin2/.test(_rendererSrc), 'no second/confirm PIN input may remain anywhere');
+    var entry = _srcFn('obSecSetPin');
+    assert((entry.match(/id="ob-pin1"/g) || []).length === 1, 'exactly one PIN input in the Set PIN entry');
+    assert(!/ob-pin2|pin_confirm|obPinMismatch/.test(entry), 'no confirm field / mismatch logic in Set PIN entry');
+  });
+
+  test('OPTIONAL-PIN-1A: Skip proceeds PIN-less; obStep2 keeps PIN optional', function() {
+    var skip = _srcFn('obSecSkip');
+    assert(/_obPin\s*=\s*''/.test(skip), 'Skip clears the transient PIN');
+    assert(/obStep2\(\)/.test(skip), 'Skip proceeds to the building step (not commit)');
+    var step2 = _srcFn('obStep2');
+    // step2 validates a PIN only when one was actually typed (length>0)
+    assert(/p1\.length>0/.test(step2), 'obStep2 only validates a PIN when non-empty');
+    assert(!/obPinMismatch/.test(step2), 'no confirm-mismatch logic in building step');
+  });
+
+  test('OPTIONAL-PIN-1A: obCommit makes PIN optional and never stores a PIN-less credential', function() {
+    var c = _srcFn('obCommit');
+    assert(!/if\(!_obPin\|\|_obPin\.length<4\)\{[^}]*return/.test(c), 'forced-PIN guard removed');
+    assert(/_obPin&&_obPin\.length>=4/.test(c), 'PBKDF2 credentials only when a PIN was set');
+    assert(/_hashPinV2\(_obPin/.test(c), 'PBKDF2 v2 hashing preserved for set PIN');
+    assert(/_obPin=''/.test(c), 'transient PIN cleared after commit');
+    // PIN-less admin must carry NO pin fields — the built object has no plaintext pin
+    assert(!/pin:\s*_obPin/.test(c), 'raw PIN never written to the user record');
+  });
+
+  test('OPTIONAL-PIN-1A: needsOnboarding treats admin by ROLE presence (PIN-less admin not re-onboarded)', function() {
+    var src = _srcFn('needsOnboarding');
+    assert(/role==='admin'\)/.test(src), 'admin detected by role presence');
+    assert(!/role==='admin'&&\(u\.pin/.test(src), 'admin detection must not require a PIN');
+    // runtime proof: PIN-less admin + active building → no onboarding
+    var factory = new Function('PRODUCTION_MODE', 'DATA', src + '\nreturn needsOnboarding();');
+    var pinlessAdmin = { initialized: true, buildings: [{ active: true }], users: [{ role: 'admin' }] };
+    assert(factory(true, pinlessAdmin) === false, 'PIN-less admin with a building must NOT re-onboard');
+    assert(factory(true, { initialized: false, buildings: [], users: [] }) === true, 'fresh install still onboards');
+    assert(factory(true, { initialized: true, buildings: [{ active: true }], users: [{ role: 'viewer' }] }) === true,
+      'no admin → onboard');
+  });
+
+  test('OPTIONAL-PIN-1A: _userHasPin detects all credential formats (runtime)', function() {
+    var src = _srcFn('_userHasPin');
+    var f = new Function(src + '\nreturn _userHasPin;')();
+    assert(f({ pin_hash_v2: 'x' }) === true, 'PBKDF2 v2 → has PIN');
+    assert(f({ pin_hash: 'x' }) === true, 'legacy SHA-256 → has PIN');
+    assert(f({ pin: '1234' }) === true, 'legacy plaintext → has PIN');
+    assert(f({ role: 'admin' }) === false, 'no credential → PIN-less');
+    assert(f(null) === false, 'null-safe');
+  });
+
+  test('OPTIONAL-PIN-1A: selectUser enters PIN-less users directly, keeps lock for PIN users', function() {
+    var s = _srcFn('selectUser');
+    assert(/!_userHasPin\(loginSelectedUser\)/.test(s), 'branches on _userHasPin');
+    // PIN-less branch: no PIN field, no verification, direct app entry
+    assert(/currentUser=loginSelectedUser[\s\S]*initApp\(\)/.test(s), 'PIN-less user enters app directly');
+    assert(/pin-wrap'\)\.style\.display='block'/.test(s), 'PIN users still get the PIN entry');
+    // verification path remains intact for PIN users
+    var cp = _srcFn('checkPin');
+    assert(/_hashPinV2\(val,loginSelectedUser\.pin_salt\)/.test(cp), 'checkPin still verifies PBKDF2');
+    assert(/needsUpgrade/.test(cp), 'legacy upgrade-on-login preserved');
+  });
+
+  test('OPTIONAL-PIN-1A: no raw PIN stored/logged in onboarding/login paths', function() {
+    [_srcFn('obCommit'), _srcFn('obStep2'), _srcFn('selectUser'), _srcFn('checkPin')].forEach(function(src) {
+      assert(!/console\.(log|info|warn|error)\([^)]*_obPin/.test(src), 'transient PIN never logged');
+      assert(!/console\.(log|info|warn|error)\([^)]*\.value/.test(src), 'raw input value never logged');
+    });
+  });
+
+  test('OPTIONAL-PIN-1A: EN and TR i18n keys exist for the optional security step', function() {
+    ['obSecTitle','obSecDetail','obSecSetPin','obSecSkip','obSecPinPh','obSecContinue'].forEach(function(k) {
+      var n = (_rendererSrc.match(new RegExp('\\b' + k + ':', 'g')) || []).length;
+      assert(n >= 2, 'i18n key ' + k + ' must be in both TR and EN (found ' + n + ')');
+    });
+  });
+
+  test('OPTIONAL-PIN-1A: lock-icon motion is CSS-only and respects reduced-motion', function() {
+    assert(/@keyframes obLockPulse/.test(_rendererSrc), 'CSS keyframe present');
+    assert(/prefers-reduced-motion:reduce\)\{\.ob-lock-pulse\{animation:none\}\}/.test(_rendererSrc.replace(/\s/g,'')) ||
+           /prefers-reduced-motion:reduce[\s\S]{0,80}ob-lock-pulse[\s\S]{0,40}animation:none/.test(_rendererSrc),
+      'reduced-motion disables the animation');
+    // no heavy animation library pulled in
+    assert(!/gsap|anime\.min|lottie|framer-motion/i.test(_rendererSrc), 'no heavy animation library added');
+  });
+
+  // ── OPTIONAL-PIN-1A-FIX1: Skip-PIN persistence contract (restart must not re-onboard)
+
+  test('OPTIONAL-PIN-1A-FIX1: obCommit persists initialized + active building + admin BEFORE leaving onboarding', function() {
+    var c = _srcFn('obCommit');
+    assert(/DATA\.initialized=true/.test(c), 'sets DATA.initialized=true');
+    assert(/active:true/.test(c), 'creates an ACTIVE building (needsOnboarding hasBuilding pointer)');
+    assert(/role:'admin'/.test(c), 'creates a role:admin user');
+    // saveLocal() must run before the onboarding screen is dismissed / login shown
+    var iSave = c.search(/saveLocal\(\)/);
+    var iHide = c.search(/ob-screen'\)\.style\.display='none'/);
+    var iLogin = c.search(/renderLogin\(\)/);
+    assert(iSave > -1 && iHide > -1, 'obCommit saves then hides onboarding');
+    assert(iSave < iHide && iSave < iLogin, 'DATA persisted BEFORE leaving onboarding (restart-safe)');
+  });
+
+  test('OPTIONAL-PIN-1A-FIX1: persisted PIN-less onboarding state does NOT re-onboard (runtime)', function() {
+    // Simulate what obCommit persists for a Skip-PIN run, then check needsOnboarding.
+    var src = _srcFn('needsOnboarding');
+    var f = new Function('PRODUCTION_MODE', 'DATA', src + '\nreturn needsOnboarding();');
+    var persisted = {
+      initialized: true,
+      buildings: [{ id: 'B', name: 'B', active: true }],
+      users: [{ id: 'admin', name: 'A', role: 'admin' }]   // PIN-less admin (no pin fields)
+    };
+    assert(f(true, persisted) === false, 'restart with persisted PIN-less admin must NOT re-onboard');
+    // and the loadLocal hydration restores the fields needsOnboarding relies on
+    var ll = _srcFn('loadLocal');
+    assert(/DATA\.initialized\s*=\s*p\.initialized/.test(ll), 'loadLocal restores initialized');
+    assert(/DATA\.users\s*=\s*p\.users/.test(ll), 'loadLocal restores users');
+    assert(/DATA\.buildings\s*=\s*p\.buildings/.test(ll), 'loadLocal restores buildings');
+  });
+
   // ── 1F.6C UX polish: render order + reload behavior ─────────────────────────
 
   test('1F.6C render: wsConfirmManualBackup calls renderAutoBackupIndicator before renderWorkspaceCard', function() {

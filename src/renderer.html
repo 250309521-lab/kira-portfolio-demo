@@ -2219,6 +2219,11 @@ body::after {
 }
 .ob-text-input:focus{border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-glow)}
 #ob-box{transition:opacity .15s ease;}
+/* OPTIONAL-PIN-1A: subtle lock-icon pulse on the optional security card. CSS-only,
+   lightweight; disabled under prefers-reduced-motion. No layout shift (transform). */
+.ob-lock-pulse{animation:obLockPulse 2.4s ease-in-out infinite;will-change:transform}
+@keyframes obLockPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}
+@media (prefers-reduced-motion:reduce){.ob-lock-pulse{animation:none}}
 
 /* ── BUILDING NAV ACTIONS ─────────────────────────────────────── */
 .bld-kebab {
@@ -4889,6 +4894,13 @@ var STRINGS={
     obStep2Sub:     'Adım 2/3 — Yönetici girişi için PIN belirleyin',
     obPinMismatch:  "❌ PIN'ler eşleşmiyor",
     obPinTooShort:  'PIN en az 4 rakam olmalıdır.',
+    // OPTIONAL-PIN-1A — optional security step (single PIN, no confirm)
+    obSecTitle:     'Uygulamayı güvene almak ister misiniz?',
+    obSecDetail:    'Şimdi bir PIN ekleyebilir veya bu adımı atlayıp daha sonra Ayarlar’dan belirleyebilirsiniz.',
+    obSecSetPin:    'PIN belirle',
+    obSecSkip:      'Şimdilik atla',
+    obSecPinPh:     'PIN girin',
+    obSecContinue:  'Devam et',
     obStep3Title:   'İlk Binanızı Oluşturun',
     obStep3Sub:     'Adım 3/3 — Sistemi başlatmak için ilk binanızı ekleyin',
     obBldLabel:     'Bina adı',
@@ -5503,6 +5515,13 @@ var STRINGS={
     obStep2Sub:     'Step 2/3 — Set a PIN for admin login',
     obPinMismatch:  '❌ PINs do not match',
     obPinTooShort:  'PIN must be at least 4 digits.',
+    // OPTIONAL-PIN-1A — optional security step (single PIN, no confirm)
+    obSecTitle:     'Secure your app?',
+    obSecDetail:    'You can add a PIN now or skip this step and set it later from Settings.',
+    obSecSetPin:    'Set PIN',
+    obSecSkip:      'Skip for now',
+    obSecPinPh:     'Enter PIN',
+    obSecContinue:  'Continue',
     obStep3Title:   'Create Your First Building',
     obStep3Sub:     'Step 3/3 — Add your first building to get started',
     obBldLabel:     'Building name',
@@ -6298,10 +6317,28 @@ function roleLabel(r){
   return r==='admin'?t('roleAdmin'):r==='manager'?t('roleManager'):t('roleViewer');
 }
 
+// OPTIONAL-PIN-1A: a user "has a PIN" if any credential field is present (current
+// PBKDF2 v2, legacy SHA-256, or very-legacy plaintext). Pure, no side effects.
+function _userHasPin(u){
+  return !!(u && (u.pin_hash_v2 || u.pin_hash || u.pin!=null));
+}
+
 function selectUser(uid){
   const users=DATA.users&&DATA.users.length?DATA.users:DEFAULT_USERS;
   loginSelectedUser=users.find(u=>u.id===uid);
   if(!loginSelectedUser) return;
+  // OPTIONAL-PIN-1A: PIN-less user enters directly (no PIN field, no verification).
+  // Users WITH a PIN keep the existing lock screen + verification path unchanged.
+  if(!_userHasPin(loginSelectedUser)){
+    if(_isLockedOut&&_isLockedOut(loginSelectedUser.id)){ /* never set for PIN-less, but harmless */ }
+    _resetAttempts&&_resetAttempts(loginSelectedUser.id);
+    currentUser=loginSelectedUser;
+    __boot('login','user: '+loginSelectedUser.id);
+    document.getElementById('login-screen').style.display='none';
+    document.getElementById('pin-wrap').style.display='none';
+    initApp();
+    return;
+  }
   document.getElementById('pin-wrap').style.display='block';
   document.getElementById('pin-inp').value='';
   document.getElementById('login-err').textContent='';
@@ -6646,7 +6683,10 @@ function needsOnboarding(){
   if(!DATA.initialized) return true;
   // Recovery: initialized flag set but data is inconsistent
   const hasBuilding=(DATA.buildings||[]).some(b=>b.active);
-  const hasAdmin=(DATA.users||[]).some(u=>u.role==='admin'&&(u.pin||u.pin_hash||u.pin_hash_v2));
+  // OPTIONAL-PIN-1A: an admin is valid by ROLE PRESENCE — a PIN is optional now.
+  // (Previously required a PIN, which would re-trigger onboarding forever for a
+  // PIN-less admin created via the Skip path.)
+  const hasAdmin=(DATA.users||[]).some(u=>u.role==='admin');
   return !hasBuilding||!hasAdmin;
 }
 
@@ -6706,51 +6746,81 @@ function obCheckProfile(){
   btn.style.pointerEvents=ok?'auto':'none';
 }
 
+// OPTIONAL-PIN-1A: optional security step. The user may Set PIN (single entry, NO
+// confirm field) or Skip for now (PIN-less admin). Either path proceeds to the
+// building step (obStep2). The PIN, if set, is validated (4+ digits) only when
+// non-empty; PBKDF2 v2 hashing happens at obCommit. No PIN is ever forced here.
 function obStepPin(){
   const nm=(document.getElementById('ob-name')?.value||'').trim();
   if(nm.length>=2) _obName=nm;
   _obSet(`
-    <div class="login-logo">🔐</div>
-    <div class="login-title">${t('obStep2Title')}</div>
-    <div class="login-sub" style="margin-bottom:22px">${t('obStep2Sub')}</div>
+    <div class="login-logo ob-lock-pulse">🔐</div>
+    <div class="login-title">${t('obSecTitle')}</div>
+    <div class="login-sub" style="margin-bottom:8px">${t('obSecDetail')}</div>
+    <div class="login-error" id="ob-err"></div>
+    <div style="margin-top:14px;display:flex;flex-direction:column;gap:8px">
+      <button class="btn btn-primary" style="width:100%" onclick="obSecSetPin()">${t('obSecSetPin')}</button>
+      <button class="btn btn-ghost" style="width:100%;font-size:13px" onclick="obSecSkip()">${t('obSecSkip')}</button>
+      <button class="btn btn-ghost" style="width:100%;font-size:12px;color:var(--i4)"
+              onclick="obStepProfile()">${t('obBackBtn')}</button>
+    </div>
+    <div class="login-version">${t('obFirstSetup')}</div>
+  `);
+}
+
+// Reveal the single PIN entry (no confirm/repeat field).
+function obSecSetPin(){
+  _obSet(`
+    <div class="login-logo ob-lock-pulse">🔐</div>
+    <div class="login-title">${t('obSecTitle')}</div>
+    <div class="login-sub" style="margin-bottom:22px">${t('obSecPinPh')}</div>
     <div style="display:flex;flex-direction:column;gap:10px">
       <input type="password" id="ob-pin1" class="login-pin-input" maxlength="6"
-             placeholder="• • • •" oninput="obCheckStep1()" autocomplete="new-password">
-      <input type="password" id="ob-pin2" class="login-pin-input" maxlength="6"
-             placeholder="••••" oninput="obCheckStep1()" autocomplete="new-password">
+             placeholder="• • • •" oninput="obCheckPin()"
+             onkeydown="if(event.key==='Enter'&&document.getElementById('ob-next1')?.style.pointerEvents!=='none')obStep2();"
+             autocomplete="new-password">
     </div>
     <div class="login-error" id="ob-err"></div>
     <div style="margin-top:16px;display:flex;flex-direction:column;gap:8px">
       <button id="ob-next1" class="btn btn-primary" style="width:100%;opacity:.4;pointer-events:none"
-              onclick="obStep2()">${t('obContinue')}</button>
+              onclick="obStep2()">${t('obSecContinue')}</button>
       <button class="btn btn-ghost" style="width:100%;font-size:12px;color:var(--i4)"
-              onclick="obStepProfile()">${t('obBackBtn')}</button>
+              onclick="obStepPin()">${t('obBackBtn')}</button>
     </div>
     <div class="login-version">${t('obFirstSetup')}</div>
   `);
   setTimeout(()=>{ const el=document.getElementById('ob-pin1'); if(el) el.focus(); },180);
 }
 
-function obCheckStep1(){
+// Skip PIN — proceed to the building step with no PIN (admin will be PIN-less).
+function obSecSkip(){
+  _obPin='';
+  obStep2();
+}
+
+// Enable Continue only when a valid 4+ digit numeric PIN is entered (single field).
+function obCheckPin(){
   const p1=(document.getElementById('ob-pin1')?.value)||'';
-  const p2=(document.getElementById('ob-pin2')?.value)||'';
   const btn=document.getElementById('ob-next1');
   if(!btn) return;
-  const ok=p1.length>=4&&/^\d+$/.test(p1)&&p1===p2;
+  const ok=p1.length>=4&&/^\d+$/.test(p1);
   btn.style.opacity=ok?'1':'0.4';
   btn.style.pointerEvents=ok?'auto':'none';
   const err=document.getElementById('ob-err');
-  if(err&&p2.length>=4&&p1!==p2) err.textContent=t('obPinMismatch');
-  else if(err) err.textContent='';
+  if(err) err.textContent='';
 }
 
+// Building step (step 3). If arriving from the Set PIN entry, validate + capture the
+// single PIN; if skipped or returning from a later step, leave _obPin as-is.
 function obStep2(){
-  const p1=(document.getElementById('ob-pin1')?.value)||'';
-  const p2=(document.getElementById('ob-pin2')?.value)||'';
-  const err=document.getElementById('ob-err');
-  if(p1.length<4||!/^\d+$/.test(p1)){ if(err) err.textContent=t('obPinTooShort'); return; }
-  if(p1!==p2){ if(err) err.textContent=t('obPinMismatch'); return; }
-  _obPin=p1;
+  const el=document.getElementById('ob-pin1');
+  if(el){
+    const p1=el.value||'';
+    if(p1.length>0){
+      if(p1.length<4||!/^\d+$/.test(p1)){ const e=document.getElementById('ob-err'); if(e) e.textContent=t('obPinTooShort'); return; }
+      _obPin=p1;
+    }
+  }
   _obSet(`
     <div class="login-logo">🏢</div>
     <div class="login-title">${t('obStep3Title')}</div>
@@ -6831,7 +6901,8 @@ async function _obCloudFetch(){
 async function obCommit(){
   const bldName=(document.getElementById('ob-bld')?.value||'').trim();
   const err=document.getElementById('ob-err2');
-  if(!_obPin||_obPin.length<4){ if(err) err.textContent=t('obErrPinInvalid'); return; }
+  // OPTIONAL-PIN-1A: PIN is OPTIONAL. Only validate it when one was actually set.
+  if(_obPin&&(_obPin.length<4||!/^\d+$/.test(_obPin))){ if(err) err.textContent=t('obErrPinInvalid'); return; }
   if(bldName.length<2){ if(err) err.textContent=t('obErrBldName'); return; }
 
   const adminName=(_obName||'').trim()||t('defaultAdminName');
@@ -6841,8 +6912,14 @@ async function obCommit(){
   const bldShort=bldName.split(/\s+/).map(w=>w.replace(/[^a-zA-ZğüşöçıĞÜŞÖÇİ]/gi,'')[0]||'')
     .join('').toUpperCase().slice(0,3) || bldName.replace(/[^a-zA-Z]/g,'').toUpperCase().slice(0,3) || 'BLD';
 
-  const adminSalt=_genSalt();
-  const adminPinHash=await _hashPinV2(_obPin,adminSalt);
+  // Build the admin user — WITH PBKDF2 v2 credentials only if a PIN was set,
+  // otherwise a fully PIN-less admin (no pin/pin_hash/pin_hash_v2/pin_salt fields).
+  const adminUser={id:'admin',name:adminName,role:'admin',color:'#4a8af4',avatar:adminAvatar};
+  if(_obPin&&_obPin.length>=4){
+    const adminSalt=_genSalt();
+    adminUser.pin_hash_v2=await _hashPinV2(_obPin,adminSalt);
+    adminUser.pin_salt=adminSalt;
+  }
 
   // Single mutation point — all DATA writes happen here
   DATA.initialized=true;
@@ -6850,7 +6927,7 @@ async function obCommit(){
   DATA.tenants[bldId]=[];
   DATA.payments[bldId]={};
   DATA.expenses[bldId]=[];
-  DATA.users=[{id:'admin',name:adminName,role:'admin',pin_hash_v2:adminPinHash,pin_salt:adminSalt,color:'#4a8af4',avatar:adminAvatar}];
+  DATA.users=[adminUser];
   _obPin=''; _obName=''; // clear transients immediately
 
   syncBuildingConstants();
