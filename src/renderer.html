@@ -5266,6 +5266,12 @@ var STRINGS={
     nameRequired:'❌ İsim zorunlu',
     pinEmpty:'❌ PIN boş olamaz',pinInvalid:'❌ Geçersiz PIN (4-6 rakam, sadece sayı)',
     pinMismatch:'❌ PIN tekrarı eşleşmiyor',pinUpdated:'🔑 PIN güncellendi',
+    // OPTIONAL-PIN-1B — settings set/change/remove PIN (single field, no confirm)
+    pinSetBtn:'PIN belirle',pinChangeBtn:'PIN değiştir',pinRemoveBtn:'PIN’i kaldır',
+    pinEnterPh:'PIN girin',pinSavedMsg:'PIN kaydedildi.',pinRemovedMsg:'PIN kaldırıldı.',
+    pinTooShortMsg:'PIN en az 4 haneli olmalıdır.',
+    pinRemoveConfirm:'Bu kullanıcı için PIN kaldırılsın mı?',
+    pinRemoveDetail:'Bu kullanıcı PIN girmeden uygulamaya girebilir.',
     pinLocked:'🔒 Hesap kilitlendi. {n} sn.',pinAttemptsLeft:'{n} hak kaldı',
     idleLogout:'⏱ Güvenlik nedeniyle oturumunuz kapatıldı.',
     userActivated:'✅ Aktifleştirildi',userDeactivated:'⏸ Pasif yapıldı',
@@ -5887,6 +5893,12 @@ var STRINGS={
     nameRequired:'❌ Name is required',
     pinEmpty:'❌ PIN cannot be empty',pinInvalid:'❌ Invalid PIN (4-6 digits, numbers only)',
     pinMismatch:'❌ PIN confirmation does not match',pinUpdated:'🔑 PIN updated',
+    // OPTIONAL-PIN-1B — settings set/change/remove PIN (single field, no confirm)
+    pinSetBtn:'Set PIN',pinChangeBtn:'Change PIN',pinRemoveBtn:'Remove PIN',
+    pinEnterPh:'Enter PIN',pinSavedMsg:'PIN saved.',pinRemovedMsg:'PIN removed.',
+    pinTooShortMsg:'PIN must be at least 4 digits.',
+    pinRemoveConfirm:'Remove PIN for this user?',
+    pinRemoveDetail:'This user will be able to enter without a PIN.',
     pinLocked:'🔒 Locked for {n}s.',pinAttemptsLeft:'{n} left',
     idleLogout:'⏱ Session closed due to inactivity.',
     userActivated:'✅ Activated',userDeactivated:'⏸ Deactivated',
@@ -11319,7 +11331,7 @@ function tplUsers(){
       <td>
         <div style="display:flex;gap:4px;flex-wrap:wrap;min-width:120px">
           ${canEditUser(i)?`<button class="btn btn-ghost btn-xs" onclick="editUserInline(${i})" title="${t('usersEditBtn')}">${t('usersEditBtn')}</button>`:''}
-          ${canEditUser(i)?`<button class="btn btn-ghost btn-xs" onclick="showPINForm(${i})" title="${t('usersPinChange')}">🔑</button>`:''}
+          ${canEditUser(i)?`<button class="btn btn-ghost btn-xs" onclick="showPINForm(${i})" title="${_userHasPin(u)?t('pinChangeBtn'):t('pinSetBtn')}">🔑</button>`:''}
           ${canDeactivateUser(i)?`<button class="btn btn-ghost btn-xs" onclick="toggleUserActive(${i})" title="${u.active!==false?t('usersInactive'):t('usersActive')}">${u.active!==false?'⏸':'▶'}</button>`:''}
           ${canDeleteUser(i)?`<button class="btn btn-danger btn-xs" id="btn-del-user-${i}" onclick="delUserConfirm(${i})">🗑</button>`:''}
         </div>
@@ -11445,20 +11457,23 @@ function saveEditUser2(i){
   toast('✅ '+t('saved'),'green');
 }
 
+// OPTIONAL-PIN-1B: adaptive PIN management — Set PIN (no PIN yet) or Change PIN +
+// Remove PIN (PIN exists). Single PIN entry only — NO confirm/repeat field.
 function showPINForm(i){
   if(!canEditUser(i)){toast(t('usersNoPermission'),'red');return;}
   const u=DATA.users[i];
   const f=document.getElementById('user-inline-form');
   if(!f) return;
+  const hasPin=_userHasPin(u);
   f.innerHTML=`<div style="background:var(--glass-2);border:1px solid var(--bd-1);border-radius:var(--r2);padding:14px;margin-bottom:10px">
-    <div style="font-size:13px;font-weight:700;margin-bottom:10px">${t('usersPinChange')} — ${u.name}</div>
-    <div class="form-grid-2" style="margin-bottom:10px">
-      <div class="form-row"><label class="form-label">${t('usersPinNew')}</label><input class="form-input" id="pin_new" type="password" maxlength="6" placeholder="••••" autofocus></div>
-      <div class="form-row"><label class="form-label">${t('usersPinRepeat')}</label><input class="form-input" id="pin_confirm" type="password" maxlength="6" placeholder="••••"></div>
-    </div>
-    <div style="display:flex;gap:6px">
+    <div style="font-size:13px;font-weight:700;margin-bottom:10px">${hasPin?t('pinChangeBtn'):t('pinSetBtn')} — ${_esc(u.name)}</div>
+    <div class="form-row" style="margin-bottom:10px"><label class="form-label">${t('pinEnterPh')}</label>
+      <input class="form-input" id="pin_new" type="password" maxlength="6" inputmode="numeric" placeholder="• • • •"
+             onkeydown="if(event.key==='Enter')commitPIN(${i})" autocomplete="new-password" autofocus></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
       <button class="btn btn-primary btn-sm" onclick="commitPIN(${i})">${t('save')}</button>
       <button class="btn btn-ghost btn-sm" onclick="document.getElementById('user-inline-form').innerHTML=''">${t('cancel')}</button>
+      ${hasPin?`<button class="btn btn-danger btn-sm" style="margin-left:auto" onclick="removePINConfirm(${i})">${t('pinRemoveBtn')}</button>`:''}
     </div>
   </div>`;
   const inp=document.getElementById('pin_new');
@@ -11467,19 +11482,47 @@ function showPINForm(i){
 async function commitPIN(i){
   if(!canEditUser(i)){toast(t('usersNoPermission'),'red');return;}
   const u=DATA.users[i];
-  const np=(document.getElementById('pin_new')||{}).value||'';
-  const nc=(document.getElementById('pin_confirm')||{}).value||'';
+  const el=document.getElementById('pin_new');
+  let np=(el||{}).value||'';
   if(!np){toast(t('pinEmpty'),'red');return;}
-  if(np.length<4||!/^\d+$/.test(np)){toast(t('pinInvalid'),'red');return;}
-  if(np!==nc){toast(t('pinMismatch'),'red');return;}
+  if(np.length<4||!/^\d+$/.test(np)){toast(t('pinTooShortMsg'),'red');return;}
   const _cs=_genSalt();
   u.pin_hash_v2=await _hashPinV2(np,_cs);
   u.pin_salt=_cs;
-  delete u.pin_hash;
+  delete u.pin_hash;   // drop any legacy credential formats
   delete u.pin;
-  addHist('PIN sıfırlandı: '+u.name);
+  np=''; if(el) el.value='';   // clear transient PIN immediately
+  addHist(t('pinSavedMsg')+' '+u.name);
   saveLocal();
-  toast(t('pinUpdated'),'green');
+  toast(t('pinSavedMsg'),'green');
+  document.getElementById('modal').innerHTML=tplUsers();
+}
+// OPTIONAL-PIN-1B: inline confirm before removing/disabling a user's PIN.
+function removePINConfirm(i){
+  if(!canEditUser(i)){toast(t('usersNoPermission'),'red');return;}
+  const u=DATA.users[i];
+  const f=document.getElementById('user-inline-form');
+  if(!f) return;
+  f.innerHTML=`<div style="background:var(--glass-2);border:1px solid rgba(244,63,94,.25);border-radius:var(--r2);padding:14px;margin-bottom:10px">
+    <div style="font-size:13px;font-weight:700;margin-bottom:6px">${t('pinRemoveConfirm')} — ${_esc(u.name)}</div>
+    <div style="font-size:11.5px;color:var(--i4);margin-bottom:10px">${t('pinRemoveDetail')}</div>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-danger btn-sm" onclick="removePIN(${i})">${t('pinRemoveBtn')}</button>
+      <button class="btn btn-ghost btn-sm" onclick="showPINForm(${i})">${t('cancel')}</button>
+    </div>
+  </div>`;
+}
+// Remove/disable PIN: strip ALL credential fields → user enters directly afterwards.
+function removePIN(i){
+  if(!canEditUser(i)){toast(t('usersNoPermission'),'red');return;}
+  const u=DATA.users[i];
+  delete u.pin;
+  delete u.pin_hash;
+  delete u.pin_hash_v2;
+  delete u.pin_salt;
+  addHist(t('pinRemovedMsg')+' '+u.name);
+  saveLocal();
+  toast(t('pinRemovedMsg'),'green');
   document.getElementById('modal').innerHTML=tplUsers();
 }
 

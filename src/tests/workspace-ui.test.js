@@ -2993,6 +2993,60 @@ function register(test, assert, assertEqual) {
     assert(/DATA\.buildings\s*=\s*p\.buildings/.test(ll), 'loadLocal restores buildings');
   });
 
+  // ── OPTIONAL-PIN-1B: settings set / change / remove PIN ──────────────────────
+
+  test('OPTIONAL-PIN-1B: PIN form is adaptive (Set when none, Change + Remove when present)', function() {
+    var f = _srcFn('showPINForm');
+    assert(/_userHasPin\(u\)/.test(f), 'form branches on whether the user has a PIN');
+    assert(/hasPin\?t\('pinChangeBtn'\):t\('pinSetBtn'\)/.test(f), 'title is Change vs Set');
+    assert(/hasPin\?[^]*removePINConfirm\(/.test(f), 'Remove PIN shown only when a PIN exists');
+    // single PIN entry only — no confirm/repeat field anywhere in the form
+    assert((f.match(/id="pin_new"/g) || []).length === 1, 'exactly one PIN input');
+    assert(!/pin_confirm|usersPinRepeat|pinMismatch/.test(f), 'no confirm/repeat field or mismatch logic');
+  });
+
+  test('OPTIONAL-PIN-1B: commitPIN writes PBKDF2 v2, drops legacy creds, clears transient, no raw PIN', function() {
+    var c = _srcFn('commitPIN');
+    assert(/_hashPinV2\(np,_cs\)/.test(c) && /u\.pin_hash_v2=/.test(c) && /u\.pin_salt=/.test(c), 'PBKDF2 v2 written');
+    assert(/delete u\.pin_hash/.test(c) && /delete u\.pin\b/.test(c), 'legacy credential fields dropped');
+    assert(/np\.length<4\|\|!\/\^\\d\+\$\/\.test\(np\)/.test(c), 'enforces 4+ digit numeric PIN');
+    assert(/np=''/.test(c) && /el\.value=''/.test(c), 'transient PIN cleared after save');
+    assert(!/u\.pin\s*=\s*np|u\.pin=np/.test(c), 'raw PIN never stored on the user');
+    assert(!/console\.(log|info|warn|error)\([^)]*np/.test(c), 'raw PIN never logged');
+    assert(/saveLocal\(\)/.test(c), 'persists after set/change');
+    assert(!/pin_confirm|pinMismatch/.test(c), 'no confirm-field logic');
+  });
+
+  test('OPTIONAL-PIN-1B: removePIN strips ALL credential fields and persists', function() {
+    var r = _srcFn('removePIN');
+    ['pin','pin_hash','pin_hash_v2','pin_salt'].forEach(function(field){
+      assert(new RegExp('delete u\\.' + field + '\\b').test(r), 'removePIN deletes u.' + field);
+    });
+    assert(/saveLocal\(\)/.test(r), 'persists after remove');
+    assert(!/console\.(log|info|warn|error)/.test(r), 'remove logs nothing sensitive');
+    // a confirm step gates the removal
+    var conf = _srcFn('removePINConfirm');
+    assert(/pinRemoveConfirm/.test(conf) && /removePIN\(/.test(conf), 'remove is behind an inline confirm');
+  });
+
+  test('OPTIONAL-PIN-1B: credential presence flips correctly (runtime via _userHasPin)', function() {
+    var f = new Function(_srcFn('_userHasPin') + '\nreturn _userHasPin;')();
+    // after set/change → has PIN
+    assert(f({ pin_hash_v2: 'h', pin_salt: 's' }) === true, 'set/change → has PIN');
+    // after removePIN deletes all four fields → no PIN
+    var u = { id: 'x', role: 'admin', pin: '1', pin_hash: 'a', pin_hash_v2: 'b', pin_salt: 'c' };
+    delete u.pin; delete u.pin_hash; delete u.pin_hash_v2; delete u.pin_salt;
+    assert(f(u) === false, 'after remove → PIN-less (enters directly)');
+  });
+
+  test('OPTIONAL-PIN-1B: EN and TR i18n keys exist for set/change/remove PIN', function() {
+    ['pinSetBtn','pinChangeBtn','pinRemoveBtn','pinEnterPh','pinSavedMsg','pinRemovedMsg',
+     'pinTooShortMsg','pinRemoveConfirm','pinRemoveDetail'].forEach(function(k) {
+      var n = (_rendererSrc.match(new RegExp('\\b' + k + ':', 'g')) || []).length;
+      assert(n >= 2, 'i18n key ' + k + ' must be in both TR and EN (found ' + n + ')');
+    });
+  });
+
   // ── 1F.6C UX polish: render order + reload behavior ─────────────────────────
 
   test('1F.6C render: wsConfirmManualBackup calls renderAutoBackupIndicator before renderWorkspaceCard', function() {
