@@ -8572,14 +8572,36 @@ function _persistSelectedMonth() {
 // All state lives OUTSIDE DATA (localStorage marker) so it never changes the DATA
 // fingerprint — preserving the 1F.6C/1F.6D invariants.
 function _realSyncPushEnabled() {
-  return typeof window !== 'undefined' && !!window.KTP_REAL_SYNC_PUSH_ENABLED;
+  return (typeof window !== 'undefined' && window.KTP_REAL_SYNC_PUSH_ENABLED === true) || _syncMarkerActiveForGate();
 }
 
 // 1G.4B: pull is gated by a SEPARATE, stricter flag — independent of push, and
 // OFF by default even when push is enabled (pull is destructive to local DATA;
 // 1G.4B is preflight-only, but the gate is introduced here for the whole pull path).
+// 1G.9C1: push and pull are TIED — the production marker path uses the same
+// validator, so opting in enables both together (writers only).
 function _realSyncPullEnabled() {
-  return typeof window !== 'undefined' && !!window.KTP_REAL_SYNC_PULL_ENABLED;
+  return (typeof window !== 'undefined' && window.KTP_REAL_SYNC_PULL_ENABLED === true) || _syncMarkerActiveForGate();
+}
+
+// ── 1G.9C1: production sync gate — honor a VALID, READY opt-in marker ─────────
+// Pure + synchronous (called from hot paths: ticks/intervals/render). NO async,
+// NO network, NO DOM. Real sync activates from the marker ONLY when it is a v2
+// marker that is enabled AND explicitly ready:true (the ready flag is set by the
+// 1G.9C2 enable flow after backup + baseline — NOT in 1G.9C1), not emergency-
+// disabled, matches the active workspace, and the active role is a writer
+// (owner/admin/editor). Old 1G.9B markers (no ready/version) → false (no silent
+// activation). viewer/member → false. Reads only the marker + in-memory role/ws.
+function _syncMarkerActiveForGate() {
+  var s = _loadSyncOptInState();
+  if (!s) return false;
+  if (s.workspaceId !== WS_UI.activeId) return false;
+  if (s.enabled !== true) return false;
+  if (s.ready !== true) return false;
+  if (s.version !== 2) return false;
+  if (s.emergencyDisabled === true) return false;
+  var role = WS_UI.activeRole;
+  return role === 'owner' || role === 'admin' || role === 'editor';
 }
 
 // ── 1G.5B: restart-safe dirty truth ──────────────────────────────────────────
@@ -8670,11 +8692,12 @@ function _saveSyncState() {
   } catch (_) {}
 }
 
-// ── 1G.9B: device-local Sync OPT-IN marker (intent only; NOT wired to engine) ─
+// ── 1G.9B/1G.9C1: device-local Sync OPT-IN marker ─────────────────────────────
 // All read/write of the per-workspace opt-in intent goes through these helpers.
-// They store ONLY { workspaceId, enabled, enabledAt, emergencyDisabled } — never
-// DATA/secrets/paths/URLs/hashes/tokens/device ids. NONE of these are used by
-// _realSyncPushEnabled()/_realSyncPullEnabled() in 1G.9B (that is 1G.9C).
+// They store ONLY { workspaceId, enabled, enabledAt, emergencyDisabled, ready,
+// readyAt, version } — never DATA/secrets/paths/URLs/hashes/tokens/device ids.
+// 1G.9C1: the real-sync gates honor this marker ONLY when version===2 AND
+// ready===true (the ready flag is set by the 1G.9C2 enable flow, NOT here).
 function _loadSyncOptInState() {
   try { var raw = localStorage.getItem(SYNC_OPTIN_KEY); return raw ? JSON.parse(raw) : null; }
   catch (_) { return null; }
@@ -8688,6 +8711,11 @@ function _saveSyncOptInState(state) {
       enabled:           state.enabled === true,
       enabledAt:         state.enabledAt || null,
       emergencyDisabled: state.emergencyDisabled === true,
+      // v2 fields. 'ready' gates real sync and is set ONLY by the 1G.9C2 enable
+      // flow after a backup + baseline; intent-only saves leave it false.
+      ready:             state.ready === true,
+      readyAt:           state.readyAt || null,
+      version:           2,
     }));
   } catch (_) {}
 }

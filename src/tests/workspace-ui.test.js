@@ -2602,6 +2602,140 @@ function register(test, assert, assertEqual) {
     assert(/localStorage\.setItem\(SYNC_OPTIN_KEY/.test(sv), 'marker persisted via localStorage only');
   });
 
+  // ── 1G.9C1 ready-marker + gate plumbing ──────────────────────────────────────
+
+  // Extract the real source of the three gate functions and run them in a sandbox
+  // with mocked window / WS_UI / _loadSyncOptInState, to PROVE the boolean outcomes
+  // (the renderer JS is not otherwise evaluated by this harness).
+  function _pickFnSrc(name) {
+    var m = _rendererSrc.match(new RegExp('function ' + name + '\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}'));
+    assert(m, name + ' source must be found');
+    return m[0];
+  }
+  function _evalGates(opts) {
+    var src = _pickFnSrc('_syncMarkerActiveForGate') + '\n' +
+              _pickFnSrc('_realSyncPushEnabled') + '\n' +
+              _pickFnSrc('_realSyncPullEnabled');
+    var factory = new Function('window', 'WS_UI', '_loadSyncOptInState',
+      src + '\nreturn { push: _realSyncPushEnabled(), pull: _realSyncPullEnabled() };');
+    return factory(
+      opts.window || {},
+      opts.WS_UI || { activeId: 'ws1', activeRole: 'owner' },
+      function () { return (opts.marker === undefined) ? null : opts.marker; }
+    );
+  }
+  function _validMarker(over) {
+    var m = { workspaceId: 'ws1', enabled: true, enabledAt: 'x', emergencyDisabled: false,
+              ready: true, readyAt: 'x', version: 2 };
+    if (over) for (var k in over) m[k] = over[k];
+    return m;
+  }
+
+  test('1G.9C1: _syncMarkerActiveForGate exists and is pure/synchronous', function() {
+    var src = _pickFnSrc('_syncMarkerActiveForGate');
+    assert(/^function _syncMarkerActiveForGate\(\)/.test(src), 'helper must exist');
+    assert(!/await|async|ipcRenderer|invoke\(|fetch\(|setTimeout|document\.|localStorage/.test(src),
+      'gate validator must be pure/synchronous (no async/network/DOM/storage directly)');
+  });
+
+  test('1G.9C1: dev runtime flags still force gates true', function() {
+    var r1 = _evalGates({ window: { KTP_REAL_SYNC_PUSH_ENABLED: true }, marker: null });
+    assert(r1.push === true, 'dev push flag forces push gate true');
+    var r2 = _evalGates({ window: { KTP_REAL_SYNC_PULL_ENABLED: true }, marker: null });
+    assert(r2.pull === true, 'dev pull flag forces pull gate true');
+  });
+
+  test('1G.9C1: no marker + dev flags off → both gates false', function() {
+    var r = _evalGates({ window: {}, marker: null });
+    assert(r.push === false && r.pull === false, 'no marker → both false');
+  });
+
+  test('1G.9C1: old 1G.9B marker (no ready/version) → both gates false', function() {
+    var r = _evalGates({ marker: { workspaceId: 'ws1', enabled: true, enabledAt: 'x', emergencyDisabled: false } });
+    assert(r.push === false && r.pull === false, 'old marker must not enable sync');
+  });
+
+  test('1G.9C1: enabled+version2 but ready:false → both gates false', function() {
+    var r = _evalGates({ marker: _validMarker({ ready: false }) });
+    assert(r.push === false && r.pull === false, 'ready:false → false');
+  });
+
+  test('1G.9C1: valid ready marker for owner → both gates true', function() {
+    var r = _evalGates({ marker: _validMarker(), WS_UI: { activeId: 'ws1', activeRole: 'owner' } });
+    assert(r.push === true && r.pull === true, 'valid ready marker → both true');
+  });
+
+  test('1G.9C1: wrong workspace marker → both gates false', function() {
+    var r = _evalGates({ marker: _validMarker({ workspaceId: 'OTHER' }) });
+    assert(r.push === false && r.pull === false, 'wrong workspace → false');
+  });
+
+  test('1G.9C1: emergencyDisabled:true → both gates false', function() {
+    var r = _evalGates({ marker: _validMarker({ emergencyDisabled: true }) });
+    assert(r.push === false && r.pull === false, 'emergencyDisabled → false');
+  });
+
+  test('1G.9C1: viewer/member with valid marker → both gates false', function() {
+    ['viewer', 'member'].forEach(function(role) {
+      var r = _evalGates({ marker: _validMarker(), WS_UI: { activeId: 'ws1', activeRole: role } });
+      assert(r.push === false && r.pull === false, role + ' must not enable sync');
+    });
+  });
+
+  test('1G.9C1: owner/admin/editor with valid marker → both gates true', function() {
+    ['owner', 'admin', 'editor'].forEach(function(role) {
+      var r = _evalGates({ marker: _validMarker(), WS_UI: { activeId: 'ws1', activeRole: role } });
+      assert(r.push === true && r.pull === true, role + ' must enable sync with a valid ready marker');
+    });
+  });
+
+  test('1G.9C1: version mismatch (e.g. v1/v3) → both gates false', function() {
+    assert(_evalGates({ marker: _validMarker({ version: 1 }) }).push === false, 'v1 → false');
+    assert(_evalGates({ marker: _validMarker({ version: 3 }) }).push === false, 'v3 → false');
+  });
+
+  test('1G.9C1: marker still carries no secrets/DATA/paths/tokens (v2 fields only)', function() {
+    var sv = _fnBodyOf('_saveSyncOptInState');
+    assert(!/JSON\.stringify\(DATA\)|rendererState|storage_path|signed|snapshot_hash|token|deviceId|lease|pin/i.test(sv),
+      'marker must hold no secrets/DATA/paths/tokens');
+    ['workspaceId','enabled','enabledAt','emergencyDisabled','ready','readyAt','version'].forEach(function(f) {
+      assert(sv.indexOf(f) > -1, 'marker must persist v2 field: ' + f);
+    });
+  });
+
+  test('1G.9C1: 1G.9B intent does NOT set ready:true (no silent activation)', function() {
+    var en = _fnBodyOf('_enableSyncOptInIntent');
+    assert(!/ready:\s*true/.test(en), 'enable intent must not set ready:true');
+    // and a marker written by the intent path (ready omitted) must not activate gates
+    var r = _evalGates({ marker: { workspaceId: 'ws1', enabled: true, enabledAt: 'x',
+                                   emergencyDisabled: false, ready: false, readyAt: null, version: 2 } });
+    assert(r.push === false && r.pull === false, 'intent marker (ready:false) must keep gates off');
+  });
+
+  test('1G.9C1: confirm still does not start push/pull/detect/apply; no backup/readiness flow added', function() {
+    var confirm = _fnBodyOf('wsSyncConfirmEnable');
+    assert(!/wsAutoSyncPushTick|_detectCloudNewer|_preflightPullSnapshot|_applyPulledSnapshot|_takeCloudConflict|_keepMineConflict/.test(confirm),
+      'confirm must not run sync');
+    // 1G.9C1 must NOT add the backup/readiness/baseline enable flow yet
+    assert(!/createFullBackup|getCloudBackupReadiness/.test(confirm), 'no enable-flow backup/readiness in 1G.9C1');
+    assert(!/ready:\s*true/.test(confirm), 'confirm must not set ready:true in 1G.9C1');
+  });
+
+  test('1G.9C1: gates use === true for dev flags and OR the marker validator', function() {
+    var push = _pickFnSrc('_realSyncPushEnabled');
+    var pull = _pickFnSrc('_realSyncPullEnabled');
+    assert(/KTP_REAL_SYNC_PUSH_ENABLED === true/.test(push), 'push uses strict === true');
+    assert(/KTP_REAL_SYNC_PULL_ENABLED === true/.test(pull), 'pull uses strict === true');
+    assert(/\|\|\s*_syncMarkerActiveForGate\(\)/.test(push), 'push ORs the marker validator');
+    assert(/\|\|\s*_syncMarkerActiveForGate\(\)/.test(pull), 'pull ORs the marker validator');
+  });
+
+  test('1G.9C1: no Cloud Backup Apply path / no new IPC introduced by gate plumbing', function() {
+    var v = _pickFnSrc('_syncMarkerActiveForGate');
+    assert(!/wsStartApply|wsConfirmApply|applyPulledSnapshot|restoreFromCloud/.test(v), 'no backup apply path in gate');
+    assert(!/ipcRenderer/.test(_rendererSrc), 'renderer must still never reference ipcRenderer directly');
+  });
+
   // ── 1F.6C UX polish: render order + reload behavior ─────────────────────────
 
   test('1F.6C render: wsConfirmManualBackup calls renderAutoBackupIndicator before renderWorkspaceCard', function() {
