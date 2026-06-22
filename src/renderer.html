@@ -5169,6 +5169,15 @@ var STRINGS={
     sxDisableBtn:'Senkronizasyonu kapat',
     sxDisableHelp:'Bu cihaz bu çalışma alanını senkronize etmeyi durduracak. Yerel verileriniz olduğu gibi kalır.',
     sxDisableOk:'Senkronizasyon kapatıldı',
+    // 1G.9C2 — enable flow (readiness + backup + baseline → ready)
+    sxPreparing:'Senkronizasyon hazırlanıyor…',
+    sxEnabledOk:'Senkronizasyon bu cihaz için etkinleştirildi.',
+    sxEnabledReview:'Senkronizasyon etkinleştirildi. Bu cihaz ve bulut farklı — aşağıdan hangi sürümü tutacağınızı seçin.',
+    sxEnableFailBackup:'Güvenlik yedeği oluşturulamadı — senkronizasyon etkinleştirilmedi.',
+    sxEnableFailReadiness:'Bulut şu anda senkronizasyon için hazır değil — hiçbir şey değişmedi.',
+    sxEnableFailOffline:'Çevrimdışısınız — senkronizasyonu etkinleştirmek için bağlanın.',
+    sxEnableFailRole:'Senkronizasyonu yalnızca sahipler, yöneticiler veya düzenleyiciler etkinleştirebilir.',
+    sxEnableFailGeneric:'Senkronizasyon etkinleştirilemedi — hiçbir şey değişmedi.',
     wsRole_editor:'Editör',wsRole_viewer:'Görüntüleyici',
     wsBackupHdr:'Bulut Yedek',
     wsBackupChecking:'Hazırlık kontrol ediliyor…',
@@ -5774,6 +5783,15 @@ var STRINGS={
     sxDisableBtn:'Turn off Sync',
     sxDisableHelp:'This device will stop syncing this workspace. Your local data stays as-is.',
     sxDisableOk:'Sync turned off',
+    // 1G.9C2 — enable flow (readiness + backup + baseline → ready)
+    sxPreparing:'Preparing Sync…',
+    sxEnabledOk:'Sync enabled for this device.',
+    sxEnabledReview:'Sync enabled. This device and the cloud differ — choose which version to keep below.',
+    sxEnableFailBackup:'Couldn’t create the safety backup — Sync was not enabled.',
+    sxEnableFailReadiness:'Cloud isn’t ready for Sync right now — nothing changed.',
+    sxEnableFailOffline:'You’re offline — connect to enable Sync.',
+    sxEnableFailRole:'Only owners, admins, or editors can enable Sync.',
+    sxEnableFailGeneric:'Couldn’t enable Sync — nothing changed.',
     wsRole_editor:'Editor',wsRole_viewer:'Viewer',
     wsBackupHdr:'Cloud Backup',
     wsBackupChecking:'Checking readiness…',
@@ -8662,6 +8680,7 @@ var SYNC_OPTIN_KEY = 'ktp_sync_optin_v1';
 // UI-ONLY, never persisted.
 var SYNC_OPTIN_UI = {
   confirming: false,    // inline confirm panel is open
+  enabling:   false,    // 1G.9C2: enable flow is running (readiness+backup+baseline)
   msgKey:     null,     // transient message key (saved / turned off) — never raw text
 };
 var _autoSyncPushTimer = null;
@@ -9523,11 +9542,95 @@ function wsSyncCancelEnable() {
   SYNC_OPTIN_UI.confirming = false;   // Cancel ("Not now") — no marker saved
   renderWorkspaceCard();
 }
-function wsSyncConfirmEnable() {
-  // Save the opt-in marker ONLY. Real sync stays gated until 1G.9C.
-  var ok = _enableSyncOptInIntent();
+// ── 1G.9C2: Enable Sync flow — activates real sync (writes marker ready:true) ──
+// ONLY after: eligibility re-check → cloud/backup readiness → MANDATORY local
+// backup ('pre-sync-enable') → baseline hydrate → first-enable dirty seed. On any
+// abort, ready stays false and no sync starts. After ready:true a single detection
+// pass settles the state; local_pending schedules the normal debounced push;
+// cloud_newer/conflict are left for the existing explicit UI (no auto-resolve).
+// Reuses existing bridges only — NO new IPC, NO Cloud Backup Apply path.
+async function wsSyncConfirmEnable() {
+  if (SYNC_OPTIN_UI.enabling) return;                 // guard against double-run
+
+  function _abort(msgKey) {
+    SYNC_OPTIN_UI.enabling = false;
+    SYNC_OPTIN_UI.confirming = false;
+    SYNC_OPTIN_UI.msgKey = msgKey;
+    renderWorkspaceCard();
+  }
+
+  // (1) progress
+  SYNC_OPTIN_UI.enabling = true;
+  SYNC_OPTIN_UI.msgKey = 'sxPreparing';
+  renderWorkspaceCard();
+
+  // (2) eligibility re-check (auth + active workspace + writer role)
+  if (!_canOfferSyncOptIn()) { _abort('sxEnableFailRole'); return; }
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) { _abort('sxEnableFailOffline'); return; }
+  var bkBridge = _backupBridge();
+  if (!bkBridge || typeof bkBridge.getCloudBackupReadiness !== 'function') { _abort('sxEnableFailReadiness'); return; }
+  if (typeof window === 'undefined' || !window.electron || typeof window.electron.createFullBackup !== 'function') {
+    _abort('sxEnableFailBackup'); return;
+  }
+
+  var reqWorkspaceId = WS_UI.activeId;                 // stamp the request
+
+  // (3) cloud/backup readiness — read-only; require canBackup === true
+  var _rd;
+  try { _rd = await bkBridge.getCloudBackupReadiness({ workspaceId: reqWorkspaceId }); }
+  catch (_) { _rd = null; }
+  if (WS_UI.activeId !== reqWorkspaceId) { _abort('sxEnableFailGeneric'); return; }
+  if (!_rd || _rd.ok !== true || _rd.canBackup !== true) { _abort('sxEnableFailReadiness'); return; }
+
+  // (4) MANDATORY local backup BEFORE ready:true (existing local backup bridge)
+  var _bkRes;
+  try {
+    var _cap = _captureRendererState();
+    _bkRes = await window.electron.createFullBackup({
+      rendererState:  _cap.rendererStateStr,
+      importProfiles: _cap.importProfilesStr,
+      trigger:        'pre-sync-enable',
+    });
+  } catch (_) { _bkRes = null; }
+  if (WS_UI.activeId !== reqWorkspaceId) { _abort('sxEnableFailGeneric'); return; }
+  if (!_bkRes || _bkRes.ok !== true) { _abort('sxEnableFailBackup'); return; }   // cancel/fail → ready stays false
+
+  // (5) establish baseline (authoritative source stays ktp_sync_state_v1)
+  _hydrateSyncState();
+
+  // (6) first-enable dirty seed — unverified local data must be treated as dirty so
+  // a cloud-ahead case surfaces as 'conflict' (explicit), never a silent clean pull.
+  if (SYNC_PUSH_UI.lastSyncedHash == null) {
+    SYNC_PUSH_UI.pendingHash = _getCurrentDataHash();
+  }
+
+  // (7) write the ready marker — preserve original enabledAt; set readyAt now.
+  var _prev = _loadSyncOptInState();
+  var _enabledAt = (_prev && _prev.workspaceId === reqWorkspaceId && _prev.enabledAt)
+    ? _prev.enabledAt : new Date().toISOString();
+  _saveSyncOptInState({
+    enabled:           true,
+    enabledAt:         _enabledAt,
+    emergencyDisabled: false,
+    ready:             true,
+    readyAt:           new Date().toISOString(),
+  });
+
+  // (8) settle state — gates are now active, so detection can run.
+  try { await _detectCloudNewer(); } catch (_) {}
+  if (WS_UI.activeId !== reqWorkspaceId) { SYNC_OPTIN_UI.enabling = false; renderWorkspaceCard(); return; }
+
+  // (9) safe handoff — debounced push ONLY for local_pending; never a direct tick,
+  // never auto-apply/auto-resolve for cloud_newer/conflict.
+  if (SYNC_PUSH_UI.state === 'local_pending') {
+    _scheduleAutoSyncPush();
+  }
+
+  // (10) final UI
+  SYNC_OPTIN_UI.enabling = false;
   SYNC_OPTIN_UI.confirming = false;
-  SYNC_OPTIN_UI.msgKey = ok ? 'sxOptInSaved' : null;
+  SYNC_OPTIN_UI.msgKey = (SYNC_PUSH_UI.state === 'cloud_newer' || SYNC_PUSH_UI.state === 'conflict')
+    ? 'sxEnabledReview' : 'sxEnabledOk';
   renderWorkspaceCard();
 }
 function wsSyncTurnOff() {
@@ -10630,13 +10733,20 @@ function renderWorkspaceCard() {
                 '</div>' +
               '</div>';
             } else if (SYNC_OPTIN_UI.confirming) {
+              // 1G.9C2: while the enable flow runs, show the progress line and
+              // disable both buttons (no double-run, no cancel mid-flight).
+              var _enabling = SYNC_OPTIN_UI.enabling === true;
               _optin = '<div class="ws-sx-optin ws-sx-confirm">' +
                 '<div id="ws-sx-cf-title" class="ws-sync-summary"></div>' +
                 '<div id="ws-sx-cf-what" class="ws-sync-detail"></div>' +
                 '<div id="ws-sx-cf-safety" class="ws-sync-detail"></div>' +
+                (_enabling && SYNC_OPTIN_UI.msgKey
+                  ? '<div id="ws-sx-optin-msg" class="ws-sync-detail ws-sx-actmsg"></div>' : '') +
                 '<div class="ws-sx-action-row">' +
-                  '<button class="btn btn-primary btn-xs" id="ws-sx-cf-confirm" onclick="wsSyncConfirmEnable()"></button>' +
-                  '<button class="btn btn-ghost btn-xs" id="ws-sx-cf-cancel" onclick="wsSyncCancelEnable()"></button>' +
+                  '<button class="btn btn-primary btn-xs" id="ws-sx-cf-confirm"' +
+                    (_enabling ? ' disabled' : '') + ' onclick="wsSyncConfirmEnable()"></button>' +
+                  '<button class="btn btn-ghost btn-xs" id="ws-sx-cf-cancel"' +
+                    (_enabling ? ' disabled' : '') + ' onclick="wsSyncCancelEnable()"></button>' +
                 '</div>' +
               '</div>';
             } else {

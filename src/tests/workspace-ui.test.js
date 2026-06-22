@@ -2551,11 +2551,13 @@ function register(test, assert, assertEqual) {
     assert(/SYNC_OPTIN_UI\.confirming = false/.test(cancel), 'Cancel closes confirm');
     assert(!/_saveSyncOptInState|_enableSyncOptInIntent/.test(cancel), 'Cancel must NOT save the marker');
     var confirm = _fnBodyOf('wsSyncConfirmEnable');
-    assert(/_enableSyncOptInIntent\(\)/.test(confirm), 'Confirm saves the opt-in marker');
-    // confirm must NOT enable the engine / set flags / run sync
+    // 1G.9C2: confirm is now the activation flow — it persists the marker via
+    // _saveSyncOptInState (after checks) and must NEVER set the runtime dev flags
+    // or call the push tick / pull-apply / conflict resolvers directly.
+    assert(/_saveSyncOptInState/.test(confirm), 'Confirm persists the opt-in marker');
     assert(!/KTP_REAL_SYNC_PUSH_ENABLED|KTP_REAL_SYNC_PULL_ENABLED/.test(confirm), 'confirm must not set runtime flags');
-    assert(!/wsAutoSyncPushTick|_detectCloudNewer|_preflightPullSnapshot|_applyPulledSnapshot|_takeCloudConflict|_keepMineConflict/.test(confirm),
-      'confirm must not run push/pull/detect/apply');
+    assert(!/wsAutoSyncPushTick\(|_preflightPullSnapshot|_applyPulledSnapshot|_takeCloudConflict|_keepMineConflict/.test(confirm),
+      'confirm must not push-tick/pull-apply/resolve directly (detection-only handoff)');
   });
 
   test('1G.9B: enable intent does not flip engine; disable clears marker without deleting data', function() {
@@ -2712,13 +2714,16 @@ function register(test, assert, assertEqual) {
     assert(r.push === false && r.pull === false, 'intent marker (ready:false) must keep gates off');
   });
 
-  test('1G.9C1: confirm still does not start push/pull/detect/apply; no backup/readiness flow added', function() {
-    var confirm = _fnBodyOf('wsSyncConfirmEnable');
-    assert(!/wsAutoSyncPushTick|_detectCloudNewer|_preflightPullSnapshot|_applyPulledSnapshot|_takeCloudConflict|_keepMineConflict/.test(confirm),
-      'confirm must not run sync');
-    // 1G.9C1 must NOT add the backup/readiness/baseline enable flow yet
-    assert(!/createFullBackup|getCloudBackupReadiness/.test(confirm), 'no enable-flow backup/readiness in 1G.9C1');
-    assert(!/ready:\s*true/.test(confirm), 'confirm must not set ready:true in 1G.9C1');
+  test('1G.9C1: the gate plumbing itself runs no sync/backup/readiness (validator + gates stay pure)', function() {
+    // The 1G.9C1 contribution is the gate plumbing — it must remain side-effect-free.
+    // (The enable FLOW adds backup/readiness/ready:true in 1G.9C2, tested separately.)
+    var v = _pickFnSrc('_syncMarkerActiveForGate');
+    var push = _pickFnSrc('_realSyncPushEnabled');
+    var pull = _pickFnSrc('_realSyncPullEnabled');
+    [v, push, pull].forEach(function(src) {
+      assert(!/createFullBackup|getCloudBackupReadiness|wsAutoSyncPushTick|_detectCloudNewer|_applyPulledSnapshot|_takeCloudConflict|_keepMineConflict|ready:\s*true/.test(src),
+        'gate plumbing must not run backup/readiness/sync or write ready:true');
+    });
   });
 
   test('1G.9C1: gates use === true for dev flags and OR the marker validator', function() {
@@ -2734,6 +2739,126 @@ function register(test, assert, assertEqual) {
     var v = _pickFnSrc('_syncMarkerActiveForGate');
     assert(!/wsStartApply|wsConfirmApply|applyPulledSnapshot|restoreFromCloud/.test(v), 'no backup apply path in gate');
     assert(!/ipcRenderer/.test(_rendererSrc), 'renderer must still never reference ipcRenderer directly');
+  });
+
+  // ── 1G.9C2 enable flow (readiness + backup + baseline → ready:true) ───────────
+
+  function _enableBody() { return _fnBodyOf('wsSyncConfirmEnable'); }
+  // ordering helper: index of first match of `re` within the enable-flow body
+  function _at(body, re) { var m = body.search(re); assert(m > -1, 'expected to find ' + re + ' in enable flow'); return m; }
+
+  test('1G.9C2: enable flow re-checks eligibility/online/bridges before backup + ready', function() {
+    var b = _enableBody();
+    var iElig   = _at(b, /_canOfferSyncOptIn\(\)/);
+    var iOnline = _at(b, /navigator\.onLine === false/);
+    var iReady  = _at(b, /getCloudBackupReadiness/);
+    var iBackup = _at(b, /createFullBackup/);
+    var iWrite  = _at(b, /ready:\s+true,/);   // the marker write (not the doc-comment)
+    assert(iElig < iReady && iOnline < iReady, 'eligibility + online checked before readiness');
+    assert(iReady < iBackup, 'readiness checked before backup');
+    assert(iBackup < iWrite, 'backup created BEFORE ready:true is written');
+  });
+
+  test('1G.9C2: viewer/member cannot reach ready (eligibility is writers-only)', function() {
+    var b = _enableBody();
+    assert(/_canOfferSyncOptIn\(\)/.test(b), 'enable flow calls writers-only eligibility');
+    // _canOfferSyncOptIn already excludes viewer/member (asserted in 1G.9B); abort uses role msg
+    assert(/_abort\('sxEnableFailRole'\)/.test(b), 'ineligible role aborts with role message');
+    var co = _fnBodyOf('_canOfferSyncOptIn');
+    assert(!/'viewer'|'member'/.test(co) && /'owner' \|\| role === 'admin' \|\| role === 'editor'/.test(co),
+      'eligibility stays owner/admin/editor');
+  });
+
+  test('1G.9C2: offline aborts before any backup; ready stays false', function() {
+    var b = _enableBody();
+    var iOnline = _at(b, /navigator\.onLine === false/);
+    var iBackup = _at(b, /createFullBackup/);
+    assert(iOnline < iBackup, 'offline check precedes backup');
+    assert(/navigator\.onLine === false\) \{ _abort\('sxEnableFailOffline'\)/.test(b), 'offline aborts with offline msg');
+  });
+
+  test('1G.9C2: readiness failure aborts before backup (canBackup !== true)', function() {
+    var b = _enableBody();
+    assert(/_rd\.canBackup !== true\) \{ _abort\('sxEnableFailReadiness'\)/.test(b), 'readiness gate requires canBackup true');
+    assert(_at(b, /getCloudBackupReadiness/) < _at(b, /createFullBackup/), 'readiness before backup');
+  });
+
+  test('1G.9C2: backup failure aborts and ready stays false', function() {
+    var b = _enableBody();
+    assert(/_bkRes\.ok !== true\) \{ _abort\('sxEnableFailBackup'\)/.test(b), 'backup failure aborts');
+    // the abort for backup must occur before the ready:true marker write
+    assert(_at(b, /_bkRes\.ok !== true/) < _at(b, /ready:\s+true,/), 'backup failure path precedes ready write');
+  });
+
+  test('1G.9C2: trigger is exactly pre-sync-enable and uses existing local backup bridge', function() {
+    var b = _enableBody();
+    assert(/window\.electron\.createFullBackup\(/.test(b), 'uses existing local backup bridge');
+    assert(/trigger:\s*'pre-sync-enable'/.test(b), "backup trigger is 'pre-sync-enable'");
+    assert(/_captureRendererState\(\)/.test(b), 'captures renderer state via existing helper');
+  });
+
+  test('1G.9C2: ready marker preserves enabledAt and sets readyAt + version2 (no secrets)', function() {
+    var b = _enableBody();
+    assert(/_prev\.enabledAt/.test(b), 'preserves existing enabledAt when present');
+    assert(/readyAt:\s*new Date\(\)\.toISOString\(\)/.test(b), 'sets readyAt at activation');
+    // marker schema (in _saveSyncOptInState) carries no secrets and stays v2
+    var sv = _fnBodyOf('_saveSyncOptInState');
+    assert(/version:\s*2/.test(sv), 'marker is v2');
+    assert(!/JSON\.stringify\(DATA\)|rendererState|storage_path|signed|snapshot_hash|token|deviceId|lease/i.test(sv),
+      'marker carries no secrets/DATA/paths/tokens');
+  });
+
+  test('1G.9C2: first-enable dirty seed when lastSyncedHash == null, before detection', function() {
+    var b = _enableBody();
+    assert(/SYNC_PUSH_UI\.lastSyncedHash == null\)\s*\{?\s*SYNC_PUSH_UI\.pendingHash = _getCurrentDataHash\(\)/.test(b),
+      'seeds pendingHash from current hash when never-synced');
+    assert(_at(b, /pendingHash = _getCurrentDataHash/) < _at(b, /_detectCloudNewer\(\)/),
+      'dirty seed happens before detection');
+  });
+
+  test('1G.9C2: no blind push / no auto-apply / no auto-resolve in the enable flow', function() {
+    var b = _enableBody();
+    assert(!/wsAutoSyncPushTick\(/.test(b), 'must not call the push tick directly');
+    assert(!/applyPulledSnapshot|_takeCloudConflict|_keepMineConflict|restoreFromCloud|wsStartApply/.test(b),
+      'no auto-apply / auto-resolve / backup-apply path');
+  });
+
+  test('1G.9C2: only local_pending schedules the debounced push (after ready + detection)', function() {
+    var b = _enableBody();
+    assert(/SYNC_PUSH_UI\.state === 'local_pending'\)\s*\{?\s*_scheduleAutoSyncPush\(\)/.test(b),
+      'local_pending schedules debounced push');
+    // push scheduling occurs after the ready write and the detection pass
+    assert(_at(b, /ready:\s+true,/) < _at(b, /_scheduleAutoSyncPush\(\)/), 'push scheduled only after ready');
+    assert(_at(b, /_detectCloudNewer\(\)/) < _at(b, /_scheduleAutoSyncPush\(\)/), 'push scheduled after detection');
+    // cloud_newer/conflict → review message, no push
+    assert(/'cloud_newer' \|\| SYNC_PUSH_UI\.state === 'conflict'\)\s*\n?\s*\? 'sxEnabledReview'/.test(b),
+      'cloud_newer/conflict yield the review message');
+  });
+
+  test('1G.9C2: confirm flow no longer uses the gated 1G.9B "still gated" copy on success', function() {
+    var b = _enableBody();
+    assert(!/sxOptInSaved/.test(b), 'success path must not show the old still-gated message');
+    assert(/sxEnabledOk/.test(b) && /sxEnabledReview/.test(b), 'uses the 1G.9C2 activation messages');
+  });
+
+  test('1G.9C2: gates false until ready:true, true after (sandbox re-assert)', function() {
+    assert(_evalGates({ marker: _validMarker({ ready: false }) }).push === false, 'ready:false → gate false');
+    assert(_evalGates({ marker: _validMarker() }).push === true, 'ready:true valid → gate true');
+  });
+
+  test('1G.9C2: EN and TR i18n keys exist for all enable-flow strings', function() {
+    ['sxPreparing','sxEnabledOk','sxEnabledReview','sxEnableFailBackup','sxEnableFailReadiness',
+     'sxEnableFailOffline','sxEnableFailRole','sxEnableFailGeneric'].forEach(function(k) {
+      var n = (_rendererSrc.match(new RegExp('\\b' + k + ':', 'g')) || []).length;
+      assert(n >= 2, 'i18n key ' + k + ' must be in both TR and EN (found ' + n + ')');
+    });
+  });
+
+  test('1G.9C2: no new IPC/RPC/preload bridge added by the enable flow', function() {
+    assert(!/ipcRenderer/.test(_rendererSrc), 'renderer must still never reference ipcRenderer directly');
+    var b = _enableBody();
+    // only existing bridges: window.electron.createFullBackup + cloudBackup readiness
+    assert(!/exposeInMainWorld|ipcRenderer\.invoke/.test(b), 'no new bridge/invoke introduced');
   });
 
   // ── 1F.6C UX polish: render order + reload behavior ─────────────────────────
