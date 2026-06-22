@@ -5272,6 +5272,9 @@ var STRINGS={
     pinTooShortMsg:'PIN en az 4 haneli olmalıdır.',
     pinRemoveConfirm:'Bu kullanıcı için PIN kaldırılsın mı?',
     pinRemoveDetail:'Bu kullanıcı PIN girmeden uygulamaya girebilir.',
+    // OPTIONAL-PIN-1C — add-user optional PIN (single field, no confirm)
+    pinOptionalPh:'PIN (isteğe bağlı)',
+    pinOptionalHelp:'Boş bırakırsanız bu kullanıcı PIN girmeden uygulamaya girebilir.',
     pinLocked:'🔒 Hesap kilitlendi. {n} sn.',pinAttemptsLeft:'{n} hak kaldı',
     idleLogout:'⏱ Güvenlik nedeniyle oturumunuz kapatıldı.',
     userActivated:'✅ Aktifleştirildi',userDeactivated:'⏸ Pasif yapıldı',
@@ -5899,6 +5902,9 @@ var STRINGS={
     pinTooShortMsg:'PIN must be at least 4 digits.',
     pinRemoveConfirm:'Remove PIN for this user?',
     pinRemoveDetail:'This user will be able to enter without a PIN.',
+    // OPTIONAL-PIN-1C — add-user optional PIN (single field, no confirm)
+    pinOptionalPh:'PIN (optional)',
+    pinOptionalHelp:'Leave blank to let this user enter without a PIN.',
     pinLocked:'🔒 Locked for {n}s.',pinAttemptsLeft:'{n} left',
     idleLogout:'⏱ Session closed due to inactivity.',
     userActivated:'✅ Activated',userDeactivated:'⏸ Deactivated',
@@ -11383,8 +11389,9 @@ function showAddUserForm(){
           <option value="viewer">👁 ${t('roleViewer').replace(/^👁️?\s*/,'')}</option>
         </select>
       </div>
-      <div class="form-row"><label class="form-label">${t('usersPinLabel')}</label><input class="form-input" id="nu_p" type="password" maxlength="6" placeholder="••••"></div>
+      <div class="form-row"><label class="form-label">${t('pinOptionalPh')}</label><input class="form-input" id="nu_p" type="password" maxlength="6" inputmode="numeric" placeholder="${t('pinOptionalPh')}" autocomplete="new-password"></div>
     </div>
+    <div style="font-size:11px;color:var(--i4);margin:-4px 0 10px">${t('pinOptionalHelp')}</div>
     <div class="form-row"><label class="form-label">${t('usersColorLabel')}</label>
       <input type="color" id="nu_c" value="#4a8af4" style="height:36px;width:100%;border-radius:var(--r1);border:1px solid var(--bd-1);cursor:pointer"></div>
     <div style="display:flex;gap:8px;margin-top:12px">
@@ -11400,15 +11407,22 @@ async function saveNewUser(){
   const name=(document.getElementById('nu_n')?.value||'').trim();
   const avatar=(document.getElementById('nu_av')?.value||name[0]||'U').toUpperCase();
   const role=document.getElementById('nu_r')?.value||'viewer';
-  const pin=(document.getElementById('nu_p')?.value||'').trim();
+  const _pinEl=document.getElementById('nu_p');
+  let pin=(_pinEl?.value||'').trim();
   const color=document.getElementById('nu_c')?.value||'#4a8af4';
   if(!name){toast(t('nameRequired'),'red');return;}
-  if(pin.length<4){toast('❌ PIN en az 4 haneli','red');return;}
-  if(!/^\d+$/.test(pin)){toast('❌ PIN sadece rakam','red');return;}
-  const pin_salt=_genSalt();
-  const pin_hash_v2=await _hashPinV2(pin,pin_salt);
-  DATA.users.push({id:'u_'+Date.now(),name,avatar,role,pin_hash_v2,pin_salt,color,active:true});
-  addHist('Kullanıcı eklendi: '+name);
+  // OPTIONAL-PIN-1C: PIN is OPTIONAL. Validate ONLY when one was typed; a blank PIN
+  // creates a credential-less user (no pin/pin_hash/pin_hash_v2/pin_salt fields).
+  const newUser={id:'u_'+Date.now(),name,avatar,role,color,active:true};
+  if(pin){
+    if(pin.length<4||!/^\d+$/.test(pin)){toast(t('pinTooShortMsg'),'red');return;}
+    const pin_salt=_genSalt();
+    newUser.pin_hash_v2=await _hashPinV2(pin,pin_salt);
+    newUser.pin_salt=pin_salt;
+  }
+  pin=''; if(_pinEl) _pinEl.value='';   // clear transient PIN immediately
+  DATA.users.push(newUser);
+  addHist(t('userAdded')+': '+name);
   saveLocal();
   document.getElementById('modal').innerHTML=tplUsers();
   toast(t('userAdded'),'green');

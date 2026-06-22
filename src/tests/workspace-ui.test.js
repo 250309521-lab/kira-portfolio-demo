@@ -3047,6 +3047,51 @@ function register(test, assert, assertEqual) {
     });
   });
 
+  // ── OPTIONAL-PIN-1C: add-user optional PIN ───────────────────────────────────
+
+  test('OPTIONAL-PIN-1C: add-user form labels PIN optional, single field, no confirm', function() {
+    var f = _srcFn('showAddUserForm');
+    assert(/pinOptionalPh/.test(f), 'PIN field labelled optional');
+    assert(/pinOptionalHelp/.test(f), 'helper text explains blank = no PIN');
+    assert((f.match(/id="nu_p"/g) || []).length === 1, 'exactly one PIN input in add-user');
+    assert(!/nu_p2|pin_confirm|usersPinRepeat/.test(f), 'no confirm/repeat PIN field in add-user');
+  });
+
+  test('OPTIONAL-PIN-1C: saveNewUser PIN-optional — blank → no credential fields; set → PBKDF2 v2', function() {
+    var c = _srcFn('saveNewUser');
+    // PIN only validated when typed; blank is allowed (no forced-PIN guard)
+    assert(/if\(pin\)\{/.test(c), 'PIN handled only when provided');
+    assert(!/if\(pin\.length<4\)\{toast[^}]*return;\}\s*\n\s*if\(!\/\^\\d/.test(c) || /if\(pin\)\{/.test(c),
+      'no unconditional PIN-required guard');
+    assert(/pin\.length<4\|\|!\/\^\\d\+\$\/\.test\(pin\)/.test(c), 'validates 4+ digit numeric only when set');
+    // base user object built WITHOUT credential fields; creds added only inside if(pin)
+    assert(/newUser=\{[^}]*\}/.test(c) && !/newUser=\{[^}]*pin_hash_v2/.test(c),
+      'base new user has no credential fields');
+    assert(/newUser\.pin_hash_v2=/.test(c) && /newUser\.pin_salt=/.test(c), 'PBKDF2 v2 set only when a PIN is given');
+    assert(/_hashPinV2\(pin,pin_salt\)/.test(c), 'PBKDF2 v2 hashing used');
+    assert(/pin=''/.test(c) && /_pinEl\.value=''/.test(c), 'transient PIN cleared after create');
+    assert(!/pin:\s*pin|\bpin:pin\b/.test(c), 'raw PIN never stored on the user');
+    assert(!/console\.(log|info|warn|error)\([^)]*pin/.test(c), 'raw PIN never logged');
+    assert(/saveLocal\(\)/.test(c), 'persists after add');
+  });
+
+  test('OPTIONAL-PIN-1C: credential presence correct for added users (runtime via _userHasPin)', function() {
+    var f = new Function(_srcFn('_userHasPin') + '\nreturn _userHasPin;')();
+    // blank-PIN add → object with no credential fields
+    assert(f({ id: 'u1', name: 'x', role: 'viewer', color: '#fff', active: true }) === false,
+      'blank-PIN added user is PIN-less (enters directly)');
+    // with-PIN add → PBKDF2 v2 fields present
+    assert(f({ id: 'u2', name: 'y', role: 'admin', pin_hash_v2: 'h', pin_salt: 's' }) === true,
+      'with-PIN added user has a PIN');
+  });
+
+  test('OPTIONAL-PIN-1C: EN and TR i18n keys exist for add-user optional PIN', function() {
+    ['pinOptionalPh','pinOptionalHelp'].forEach(function(k) {
+      var n = (_rendererSrc.match(new RegExp('\\b' + k + ':', 'g')) || []).length;
+      assert(n >= 2, 'i18n key ' + k + ' must be in both TR and EN (found ' + n + ')');
+    });
+  });
+
   // ── 1F.6C UX polish: render order + reload behavior ─────────────────────────
 
   test('1F.6C render: wsConfirmManualBackup calls renderAutoBackupIndicator before renderWorkspaceCard', function() {
