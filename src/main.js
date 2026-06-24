@@ -1007,16 +1007,18 @@ function createSplashWindow() {
   splashStart = Date.now();
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   splashWin = new BrowserWindow({
+    // STARTUP-EXPERIENCE-REDESIGN-0C2: portrait splash to fit the approved R7 design
+    // (480x640 stage). Previous splash was 480x300 landscape.
     width: 480,
-    height: 300,
+    height: 640,
     x: Math.round((width  - 480) / 2),
-    y: Math.round((height - 300) / 2),
+    y: Math.round((height - 640) / 2),
     frame: false,
     resizable: false,
     movable: false,
     skipTaskbar: true,
     alwaysOnTop: true,
-    backgroundColor: '#060d1a',
+    backgroundColor: '#020b1e',
     show: true,
     webPreferences: {
       nodeIntegration: false,
@@ -1063,7 +1065,10 @@ function createWindow() {
   if (!IS_DEV) mainWindow.setMenuBarVisibility(false);
   mainWindow.loadFile(path.join(__dirname, IS_DEV ? 'renderer.html' : 'renderer.min.html'));
   mainWindow.once('ready-to-show', () => {
-    const MIN_SPLASH = 1800;
+    // 0C2: allow the approved R7 hero motion (gem descent → receipt print → chart)
+    // to play before the splash fades. Not a forced stall — if the app is ready
+    // sooner we still hold only to this minimum; if it takes longer, no extra wait.
+    const MIN_SPLASH = 2300;
     const elapsed = splashStart ? Date.now() - splashStart : MIN_SPLASH;
     const waitMs  = Math.max(0, MIN_SPLASH - elapsed);
     setTimeout(() => {
