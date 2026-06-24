@@ -17,3 +17,8 @@ issued-licenses/
 
 # Local dev environment variables — never commit
 .env.local
+
+# Splash design handoff, scratch extraction, and prototype review files
+_handoff/
+_scratch/
+src/prototypes/

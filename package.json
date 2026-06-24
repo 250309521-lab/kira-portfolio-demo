@@ -47,7 +47,8 @@
       "!node_modules/.cache",
       "!**/*.map",
       "!src/tests/**",
-      "!src/renderer.html"
+      "!src/renderer.html",
+      "!src/prototypes/**"
     ],
     "win": {
       "target": [
