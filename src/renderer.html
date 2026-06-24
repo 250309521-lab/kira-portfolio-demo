@@ -10,7 +10,7 @@
    Design: Linear × Vercel × Apple iOS 18
    Fonts: DM Sans (UI) + JetBrains Mono (data)
 ═══════════════════════════════════════════════════════════════════ */
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;1,9..40,400&family=JetBrains+Mono:wght@400;500;600&display=swap');
+/* RENDERER-FONTS-0B: remote Google Fonts @import removed — using offline-safe system font stack. */
 
 /* ── DESIGN TOKENS ─────────────────────────────────────────────── */
 :root {
@@ -96,8 +96,8 @@
   --ease-std:    cubic-bezier(0.4,0,0.2,1);
 
   /* Fonts */
-  --sans: 'DM Sans', system-ui, -apple-system, sans-serif;
-  --mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", "Helvetica Neue", Arial, sans-serif;
+  --mono: "Cascadia Code", "Cascadia Mono", "Consolas", "Fira Code", "SFMono-Regular", Menlo, Monaco, monospace;
 }
 
 /* ── LIGHT THEME ─────────────────────────────────────────────────── */
@@ -4494,7 +4494,7 @@ tbody tr[onclick] { cursor: pointer; }
 <!-- LICENSE BOOT GATE -->
 <div id="lic-gate"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="./vendor/chart.umd.min.js"></script>
 <script>
 'use strict';
 // ═══════════════════════════════════════════════
