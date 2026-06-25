@@ -2508,6 +2508,9 @@ body::after {
 }
 .period-bar::-webkit-scrollbar{display:none}
 .period-bar.is-dragging{cursor:grabbing;user-select:none}
+/* MONTH-RAIL-DRAG-0A/FIX3: while a real drag is active the global class keeps
+   cursor+selection locked everywhere, even when the pointer leaves the rail. */
+html.ktp-month-rail-dragging,html.ktp-month-rail-dragging *{cursor:grabbing!important;user-select:none!important;}
 .period-label{
   font-size:10.5px;color:var(--i5);font-weight:600;
   white-space:nowrap;flex-shrink:0;margin-right:5px;
@@ -7043,10 +7046,7 @@ function monthBar(){
     <button class="mbar-arrow" onclick="stepMo(-1)" aria-label="${t('monthBarPrev')}" title="${t('monthBarPrev')} ( [ )">‹</button>
     <div class="period-bar" id="${scrollId}" role="region" aria-label="${t('monthBarRegion')}"
          onwheel="mbarWheel(event,this)"
-         onmousedown="mbarDragStart(event,this)"
-         onmousemove="mbarDragMove(event,this)"
-         onmouseup="mbarDragEnd(this)"
-         onmouseleave="mbarDragEnd(this)">
+         onpointerdown="mbarDragStart(event,this)">
       <span class="period-label">📅</span>
       ${inner}
     </div>
@@ -7072,43 +7072,88 @@ function setMo(m){
 // ── Month bar: drag-to-scroll with momentum/inertia ──────────
 const _mbar={
   dragging:false,startX:0,scrollLeft:0,el:null,
-  velX:0,lastX:0,lastT:0,rafId:null
+  velX:0,lastX:0,lastT:0,rafId:null,
+  // MONTH-RAIL-DRAG-0A/FIX2: document-level listener handles; no setPointerCapture.
+  pointerId:null,moved:false,docMoveH:null,docUpH:null
 };
 
+// MONTH-RAIL-DRAG-0A/FIX2: use document-level pointer listeners instead of
+// setPointerCapture. setPointerCapture re-targets pointerup to the capturing
+// element, so click fires on .period-bar and NEVER reaches the child .mbtn
+// onclick — causing the "clicks but month doesn't change" regression.
+// With document listeners, pointer events are received for out-of-bounds movement
+// without re-targeting; click fires on the original hit element (.mbtn) normally.
+// 'is-dragging' is added only once the movement threshold is exceeded so that
+// a tap with no movement never enters drag mode.
+// Post-drag click suppression uses a one-time capture-phase click listener on the
+// rail element — removed after one event or a 200 ms fallback timeout.
 function mbarDragStart(e,el){
-  // Cancel any ongoing momentum
+  if(e.button!==undefined&&e.button!==0) return;
   if(_mbar.rafId){cancelAnimationFrame(_mbar.rafId);_mbar.rafId=null;}
+  // Clean up any stale doc listeners from a previous interaction.
+  if(_mbar.docMoveH){document.removeEventListener('pointermove',_mbar.docMoveH);_mbar.docMoveH=null;}
+  if(_mbar.docUpH)  {document.removeEventListener('pointerup',  _mbar.docUpH);
+                     document.removeEventListener('pointercancel',_mbar.docUpH);_mbar.docUpH=null;}
   _mbar.dragging=true;_mbar.el=el;
-  _mbar.startX=e.pageX-el.offsetLeft;
+  _mbar.pointerId=e.pointerId;
+  _mbar.startX=e.clientX;
   _mbar.scrollLeft=el.scrollLeft;
-  _mbar.velX=0;_mbar.lastX=e.pageX;_mbar.lastT=Date.now();
-  el.classList.add('is-dragging');
-  e.preventDefault();
+  _mbar.velX=0;_mbar.lastX=e.clientX;_mbar.lastT=Date.now();
+  _mbar.moved=false;
+  // Attach to document — events arrive for out-of-bounds movement; filtered by pointerId.
+  _mbar.docMoveH=function(ev){if(ev.pointerId===_mbar.pointerId)mbarDragMove(ev,el);};
+  _mbar.docUpH  =function(ev){if(ev.pointerId===_mbar.pointerId)mbarDragEnd(el,ev);};
+  // {passive:false} required so preventDefault() in mbarDragMove is honoured.
+  document.addEventListener('pointermove',  _mbar.docMoveH,{passive:false});
+  document.addEventListener('pointerup',    _mbar.docUpH);
+  document.addEventListener('pointercancel',_mbar.docUpH);
 }
 function mbarDragMove(e,el){
   if(!_mbar.dragging||_mbar.el!==el) return;
-  e.preventDefault();
   const now=Date.now();
   const dt=Math.max(now-_mbar.lastT,1);
-  const dx=e.pageX-_mbar.lastX;
-  // Exponential moving average velocity (px/ms)
+  const dx=e.clientX-_mbar.lastX;
   _mbar.velX=_mbar.velX*0.7+dx/dt*0.3;
-  _mbar.lastX=e.pageX;_mbar.lastT=now;
-  const x=e.pageX-el.offsetLeft;
-  el.scrollLeft=_mbar.scrollLeft-(x-_mbar.startX);
+  _mbar.lastX=e.clientX;_mbar.lastT=now;
+  const delta=e.clientX-_mbar.startX;
+  el.scrollLeft=_mbar.scrollLeft-delta;
+  if(Math.abs(delta)>5&&!_mbar.moved){
+    _mbar.moved=true;
+    el.classList.add('is-dragging');
+    // Apply global grab cursor + text-selection lock everywhere so the user
+    // does not see text selection or cursor flicker outside the rail.
+    document.documentElement.classList.add('ktp-month-rail-dragging');
+  }
+  // Prevent browser text selection while dragging (requires passive:false on listener).
+  if(_mbar.moved) e.preventDefault();
 }
 function mbarDragEnd(el){
   if(!_mbar.dragging) return;
   _mbar.dragging=false;
   if(el) el.classList.remove('is-dragging');
-  // Apply momentum (inertia scroll)
-  const vel=_mbar.velX*18; // scale velocity
+  // Restore cursor and text selection everywhere.
+  document.documentElement.classList.remove('ktp-month-rail-dragging');
+  // Remove document listeners.
+  if(_mbar.docMoveH){document.removeEventListener('pointermove',  _mbar.docMoveH);_mbar.docMoveH=null;}
+  if(_mbar.docUpH)  {document.removeEventListener('pointerup',    _mbar.docUpH);
+                     document.removeEventListener('pointercancel',_mbar.docUpH);_mbar.docUpH=null;}
+  _mbar.pointerId=null;
+  // After a real drag (threshold exceeded), suppress the click that fires on the
+  // rail via a one-time capture-phase listener — removed after first event or 200 ms.
+  if(_mbar.moved&&el){
+    var sc=function(ev){ev.stopPropagation();ev.preventDefault();el.removeEventListener('click',sc,true);};
+    el.addEventListener('click',sc,true);
+    setTimeout(function(){el.removeEventListener('click',sc,true);},200);
+  }
+  _mbar.moved=false;
+  // Apply momentum (inertia scroll).
+  var vel=_mbar.velX*18;
   if(Math.abs(vel)<0.5) return;
-  let v=vel;
+  var v=vel;
   function momentum(){
     if(Math.abs(v)<0.2){_mbar.rafId=null;return;}
     el.scrollLeft-=v;
-    v*=0.88; // friction
+    v*=0.88;
     _mbar.rafId=requestAnimationFrame(momentum);
   }
   _mbar.rafId=requestAnimationFrame(momentum);
