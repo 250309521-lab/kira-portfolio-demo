@@ -97,7 +97,6 @@
       "artifactName": "KiraTakipPro-Customer-${version}-portable.exe"
     },
     "artifactName": "KiraTakipPro-Customer-Setup-${version}.exe",
-    "_macNote": "ICON REQUIRED before mac build: build/icon.icns is missing. The repo has build/icon.ico (256x256 BMP frame). On macOS: open icon.ico in Preview → export largest frame as PNG → scale to 512x512 with sips → generate icns with iconutil. See MAC-NATIVE-INSTALL-0B docs for exact commands.",
     "mac": {
       "target": [
         { "target": "dmg",  "arch": ["x64", "arm64"] },
