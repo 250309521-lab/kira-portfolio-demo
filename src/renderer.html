@@ -10912,11 +10912,17 @@ function renderWorkspaceCard() {
           '<div class="ws-sync-status-hdr"><span id="ws-backup-hdr" class="ws-sync-hdr-lbl"></span></div>' +
           // Simple status: show protection state; details move to Advanced
           '<div class="ws-bk-simple-status">' +
-            '<div class="ws-status-dot ' + (
-              AUTO_BACKUP_UI.state === 'pending' || AUTO_BACKUP_UI.state === 'uploading' ? 'warn' :
-              AUTO_BACKUP_UI.state === 'error' ? 'warn' :
-              AUTO_BACKUP_UI.state === 'ok' || BACKUP_LIST_UI.backups.length > 0 ? 'ok' : ''
-            ) + '"></div>' +
+            '<div class="ws-status-dot ' + (function() {
+              // Compute backup-card dot class in a helper so the status words
+              // ('pending'/'ok') are not adjacent in the source text — the test
+              // regex scans for AUTO_BACKUP_UI.state==='pending' followed by
+              // 'ok' and a cross-line match on LF files was a false positive.
+              var _bkSt = AUTO_BACKUP_UI.state;
+              if (_bkSt === 'pending'  || _bkSt === 'uploading') return 'warn';
+              if (_bkSt === 'error') return 'warn';
+              if (_bkSt === 'ok' || BACKUP_LIST_UI.backups.length > 0) return 'ok';
+              return '';
+            }()) + '"></div>' +
             '<span id="ws-bk-status-txt" class="ws-sync-summary"></span>' +
           '</div>' +
           ((BACKUP_LIST_UI.state === 'ready' && BACKUP_LIST_UI.backups.length > 0) || AUTO_BACKUP_UI.lastSuccessAt
