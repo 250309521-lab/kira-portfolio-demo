@@ -96,7 +96,6 @@
     "portable": {
       "artifactName": "KiraTakipPro-Customer-${version}-portable.exe"
     },
-    "artifactName": "KiraTakipPro-Customer-Setup-${version}.exe",
     "mac": {
       "target": [
         { "target": "dmg",  "arch": ["x64", "arm64"] },
@@ -106,6 +105,7 @@
       "category": "public.app-category.business",
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
+      "artifactName": "KiraTakipPro-Customer-${version}-mac-${arch}.${ext}",
       "fileAssociations": [
         {
           "ext": "ktpbackup",
