@@ -15,6 +15,8 @@
     "prebuild": "node scripts/check-syntax.js && node scripts/build-renderer.js",
     "build": "electron-builder build --win --x64",
     "build:dir": "electron-builder build --win --x64 --dir",
+    "build:mac": "electron-builder build --mac",
+    "build:mac:dir": "electron-builder build --mac --dir",
     "lint": "echo 'No linter configured'",
     "test": "node src/tests/run.js",
     "test:integrity": "node src/tests/integrity.js",
@@ -94,6 +96,24 @@
     "portable": {
       "artifactName": "KiraTakipPro-Customer-${version}-portable.exe"
     },
-    "artifactName": "KiraTakipPro-Customer-Setup-${version}.exe"
+    "artifactName": "KiraTakipPro-Customer-Setup-${version}.exe",
+    "_macNote": "ICON REQUIRED before mac build: build/icon.icns is missing. The repo has build/icon.ico (256x256 BMP frame). On macOS: open icon.ico in Preview → export largest frame as PNG → scale to 512x512 with sips → generate icns with iconutil. See MAC-NATIVE-INSTALL-0B docs for exact commands.",
+    "mac": {
+      "target": [
+        { "target": "dmg",  "arch": ["x64", "arm64"] },
+        { "target": "zip",  "arch": ["x64", "arm64"] }
+      ],
+      "icon": "build/icon.icns",
+      "category": "public.app-category.business",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "fileAssociations": [
+        {
+          "ext": "ktpbackup",
+          "name": "Kira Takip Backup",
+          "description": "Kira Takip Pro Backup File"
+        }
+      ]
+    }
   }
 }

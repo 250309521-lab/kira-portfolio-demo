@@ -1795,6 +1795,10 @@ _preloadTest.register(test, assert, assertEqual);
 var _workspaceStateTest = require('./workspace-state.test.js');
 _workspaceStateTest.register(test, assert, assertEqual);
 
+// ── Machine ID (MAC-NATIVE-INSTALL-0A) ────────────────────────────────────────
+var _machineIdTest = require('./machine-id.test.js');
+_machineIdTest.register(test, assert, assertEqual);
+
 // ── Workspace UI (CLOUD-FOUNDATION-1E.6) ──────────────────────────────────────
 var _workspaceUiTest = require('./workspace-ui.test.js');
 _workspaceUiTest.register(test, assert, assertEqual);

@@ -1,0 +1,152 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# KiraTakipPro — Mac Dogfood Build (unsigned, internal only)
+#
+# PURPOSE:  Produce an unsigned macOS DMG + ZIP for internal manager-ready
+#           dogfooding. This is NOT a public release build.
+#
+# SIGNING:  Intentionally absent. No Apple Developer credentials are required
+#           or used. The resulting app will trigger a Gatekeeper warning on
+#           first launch (right-click → Open to approve, one-time per machine).
+#
+# TRIGGER:  Manual only (workflow_dispatch). Do not add push/PR triggers.
+#
+# ARTIFACT: Available in the GitHub Actions run → Artifacts section.
+#           Download the DMG, open it, drag to Applications, right-click → Open.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Mac Dogfood Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      note:
+        description: "Optional build note (e.g. 'for Masoumeh dogfood test')"
+        required: false
+        default: "internal dogfood"
+
+jobs:
+  build-mac:
+    name: Build unsigned macOS DMG
+    runs-on: macos-latest
+
+    steps:
+      # ── 1. Checkout ────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Setup Node ──────────────────────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      # ── 3. Install dependencies ────────────────────────────────────────────
+      - name: Install dependencies
+        run: npm ci
+
+      # ── 4. Create build/icon.icns from build/icon.ico ─────────────────────
+      #       Uses macOS built-in sips + iconutil. No external tools needed.
+      #       Fails clearly if icon.ico is missing.
+      - name: Verify source icon exists
+        run: |
+          if [ ! -f "build/icon.ico" ]; then
+            echo "ERROR: build/icon.ico is missing. Cannot create .icns." >&2
+            exit 1
+          fi
+          echo "Source icon found: $(wc -c < build/icon.ico) bytes"
+
+      - name: Convert icon.ico → PNG
+        run: |
+          sips -s format png build/icon.ico --out /tmp/icon_source.png
+          echo "PNG created: $(wc -c < /tmp/icon_source.png) bytes"
+
+      - name: Build iconset for all required sizes
+        run: |
+          rm -rf /tmp/ktp.iconset
+          mkdir /tmp/ktp.iconset
+
+          sips -z  16  16  /tmp/icon_source.png --out /tmp/ktp.iconset/icon_16x16.png
+          sips -z  32  32  /tmp/icon_source.png --out "/tmp/ktp.iconset/icon_16x16@2x.png"
+          sips -z  32  32  /tmp/icon_source.png --out /tmp/ktp.iconset/icon_32x32.png
+          sips -z  64  64  /tmp/icon_source.png --out "/tmp/ktp.iconset/icon_32x32@2x.png"
+          sips -z 128 128  /tmp/icon_source.png --out /tmp/ktp.iconset/icon_128x128.png
+          sips -z 256 256  /tmp/icon_source.png --out "/tmp/ktp.iconset/icon_128x128@2x.png"
+          sips -z 256 256  /tmp/icon_source.png --out /tmp/ktp.iconset/icon_256x256.png
+          sips -z 512 512  /tmp/icon_source.png --out "/tmp/ktp.iconset/icon_256x256@2x.png"
+          sips -z 512 512  /tmp/icon_source.png --out /tmp/ktp.iconset/icon_512x512.png
+          sips -z 512 512  /tmp/icon_source.png --out "/tmp/ktp.iconset/icon_512x512@2x.png"
+
+          echo "Iconset files:"
+          ls -la /tmp/ktp.iconset/
+
+      - name: Create build/icon.icns
+        run: |
+          iconutil -c icns /tmp/ktp.iconset -o build/icon.icns
+
+          if [ ! -f "build/icon.icns" ]; then
+            echo "ERROR: build/icon.icns was not created." >&2
+            exit 1
+          fi
+          echo "Icon created: $(wc -c < build/icon.icns) bytes"
+
+      # ── 5. Run automated gates ─────────────────────────────────────────────
+      - name: Syntax check
+        run: npm run syntax-check
+
+      - name: Prebuild (generate renderer.min.html)
+        run: npm run prebuild
+
+      - name: Run test suite
+        run: node src/tests/run.js
+
+      # ── 6. Build unsigned macOS app (DMG + ZIP) ────────────────────────────
+      #       hardenedRuntime: false — unsigned, for internal dogfood only.
+      #       No CSC_LINK / APPLE_ID / APPLE_TEAM_ID secrets are set or needed.
+      - name: Build macOS app (unsigned)
+        run: npm run build:mac
+        env:
+          # Explicitly ensure no signing credentials leak in
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      # ── 7. List artifacts (safe — no sensitive paths printed) ─────────────
+      - name: List build artifacts
+        run: |
+          echo "=== dist/ contents ==="
+          ls -lh dist/*.dmg dist/*mac*.zip 2>/dev/null || true
+          echo "========================"
+
+      # ── 8. Upload DMG ──────────────────────────────────────────────────────
+      - name: Upload DMG artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-dogfood-dmg-${{ github.run_number }}
+          path: |
+            dist/*.dmg
+          retention-days: 14
+          if-no-files-found: error
+
+      # ── 9. Upload ZIP artifacts ────────────────────────────────────────────
+      - name: Upload ZIP artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-dogfood-zip-${{ github.run_number }}
+          path: |
+            dist/*mac*.zip
+          retention-days: 14
+          if-no-files-found: warn
+
+      # ── 10. Summary ────────────────────────────────────────────────────────
+      - name: Build summary
+        run: |
+          echo "## Mac Dogfood Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Type:** Unsigned internal dogfood (Gatekeeper approval required on first launch)" >> $GITHUB_STEP_SUMMARY
+          echo "**Note:** ${{ github.event.inputs.note }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Artifacts:** Download from the run's Artifacts section." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Install instructions" >> $GITHUB_STEP_SUMMARY
+          echo "1. Download the DMG from Artifacts." >> $GITHUB_STEP_SUMMARY
+          echo "2. Open the DMG and drag the app to Applications." >> $GITHUB_STEP_SUMMARY
+          echo "3. **Right-click → Open** on first launch (required for unsigned apps)." >> $GITHUB_STEP_SUMMARY
+          echo "4. See \`docs/mac-dogfood-install.md\` for full instructions." >> $GITHUB_STEP_SUMMARY
