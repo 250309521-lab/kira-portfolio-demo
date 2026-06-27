@@ -104,17 +104,24 @@ jobs:
       #       hardenedRuntime: false — unsigned, for internal dogfood only.
       #       No CSC_LINK / APPLE_ID / APPLE_TEAM_ID secrets are set or needed.
       - name: Build macOS app (unsigned)
-        run: npm run build:mac
+        run: npm run build:mac -- --publish never
         env:
           # Explicitly ensure no signing credentials leak in
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # Disable any GitHub publish attempt — artifacts uploaded via upload-artifact only
+          PUBLISH_FOR_PULL_REQUEST: "false"
 
-      # ── 7. List artifacts (safe — no sensitive paths printed) ─────────────
-      - name: List build artifacts
+      # ── 7. Verify and list artifacts (safe — no sensitive paths printed) ────
+      - name: Verify and list build artifacts
         run: |
           echo "=== dist/ contents ==="
-          ls -lh dist/*.dmg dist/*mac*.zip 2>/dev/null || true
+          ls -lh dist/
           echo "========================"
+          echo "Verifying DMG artifacts exist..."
+          test -n "$(ls dist/*.dmg 2>/dev/null)" || { echo "ERROR: No .dmg files found"; exit 1; }
+          echo "Verifying ZIP artifacts exist..."
+          test -n "$(ls dist/*mac*.zip 2>/dev/null)" || { echo "ERROR: No mac .zip files found"; exit 1; }
+          echo "All expected artifacts present."
 
       # ── 8. Upload DMG ──────────────────────────────────────────────────────
       - name: Upload DMG artifacts
