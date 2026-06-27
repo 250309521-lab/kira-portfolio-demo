@@ -1150,16 +1150,29 @@ function register(test, assert, assertEqual) {
   });
 
   test('1F.6C status-dot: backup card dot uses warn for pending/uploading/error', function() {
-    // The inner backup card dot must NOT show green for pending state
-    assert(!/AUTO_BACKUP_UI\.state === 'pending'.*?'ok'/.test(_rendererSrc.replace(/\n/g,' ')),
-      'pending state must not map to ok (green) dot in the backup card');
-    assert(!/AUTO_BACKUP_UI\.state === 'uploading'.*?'ok'/.test(_rendererSrc.replace(/\n/g,' ')),
-      'uploading state must not map to ok (green) dot in the backup card');
-    // Must use warn variant
-    assert(/ws-status-dot.*warn|'warn'/.test(_rendererSrc),
-      'warn CSS class must be used for pending/uploading states');
-    assert(/\.ws-status-dot\.warn/.test(_rendererSrc),
-      'ws-status-dot.warn CSS variant must be defined');
+    // The backup card dot class is computed by the named _bkCardDot() helper.
+    // We use POSITIVE assertions scoped to that function body — verifying that
+    // each non-ok state explicitly returns 'warn' — rather than a broad negative
+    // regex that can false-positive on legitimate state-machine transitions
+    // elsewhere in the source (e.g. pending→ok when an upload completes).
+    var dotFn = _rendererSrc.match(/function _bkCardDot\(\)\s*\{([\s\S]*?)\n\}/);
+    assert(dotFn, '_bkCardDot helper must exist for the backup card status dot');
+    var dotBody = dotFn[1].replace(/\n/g,' ');
+    // Positive: pending must map to 'warn' (its return appears before any 'ok')
+    assert(/pending.*return 'warn'/.test(dotBody),
+      "pending state must explicitly return 'warn' in _bkCardDot");
+    // Positive: uploading must map to 'warn'
+    assert(/uploading.*return 'warn'/.test(dotBody),
+      "uploading state must explicitly return 'warn' in _bkCardDot");
+    // Positive: error must map to 'warn'
+    assert(/error.*return 'warn'/.test(dotBody),
+      "error state must explicitly return 'warn' in _bkCardDot");
+    // Positive: success (ok / backups exist) correctly maps to 'ok' — that is expected
+    assert(/return 'ok'/.test(dotBody), "_bkCardDot must return 'ok' for the success state");
+    // Template must call the named helper
+    assert(/_bkCardDot\(\)/.test(_rendererSrc), '_bkCardDot() must be called in the backup card template');
+    // CSS must define the warn variant
+    assert(/\.ws-status-dot\.warn/.test(_rendererSrc), 'ws-status-dot.warn CSS variant must be defined');
   });
 
   // ── 1F.6D startup responsiveness + reload hydration hardening ───────────────

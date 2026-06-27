@@ -10732,6 +10732,19 @@ async function wsDownloadBackup(idx) {
 // Shows a simple colored dot with a non-technical tooltip title only.
 // Called from renderWorkspaceCard() so it stays in sync with all state changes.
 
+// ── 1F.6C: Cloud Backup card status-dot class helper ─────────────────────────
+// Named function so the test can scope its static check to this body only,
+// rather than scanning the whole source (which contains legitimate state-machine
+// transitions like pending→ok after a successful upload that are NOT dot-rendering).
+// Product rule: pending / uploading / error must never render as ok (green).
+function _bkCardDot() {
+  var _s = AUTO_BACKUP_UI.state;
+  if (_s === 'pending' || _s === 'uploading') return 'warn';
+  if (_s === 'error') return 'warn';
+  if (_s === 'ok' || BACKUP_LIST_UI.backups.length > 0) return 'ok';
+  return '';
+}
+
 function renderAutoBackupIndicator() {
   var el = document.getElementById('cloud-backup-indicator');
   if (!el) return;
@@ -10912,17 +10925,7 @@ function renderWorkspaceCard() {
           '<div class="ws-sync-status-hdr"><span id="ws-backup-hdr" class="ws-sync-hdr-lbl"></span></div>' +
           // Simple status: show protection state; details move to Advanced
           '<div class="ws-bk-simple-status">' +
-            '<div class="ws-status-dot ' + (function() {
-              // Compute backup-card dot class in a helper so the status words
-              // ('pending'/'ok') are not adjacent in the source text — the test
-              // regex scans for AUTO_BACKUP_UI.state==='pending' followed by
-              // 'ok' and a cross-line match on LF files was a false positive.
-              var _bkSt = AUTO_BACKUP_UI.state;
-              if (_bkSt === 'pending'  || _bkSt === 'uploading') return 'warn';
-              if (_bkSt === 'error') return 'warn';
-              if (_bkSt === 'ok' || BACKUP_LIST_UI.backups.length > 0) return 'ok';
-              return '';
-            }()) + '"></div>' +
+            '<div class="ws-status-dot ' + _bkCardDot() + '"></div>' +
             '<span id="ws-bk-status-txt" class="ws-sync-summary"></span>' +
           '</div>' +
           ((BACKUP_LIST_UI.state === 'ready' && BACKUP_LIST_UI.backups.length > 0) || AUTO_BACKUP_UI.lastSuccessAt
