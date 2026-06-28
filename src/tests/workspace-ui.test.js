@@ -2497,6 +2497,52 @@ function register(test, assert, assertEqual) {
     });
   });
 
+  // ── SYNC-SAFETY-V1-0A-SLICE-A: backup-first safety notice on conflict buttons ──
+
+  test('1G.8B SYNC-SAFETY-V1-0A: sxKeepMineHelp EN mentions backup-first behavior', function() {
+    // G7 gate: "Keep my version" help text must tell the user their local state is
+    // backed up first. main.js cloud:keepMineResolve creates a mandatory pre-keep-mine
+    // safety backup before the push — this copy makes that visible to the user.
+    var m = _rendererSrc.match(/sxKeepMineHelp:'([^']+)'/g);
+    assert(m && m.length >= 2, 'sxKeepMineHelp must appear in both TR and EN blocks (found ' + (m ? m.length : 0) + ')');
+    var en = m.find(function(s) { return /backed up/.test(s); });
+    assert(en, 'sxKeepMineHelp EN must mention "backed up first"\n  found: ' + (m ? m.join(' | ') : '(none)'));
+  });
+
+  test('1G.8B SYNC-SAFETY-V1-0A: sxKeepMineHelp TR mentions backup-first behavior', function() {
+    var m = _rendererSrc.match(/sxKeepMineHelp:'([^']+)'/g);
+    assert(m && m.length >= 2, 'sxKeepMineHelp must appear in both TR and EN blocks');
+    var tr = m.find(function(s) { return /yedeklenecek/.test(s); });
+    assert(tr, 'sxKeepMineHelp TR must mention "yedeklenecek" (will be backed up)\n  found: ' + (m ? m.join(' | ') : '(none)'));
+  });
+
+  test('1G.8B SYNC-SAFETY-V1-0A: both conflict action buttons carry a backup-first notice', function() {
+    // Symmetry: Use Cloud already had the notice; Keep Mine now also has it.
+    // Both verify that a safety backup happens before any data is changed.
+    var ucMatches = _rendererSrc.match(/sxUseCloudHelp:'([^']+)'/g) || [];
+    var kmMatches = _rendererSrc.match(/sxKeepMineHelp:'([^']+)'/g) || [];
+    var ucEn = ucMatches.find(function(s) { return /backed up/.test(s); });
+    var ucTr = ucMatches.find(function(s) { return /yedeklenecek/.test(s); });
+    var kmEn = kmMatches.find(function(s) { return /backed up/.test(s); });
+    var kmTr = kmMatches.find(function(s) { return /yedeklenecek/.test(s); });
+    assert(ucEn, 'sxUseCloudHelp EN must mention backed up');
+    assert(ucTr, 'sxUseCloudHelp TR must mention yedeklenecek');
+    assert(kmEn, 'sxKeepMineHelp EN must mention backed up');
+    assert(kmTr, 'sxKeepMineHelp TR must mention yedeklenecek');
+  });
+
+  test('1G.8B SYNC-SAFETY-V1-0A: sxConfirmSafety still mentions explicit conflict choice (regression guard)', function() {
+    // The Enable Sync confirm panel must still tell users that conflicts require
+    // an explicit choice ("Use cloud version" / "Keep my version") — no silent overwrite.
+    var m = _rendererSrc.match(/sxConfirmSafety:'([^']+)'/g) || [];
+    assert(m.length >= 2, 'sxConfirmSafety must appear in both TR and EN');
+    var enText = m.find(function(s) { return /Use cloud|Keep my/.test(s); });
+    var trText = m.find(function(s) { return /Bulut sürümünü|sürümümü tut/.test(s); });
+    assert(enText, 'sxConfirmSafety EN must reference both conflict choices');
+    assert(trText, 'sxConfirmSafety TR must reference both conflict choices');
+    assert(m.every(function(s) { return /silently|sessizce/.test(s); }), 'sxConfirmSafety must state nothing is overwritten silently');
+  });
+
   test('1G.8B: no new IPC/preload bridge; Cloud Backup section remains separate', function() {
     assert(!/ipcRenderer/.test(_rendererSrc), 'renderer must still never reference ipcRenderer directly');
     assert(/wsStartApply\(/.test(_rendererSrc), 'Cloud Backup apply must still exist (separate)');
