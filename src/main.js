@@ -594,6 +594,17 @@ function setupIPC() {
 
     log('WARN', 'license:check — invalid', { reason: result.reason });
 
+    // LICENSE-FOUNDATION-0A: for expired licenses, pass the plan so the renderer
+    // can downgrade expired Pro/trial to Basic local-only mode. No other failure
+    // reason exposes a plan — only expired, where all security checks already passed.
+    if (result.reason === 'expired') {
+      return {
+        ok:          false,
+        reason:      'expired',
+        expiredPlan: typeof result.expiredPlan === 'string' ? result.expiredPlan : null,
+      };
+    }
+
     return {
       ok:     false,
       reason: result.reason,

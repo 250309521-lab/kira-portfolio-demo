@@ -172,6 +172,69 @@ function register(test, assert, assertEqual) {
     assertEqual(r.reason, 'expired', 'reason must be expired');
   });
 
+  // ── H2. LICENSE-FOUNDATION-0A: expiredPlan in expired result ─────────────────
+
+  test('CH-4C LF-0A: expired pro returns expiredPlan:pro', function() {
+    var obj = _makeLicense({ plan: 'pro', perpetual: false, expiresAt: '2020-01-01T23:59:59.999Z' });
+    var r   = verifier.verifyLicenseObject(obj, _FP, _OPTS);
+    assert(!r.ok, 'expired pro must fail');
+    assertEqual(r.reason, 'expired', 'reason must be expired');
+    assertEqual(r.expiredPlan, 'pro', 'expiredPlan must be pro');
+    assert(r.license === undefined, 'license object must NOT be present on expired');
+  });
+
+  test('CH-4C LF-0A: expired trial returns expiredPlan:trial', function() {
+    var obj = _makeLicense({ plan: 'trial', perpetual: false, expiresAt: '2020-01-01T23:59:59.999Z' });
+    var r   = verifier.verifyLicenseObject(obj, _FP, _OPTS);
+    assert(!r.ok, 'expired trial must fail');
+    assertEqual(r.reason, 'expired', 'reason must be expired');
+    assertEqual(r.expiredPlan, 'trial', 'expiredPlan must be trial');
+  });
+
+  test('CH-4C LF-0A: expired standard returns expiredPlan:standard', function() {
+    var obj = _makeLicense({ plan: 'standard', perpetual: false, expiresAt: '2020-01-01T23:59:59.999Z' });
+    var r   = verifier.verifyLicenseObject(obj, _FP, _OPTS);
+    assert(!r.ok, 'expired standard must fail');
+    assertEqual(r.reason, 'expired', 'reason must be expired');
+    assertEqual(r.expiredPlan, 'standard', 'expiredPlan must be standard');
+  });
+
+  test('CH-4C LF-0A: invalid_signature does NOT expose expiredPlan', function() {
+    // Signature check happens before expiry — expiredPlan must not leak on sig failure.
+    var obj = _makeLicense({ plan: 'pro', perpetual: false, expiresAt: '2099-12-31T23:59:59.999Z' }, 'invalidsig');
+    var r   = verifier.verifyLicenseObject(obj, _FP, _OPTS);
+    assert(!r.ok, 'invalid signature must fail');
+    assertEqual(r.reason, 'invalid_signature', 'reason must be invalid_signature');
+    assert(r.expiredPlan === undefined, 'expiredPlan must NOT be present on invalid_signature');
+  });
+
+  test('CH-4C LF-0A: wrong_machine does NOT expose expiredPlan', function() {
+    // Machine fingerprint check happens before signature and expiry.
+    var obj = _makeLicense({ plan: 'pro', perpetual: false, expiresAt: '2020-01-01T23:59:59.999Z' });
+    var r   = verifier.verifyLicenseObject(obj, _FP2, _OPTS);  // wrong machine
+    assert(!r.ok, 'wrong machine must fail');
+    assertEqual(r.reason, 'wrong_machine', 'reason must be wrong_machine');
+    assert(r.expiredPlan === undefined, 'expiredPlan must NOT be present on wrong_machine');
+  });
+
+  test('CH-4C LF-0A: valid pro — behavior unchanged (regression)', function() {
+    var obj = _makeLicense({ plan: 'pro', perpetual: false, expiresAt: '2099-12-31T23:59:59.999Z' });
+    var r   = verifier.verifyLicenseObject(obj, _FP, _OPTS);
+    assert(r.ok, 'valid pro must succeed');
+    assertEqual(r.reason, 'valid', 'reason must be valid');
+    assertEqual(r.license.plan, 'pro', 'plan must be pro');
+    assert(r.expiredPlan === undefined, 'expiredPlan must NOT be present on valid license');
+  });
+
+  test('CH-4C LF-0A: valid standard — behavior unchanged (regression)', function() {
+    var obj = _makeLicense({ plan: 'standard', perpetual: false, expiresAt: '2099-12-31T23:59:59.999Z' });
+    var r   = verifier.verifyLicenseObject(obj, _FP, _OPTS);
+    assert(r.ok, 'valid standard must succeed');
+    assertEqual(r.reason, 'valid', 'reason must be valid');
+    assertEqual(r.license.plan, 'standard', 'plan must be standard');
+    assert(r.expiredPlan === undefined, 'expiredPlan must NOT be present on valid license');
+  });
+
   test('CH-4C: options.now override — license not yet expired relative to past "now" is valid', function() {
     var futureExpiry = new Date(Date.now() + 86400000).toISOString();
     var obj          = _makeLicense({ perpetual: false, expiresAt: futureExpiry });

@@ -150,7 +150,11 @@ function verifyLicenseObject(licenseObject, currentFingerprint, options = {}) {
         return { ok: false, reason: 'invalid_format', message: 'expiresAt must be a valid ISO date string for non-perpetual licenses' };
       }
       if (new Date(payload.expiresAt) <= now) {
-        return { ok: false, reason: 'expired', message: `License expired at ${payload.expiresAt}` };
+        // LICENSE-FOUNDATION-0A: expose the plan so the renderer can downgrade
+        // expired Pro/trial to Basic local-only mode. Only reachable after all
+        // other checks pass (schema, app binding, machine fingerprint, signature).
+        // payload.plan was already validated as one of ALLOWED_PLANS above.
+        return { ok: false, reason: 'expired', message: `License expired at ${payload.expiresAt}`, expiredPlan: payload.plan };
       }
     }
 

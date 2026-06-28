@@ -4592,10 +4592,19 @@ function isLicensed()   { return licenseStatus != null && licenseStatus.ok === t
 function getLicensePlan(){ return (isLicensed() && licenseStatus.license) ? licenseStatus.license.plan : null; }
 // pro / trial count as Pro for internal testing; standard is Basic only.
 function isProUser()    { var p = getLicensePlan(); return p === 'pro' || p === 'trial'; }
-// Basic-tier features: always available to any valid licensed user.
-function canUseBasicApp()           { return isLicensed(); }
-function canUseLocalBackup()        { return isLicensed(); }
-function canUseLocalRestore()       { return isLicensed(); }
+// LICENSE-FOUNDATION-0A: expired Pro/trial downgrade. All security checks (sig,
+// machine, app) passed but the subscription lapsed. Expired standard stays blocked.
+// Pro features (cloud/sync/WA) remain locked even when this returns true.
+function _isExpiredPro() {
+  return licenseStatus != null &&
+         licenseStatus.ok === false &&
+         licenseStatus.reason === 'expired' &&
+         (licenseStatus.expiredPlan === 'pro' || licenseStatus.expiredPlan === 'trial');
+}
+// Basic-tier features: available to valid licensed users AND expired Pro/trial.
+function canUseBasicApp()           { return isLicensed() || _isExpiredPro(); }
+function canUseLocalBackup()        { return isLicensed() || _isExpiredPro(); }
+function canUseLocalRestore()       { return isLicensed() || _isExpiredPro(); }
 // Pro-tier features: require isProUser().
 function canUseCloudAccount()       { return isProUser(); }
 function canUseCloudBackup()        { return isProUser(); }
@@ -14853,9 +14862,13 @@ function _renderLicenseStatus() {
     el.style.color       = 'var(--emerald-l)';
   } else {
     const isCritical = licenseStatus.reason === 'wrong_machine' ||
-                       licenseStatus.reason === 'invalid_signature' ||
-                       licenseStatus.reason === 'expired';
-    el.textContent       = _licenseMsg(licenseStatus.reason, lang);
+                       licenseStatus.reason === 'invalid_signature';
+    const _expiredProMsg = _isExpiredPro()
+      ? (lang === 'en'
+          ? '⚠ Pro subscription expired. Basic local features remain available.'
+          : '⚠ Pro aboneliği sona erdi. Temel yerel özellikler kullanılabilir.')
+      : null;
+    el.textContent       = _expiredProMsg || _licenseMsg(licenseStatus.reason, lang);
     el.style.background  = isCritical ? 'var(--err-bg)'  : 'var(--warn-bg)';
     el.style.borderColor = isCritical ? 'var(--err-bd)'  : 'var(--warn-bd)';
     el.style.color       = isCritical ? 'var(--rose-l)'  : 'var(--amber-l)';
@@ -14883,6 +14896,9 @@ async function checkLicenseStatus() {
   _applyProNavGates();
   if (result.ok) {
     _hideLicenseGateAnimated();
+  } else if (_isExpiredPro()) {
+    // Expired Pro/trial: Basic local mode active — no full gate block.
+    _hideLicenseGateAnimated();
   } else {
     _showLicenseGate('active');
   }
@@ -14891,10 +14907,12 @@ async function checkLicenseStatus() {
 // ── CH-4C.6: License boot gate helpers ──────────────────────────────────────
 
 function _isCriticalLicenseReason(reason) {
+  // 'expired' is intentionally excluded: expired Pro/trial downgrades to Basic
+  // local-only mode (retry/import offered); expired standard shows the normal
+  // gate with import button. Neither should be a no-retry hard block.
   return reason === 'invalid_app'       ||
          reason === 'wrong_machine'     ||
-         reason === 'invalid_signature' ||
-         reason === 'expired';
+         reason === 'invalid_signature';
 }
 
 function _renderLicenseGate(state) {

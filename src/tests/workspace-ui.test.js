@@ -3161,7 +3161,8 @@ function register(test, assert, assertEqual) {
     var factory = new Function(
       'licenseStatus',
       helperBlock[0] + '\nreturn {isLicensed:isLicensed,getLicensePlan:getLicensePlan,' +
-        'isProUser:isProUser,canUseBasicApp:canUseBasicApp,canUseLocalBackup:canUseLocalBackup,' +
+        'isProUser:isProUser,_isExpiredPro:_isExpiredPro,canUseBasicApp:canUseBasicApp,' +
+        'canUseLocalBackup:canUseLocalBackup,' +
         'canUseLocalRestore:canUseLocalRestore,canUseCloudAccount:canUseCloudAccount,' +
         'canUseCloudBackup:canUseCloudBackup,canUseCloudBackupHistory:canUseCloudBackupHistory,' +
         'canUseCloudBackupApply:canUseCloudBackupApply,canUseSync:canUseSync,' +
@@ -3247,6 +3248,120 @@ function register(test, assert, assertEqual) {
     assert(h.canUseCloudBackup(),  'trial → canUseCloudBackup true');
     assert(h.canUseSync(),         'trial → canUseSync true');
     assert(h.canUseWhatsApp(),     'trial → canUseWhatsApp true');
+  });
+
+  // ── LICENSE-FOUNDATION-0A: expired Pro downgrade to Basic local mode ───────────
+
+  function _makeExpiredStatus(plan) {
+    return { ok: false, reason: 'expired', expiredPlan: plan };
+  }
+
+  test('LF-0A: _isExpiredPro exists in renderer', function() {
+    assert(/function _isExpiredPro\(\)/.test(_rendererSrc), '_isExpiredPro must be defined');
+    assert(/LICENSE-FOUNDATION-0A/.test(_rendererSrc), 'LICENSE-FOUNDATION-0A marker must be present');
+  });
+
+  test('LF-0A: _isExpiredPro true for expired pro', function() {
+    var h = _evalEntitlementHelpers(_makeExpiredStatus('pro'));
+    assert(h._isExpiredPro(), 'expired pro → _isExpiredPro true');
+  });
+
+  test('LF-0A: _isExpiredPro true for expired trial', function() {
+    var h = _evalEntitlementHelpers(_makeExpiredStatus('trial'));
+    assert(h._isExpiredPro(), 'expired trial → _isExpiredPro true');
+  });
+
+  test('LF-0A: _isExpiredPro false for expired standard', function() {
+    var h = _evalEntitlementHelpers(_makeExpiredStatus('standard'));
+    assert(!h._isExpiredPro(), 'expired standard → _isExpiredPro false');
+  });
+
+  test('LF-0A: _isExpiredPro false for wrong_machine / invalid_signature / invalid_app', function() {
+    [
+      { ok: false, reason: 'wrong_machine' },
+      { ok: false, reason: 'invalid_signature' },
+      { ok: false, reason: 'invalid_app' },
+    ].forEach(function(s) {
+      var h = _evalEntitlementHelpers(s);
+      assert(!h._isExpiredPro(), s.reason + ' → _isExpiredPro must be false');
+    });
+  });
+
+  test('LF-0A: _isExpiredPro false for null / valid license', function() {
+    var hNull = _evalEntitlementHelpers(null);
+    assert(!hNull._isExpiredPro(), 'null → _isExpiredPro false');
+    var hValid = _evalEntitlementHelpers({ ok: true, license: { plan: 'pro' } });
+    assert(!hValid._isExpiredPro(), 'valid → _isExpiredPro false');
+  });
+
+  test('LF-0A: expired pro — Basic features available, Pro/cloud features locked', function() {
+    var h = _evalEntitlementHelpers(_makeExpiredStatus('pro'));
+    assert(h.canUseBasicApp(),           'expired pro → canUseBasicApp true');
+    assert(h.canUseLocalBackup(),        'expired pro → canUseLocalBackup true');
+    assert(h.canUseLocalRestore(),       'expired pro → canUseLocalRestore true');
+    assert(!h.canUseCloudAccount(),      'expired pro → canUseCloudAccount false');
+    assert(!h.canUseCloudBackup(),       'expired pro → canUseCloudBackup false');
+    assert(!h.canUseCloudBackupHistory(),'expired pro → canUseCloudBackupHistory false');
+    assert(!h.canUseCloudBackupApply(),  'expired pro → canUseCloudBackupApply false');
+    assert(!h.canUseSync(),              'expired pro → canUseSync false');
+    assert(!h.canUseWhatsApp(),          'expired pro → canUseWhatsApp false');
+    assert(!h.canUsePrioritySupport(),   'expired pro → canUsePrioritySupport false');
+    assert(!h.isLicensed(),              'expired pro → isLicensed false (not a valid license)');
+    assert(!h.isProUser(),               'expired pro → isProUser false');
+  });
+
+  test('LF-0A: expired trial — Basic features available, Pro/cloud features locked', function() {
+    var h = _evalEntitlementHelpers(_makeExpiredStatus('trial'));
+    assert(h.canUseBasicApp(),     'expired trial → canUseBasicApp true');
+    assert(h.canUseLocalBackup(),  'expired trial → canUseLocalBackup true');
+    assert(h.canUseLocalRestore(), 'expired trial → canUseLocalRestore true');
+    assert(!h.canUseCloudBackup(), 'expired trial → canUseCloudBackup false');
+    assert(!h.canUseSync(),        'expired trial → canUseSync false');
+    assert(!h.canUseWhatsApp(),    'expired trial → canUseWhatsApp false');
+  });
+
+  test('LF-0A: expired standard — fully blocked (same as before)', function() {
+    var h = _evalEntitlementHelpers(_makeExpiredStatus('standard'));
+    assert(!h.canUseBasicApp(),    'expired standard → canUseBasicApp false');
+    assert(!h.canUseLocalBackup(), 'expired standard → canUseLocalBackup false');
+    assert(!h.isLicensed(),        'expired standard → isLicensed false');
+    assert(!h.isProUser(),         'expired standard → isProUser false');
+  });
+
+  test('LF-0A: wrong_machine / invalid_signature remain hard-blocked (regression)', function() {
+    [
+      { ok: false, reason: 'wrong_machine' },
+      { ok: false, reason: 'invalid_signature' },
+    ].forEach(function(s) {
+      var h = _evalEntitlementHelpers(s);
+      assert(!h.canUseBasicApp(),  s.reason + ' → canUseBasicApp must be false');
+      assert(!h.canUseLocalBackup(),s.reason + ' → canUseLocalBackup must be false');
+    });
+  });
+
+  test('LF-0A: _isCriticalLicenseReason — expired is NOT critical; wrong_machine / invalid_signature / invalid_app ARE', function() {
+    var m = _rendererSrc.match(/function _isCriticalLicenseReason\(reason\)\s*\{[\s\S]*?\n\}/);
+    assert(m, '_isCriticalLicenseReason must be found');
+    var fn = new Function('reason', m[0].replace(/^function _isCriticalLicenseReason\(reason\)\s*\{/, '').replace(/\}$/, ''));
+    assert(!fn('expired'),            "'expired' must NOT be critical after LF-0A");
+    assert( fn('wrong_machine'),      "'wrong_machine' must still be critical");
+    assert( fn('invalid_signature'),  "'invalid_signature' must still be critical");
+    assert( fn('invalid_app'),        "'invalid_app' must still be critical");
+    assert(!fn('no_license'),         "'no_license' must not be critical");
+  });
+
+  test('LF-0A: expired-Pro warning copy exists in both renderer languages', function() {
+    assert(/Pro subscription expired.*Basic local features remain available/.test(_rendererSrc),
+      'EN expired-Pro message must be present');
+    assert(/Pro aboneliği sona erdi.*Temel yerel özellikler kullanılabilir/.test(_rendererSrc),
+      'TR expired-Pro message must be present');
+  });
+
+  test('LF-0A: checkLicenseStatus hides gate for expired Pro/trial (regression)', function() {
+    var fn = _rendererSrc.match(/async function checkLicenseStatus\(\)[\s\S]*?\n\}/);
+    assert(fn, 'checkLicenseStatus must exist');
+    assert(/_isExpiredPro\(\)/.test(fn[0]), 'checkLicenseStatus must consult _isExpiredPro');
+    assert(/_hideLicenseGateAnimated/.test(fn[0]), 'checkLicenseStatus must call _hideLicenseGateAnimated');
   });
 
   test('ENTITLEMENT: helpers are pure — no IPC/network/DOM/storage access', function() {
