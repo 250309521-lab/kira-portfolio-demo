@@ -3213,6 +3213,116 @@ function register(test, assert, assertEqual) {
       'helpers must not log anything');
   });
 
+  // ── PRO-FEATURE-GATING-0A: renderer UI and action-handler gates ──────────────
+
+  test('PRO-GATING: proRequired i18n key exists in both TR and EN', function() {
+    var n = (_rendererSrc.match(/proRequired:/g) || []).length;
+    assert(n >= 2, 'proRequired key must be in both TR and EN (found ' + n + ')');
+  });
+
+  test('PRO-GATING: _applyProNavGates function exists and gates nb-cloud and nb-wa', function() {
+    assert(/function _applyProNavGates/.test(_rendererSrc), '_applyProNavGates must exist');
+    var fn = _rendererSrc.match(/function _applyProNavGates[\s\S]*?\n\}/);
+    assert(fn, '_applyProNavGates body found');
+    var b = fn[0];
+    assert(/canUseCloudAccount/.test(b), 'gates nb-cloud via canUseCloudAccount');
+    assert(/canUseWhatsApp/.test(b),     'gates nb-wa via canUseWhatsApp');
+    assert(/nb-cloud/.test(b) && /nb-wa/.test(b), 'both sidebar ids targeted');
+  });
+
+  test('PRO-GATING: tplCloud returns locked prompt when !canUseCloudAccount()', function() {
+    var fn = _rendererSrc.match(/function tplCloud\(\)[\s\S]*?\n\}/);
+    assert(fn, 'tplCloud body found');
+    assert(/canUseCloudAccount/.test(fn[0]), 'tplCloud checks canUseCloudAccount');
+    assert(/proRequired/.test(fn[0]),        'tplCloud uses proRequired i18n key');
+  });
+
+  test('PRO-GATING: _syncSectionView has canUseSync() gate as first guard', function() {
+    var fn = _rendererSrc.match(/function _syncSectionView\(\)[\s\S]*?\n\}/);
+    assert(fn, '_syncSectionView body found');
+    var body = fn[0];
+    var syncGateIdx  = body.indexOf('canUseSync');
+    var flagGateIdx  = body.indexOf('_realSyncPushEnabled');
+    assert(syncGateIdx > -1,        '_syncSectionView gates on canUseSync');
+    assert(syncGateIdx < flagGateIdx,'canUseSync check must come before the flag check');
+  });
+
+  test('PRO-GATING: _canOfferSyncOptIn has canUseSync() as first guard', function() {
+    var fn = _rendererSrc.match(/function _canOfferSyncOptIn\(\)[\s\S]*?\n\}/);
+    assert(fn, '_canOfferSyncOptIn body found');
+    var body = fn[0];
+    var syncIdx = body.indexOf('canUseSync');
+    var authIdx = body.indexOf("CLOUD_UI.state !== 'authenticated'");
+    assert(syncIdx > -1,      '_canOfferSyncOptIn gates canUseSync');
+    assert(syncIdx < authIdx, 'canUseSync must come before auth check');
+  });
+
+  test('PRO-GATING: Cloud Backup action handlers each gate on correct canUse helper', function() {
+    function firstLine(name) {
+      var m = _rendererSrc.match(new RegExp('(?:async )?function ' + name + '\\([^)]*\\)\\s*\\{\\s*([^\\n]{0,200})'));
+      return m ? m[1] : '';
+    }
+    assert(/canUseCloudBackup/.test(firstLine('wsConfirmManualBackup')), 'wsConfirmManualBackup gates canUseCloudBackup');
+    assert(/canUseCloudBackup/.test(firstLine('wsAutoBackupTick')),      'wsAutoBackupTick gates canUseCloudBackup');
+    assert(/canUseCloudBackupHistory/.test(firstLine('wsDownloadBackup')),'wsDownloadBackup gates canUseCloudBackupHistory');
+    assert(/canUseCloudBackupApply/.test(firstLine('wsConfirmApply1')),  'wsConfirmApply1 gates canUseCloudBackupApply');
+    assert(/canUseCloudBackupApply/.test(firstLine('wsConfirmApply2')),  'wsConfirmApply2 gates canUseCloudBackupApply');
+  });
+
+  test('PRO-GATING: WhatsApp action handlers all gate on canUseWhatsApp()', function() {
+    function firstLine(name) {
+      var m = _rendererSrc.match(new RegExp('function ' + name + '\\([^)]*\\)\\s*\\{\\s*([^\\n]{0,120})'));
+      return m ? m[1] : '';
+    }
+    assert(/canUseWhatsApp/.test(firstLine('waMsg')),         'waMsg gates canUseWhatsApp');
+    assert(/canUseWhatsApp/.test(firstLine('sendAllWA')),     'sendAllWA gates canUseWhatsApp');
+    assert(/canUseWhatsApp/.test(firstLine('waSendAndLog')),  'waSendAndLog gates canUseWhatsApp');
+  });
+
+  test('PRO-GATING: both renderWA() functions return locked prompt for non-Pro', function() {
+    var rwMatches = (_rendererSrc.match(/function renderWA\(\)/g) || []).length;
+    assert(rwMatches >= 2, 'both renderWA functions must exist (found ' + rwMatches + ')');
+    // Each renderWA function body must contain both canUseWhatsApp and proRequired.
+    var rwCount = 0, cursor = 0;
+    for (var ri = 0; ri < rwMatches; ri++) {
+      var start = _rendererSrc.indexOf('function renderWA()', cursor);
+      var end   = _rendererSrc.indexOf('\n}', start) + 2;
+      var body  = _rendererSrc.slice(start, end);
+      if (/canUseWhatsApp/.test(body) && /proRequired/.test(body)) rwCount++;
+      cursor = end;
+    }
+    assert(rwCount >= 2, 'both renderWA must have canUseWhatsApp + proRequired gate (found ' + rwCount + ')');
+  });
+
+  test('PRO-GATING: WA inline rent table button is gated by canUseWhatsApp()', function() {
+    // The rent table WA button must be conditional on canUseWhatsApp() not always rendered
+    assert(/canUseWhatsApp\(\)\?[\s\S]{0,80}waMsg|canUseWhatsApp\(\)\s*\?\s*`[\s\S]{0,80}waMsg/.test(_rendererSrc),
+      'rent table WA button must be behind canUseWhatsApp() ternary');
+  });
+
+  test('PRO-GATING: wsSyncConfirmEnable has canUseSync() guard', function() {
+    var fn = _rendererSrc.match(/async function wsSyncConfirmEnable\(\)[\s\S]*?\n\}/);
+    assert(fn, 'wsSyncConfirmEnable body found');
+    assert(/canUseSync/.test(fn[0]), 'wsSyncConfirmEnable must check canUseSync');
+  });
+
+  test('PRO-GATING: Basic local helpers unaffected — no canUseLocalBackup gate on backup create/restore', function() {
+    // Local backup functions must not have canUseCloudBackup (which is Pro)
+    // They may have canUseLocalBackup but that returns true for standard plan
+    var doBackup = _rendererSrc.match(/function doElectronBackup[\s\S]*?\n\}/);
+    var doRestore = _rendererSrc.match(/function _doRestoreFrom[\s\S]*?\n\}/);
+    if (doBackup)  assert(!/canUseCloudBackup/.test(doBackup[0]),  'local backup must not be gated by canUseCloudBackup');
+    if (doRestore) assert(!/canUseCloudBackup/.test(doRestore[0]), 'local restore must not be gated by canUseCloudBackup');
+  });
+
+  test('PRO-GATING: pro/trial entitlement helpers unchanged (regression)', function() {
+    // Re-confirm from existing entitlement tests — pro/trial still get Pro
+    var h = _evalEntitlementHelpers(_makeStatus('pro', true));
+    assert(h.canUseCloudBackup() && h.canUseSync() && h.canUseWhatsApp(), 'pro plan retains all Pro features');
+    var t2 = _evalEntitlementHelpers(_makeStatus('trial', true));
+    assert(t2.canUseCloudBackup() && t2.canUseSync() && t2.canUseWhatsApp(), 'trial plan retains all Pro features');
+  });
+
   // ── 1F.6C UX polish: render order + reload behavior ─────────────────────────
 
   test('1F.6C render: wsConfirmManualBackup calls renderAutoBackupIndicator before renderWorkspaceCard', function() {

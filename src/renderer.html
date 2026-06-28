@@ -4605,6 +4605,15 @@ function canUseSync()               { return isProUser(); }
 function canUseWhatsApp()           { return isProUser(); }
 function canUsePrioritySupport()    { return isProUser(); }
 
+// PRO-FEATURE-GATING-0A: hide/show Pro-only sidebar nav buttons based on plan.
+// Called after every license check so the UI reflects current entitlement.
+function _applyProNavGates() {
+  var nbCloud = document.getElementById('nb-cloud');
+  var nbWa    = document.getElementById('nb-wa');
+  if (nbCloud) nbCloud.style.display = canUseCloudAccount() ? '' : 'none';
+  if (nbWa)    nbWa.style.display    = canUseWhatsApp()    ? '' : 'none';
+}
+
 // ── CLOUD ACCOUNT UI — runtime-only; never persisted to localStorage ─────────
 var CLOUD_UI = {
   state:     'loading',
@@ -5191,6 +5200,7 @@ var STRINGS={
     sxKeepMineFail:'Sürümünüz tutulamadı — hiçbir şey değişmedi',
     sxCloudChanged:'Bulut yeniden değişti — seçim yapmadan önce tekrar kontrol edin.',
     // 1G.9B — local Sync opt-in (state + UI only; engine still gated)
+    proRequired:'Bu özellik Pro aboneliği gerektirir.',
     sxOffTitle:'Senkronizasyon kapalı',
     sxOffDetail:'Bu cihaz henüz bu çalışma alanını senkronize etmiyor.',
     sxEnableBtn:'Senkronizasyonu etkinleştir',
@@ -5821,6 +5831,7 @@ var STRINGS={
     sxKeepMineFail:'Couldn’t keep your version — nothing changed',
     sxCloudChanged:'The cloud changed again — please review before choosing.',
     // 1G.9B — local Sync opt-in (state + UI only; engine still gated)
+    proRequired:'This feature requires a Pro subscription.',
     sxOffTitle:'Sync is off',
     sxOffDetail:'This device is not syncing this workspace yet.',
     sxEnableBtn:'Enable Sync',
@@ -7296,7 +7307,7 @@ function renderDash(){
       <td class="c-orange">${t('dayOfMonth')} ${ten.gun}.</td>
       <td class="cr fw7">${TL(ten.rent)}</td>
       <td>${canEdit()?`<button class="btn btn-xs bsu-" onclick="openMod('pay-add','${b}:${ten.id}')">${t('btnEnter')}</button>`:''}
-          <button class="btn btn-xs bg-" onclick="waMsg('${b}','${ten.id}','${m}')">💬 WA</button></td></tr>`;
+          ${canUseWhatsApp()?`<button class="btn btn-xs bg-" onclick="waMsg('${b}','${ten.id}','${m}')">💬 WA</button>`:''}</td></tr>`;
   }));
 
   return monthBar()+`
@@ -8142,6 +8153,12 @@ function pasteIntoField(id){
 
 // ── CLOUD ACCOUNT MODAL (CLOUD-FOUNDATION-1C) ────────────────────────────────
 function tplCloud(){
+  // PRO-FEATURE-GATING-0A: Cloud Account is a Pro feature.
+  if (!canUseCloudAccount()) {
+    return '<div class="modal-title">'+t('cloudAccountTitle')+'</div>'+
+           '<div style="padding:24px;text-align:center;color:var(--i3);font-size:13px">'+
+           '🔒 '+t('proRequired')+'</div>';
+  }
   // Preserve meaningful state so the modal never flashes sign-in over a restored session.
   // 'authenticated' / 'reconnecting' / 'offline_cached' are kept; unknown states reset to loading.
   var _meaningful = CLOUD_UI.state === 'authenticated' ||
@@ -8911,6 +8928,7 @@ function _isSyncOptedInForActiveWorkspace() {
 // Eligibility to OFFER opt-in: authenticated + active workspace + writer role
 // (owner/admin/editor). Viewer/member are never eligible. Pure, no side effects.
 function _canOfferSyncOptIn() {
+  if (!canUseSync()) return false; // PRO-FEATURE-GATING-0A
   if (CLOUD_UI.state !== 'authenticated') return false;
   if (!WS_UI.activeId) return false;
   var role = WS_UI.activeRole;
@@ -9113,6 +9131,8 @@ function _syncStatusKey() {
 // { show:false } when the section should be hidden (sync flags off, or an unsettled
 // 'idle' state). The dot is intentionally never aggressive red — local data is safe.
 function _syncSectionView() {
+  // PRO-FEATURE-GATING-0A: Sync is a Pro feature.
+  if (!canUseSync()) return { show: false };
   // Gate behind the existing real-sync flags. If neither push nor pull is enabled,
   // sync is inert for this user → do not surface the section at all (1G.8A gating).
   if (!_realSyncPushEnabled() && !_realSyncPullEnabled()) return { show: false };
@@ -9710,7 +9730,8 @@ function wsSyncCancelEnable() {
 // cloud_newer/conflict are left for the existing explicit UI (no auto-resolve).
 // Reuses existing bridges only — NO new IPC, NO Cloud Backup Apply path.
 async function wsSyncConfirmEnable() {
-  if (SYNC_OPTIN_UI.enabling) return;                 // guard against double-run
+  if (!canUseSync()) return;           // PRO-FEATURE-GATING-0A
+  if (SYNC_OPTIN_UI.enabling) return; // guard against double-run
 
   function _abort(msgKey) {
     SYNC_OPTIN_UI.enabling = false;
@@ -9995,6 +10016,7 @@ function _scheduleAutoCloudBackup(_preSerialized) {
 // Fires after debounce or retry timer — performs the background cloud upload.
 // Auth/workspace/role checks happen here, NOT in _scheduleAutoCloudBackup.
 async function wsAutoBackupTick() {
+  if (!canUseCloudBackup()) return;    // PRO-FEATURE-GATING-0A
   _autoBackupDebounceTimer = null;
   _autoBackupRetryTimer    = null;
   AUTO_BACKUP_UI.nextRetryAt = null;
@@ -10504,6 +10526,7 @@ function wsCancelBackupConfirm() {
 }
 
 async function wsConfirmManualBackup() {
+  if (!canUseCloudBackup()) return;    // PRO-FEATURE-GATING-0A
   var bridge = _backupBridge();
   var workspaceId = WS_UI.activeId;
   if (!bridge || !workspaceId) return;
@@ -10647,12 +10670,14 @@ function wsCancelApply() {
 }
 
 function wsConfirmApply1() {
+  if (!canUseCloudBackupApply()) return; // PRO-FEATURE-GATING-0A
   if (BACKUP_LIST_UI.applyState !== 'confirm1') return;
   BACKUP_LIST_UI.applyState = 'confirm2';
   renderWorkspaceCard();
 }
 
 async function wsConfirmApply2() {
+  if (!canUseCloudBackupApply()) return; // PRO-FEATURE-GATING-0A
   if (BACKUP_LIST_UI.applyState !== 'confirm2') return;
   var workspaceId = WS_UI.activeId;
   var backupId    = BACKUP_LIST_UI.applyId;
@@ -10717,6 +10742,7 @@ function _backupDownloadErrMsg(errCode) {
 // NEVER restores. NEVER applies. NEVER modifies local DATA.
 // Only saves the .ktpbackup file to disk.
 async function wsDownloadBackup(idx) {
+  if (!canUseCloudBackupHistory()) return; // PRO-FEATURE-GATING-0A
   var backup = BACKUP_LIST_UI.backups[idx];
   if (!backup || typeof backup.backupId !== 'string' || !backup.backupId) return;
   var backupId = backup.backupId;
@@ -11985,6 +12011,11 @@ function initCharts(){
 // WHATSAPP PAGE
 // ═══════════════════════════════════════════════
 function renderWA(){
+  // PRO-FEATURE-GATING-0A: WhatsApp tools are a Pro feature.
+  if (!canUseWhatsApp()) {
+    return monthBar()+'<div style="padding:40px;text-align:center;color:var(--i3)">'+
+      '🔒 <b>WhatsApp</b><br><br>'+t('proRequired')+'</div>';
+  }
   const m=S.month;
   const unpaid=[];
   BK.forEach(b=>(DATA.tenants[b]||[]).filter(t=>{
@@ -12044,6 +12075,7 @@ function buildWAMsg(bname,t,mo){
 }
 
 function waMsg(bname,tid,mo){
+  if(!canUseWhatsApp()) return;        // PRO-FEATURE-GATING-0A
   const t=(DATA.tenants[bname]||[]).find(x=>x.id===tid);
   if(!t) return;
   const msg=buildWAMsg(bname,t,mo);
@@ -12064,6 +12096,7 @@ function logWA(bname,tid,mo){
 }
 
 function sendAllWA(mo){
+  if(!canUseWhatsApp()) return;        // PRO-FEATURE-GATING-0A
   BK.forEach(b=>(DATA.tenants[b]||[]).filter(t=>{
     if(!t.active||t.rent===0) return false;
     return isDue(t,mo)||getP(t.id,mo).paid<t.rent;
@@ -12982,6 +13015,11 @@ function renderDash(){
 // ═══════════════════════════════════════════════════════
 const _origRenderWA = renderWA;
 function renderWA(){
+  // PRO-FEATURE-GATING-0A: WhatsApp tools are a Pro feature.
+  if (!canUseWhatsApp()) {
+    return monthBar()+'<div style="padding:40px;text-align:center;color:var(--i3)">'+
+      '🔒 <b>WhatsApp</b><br><br>'+t('proRequired')+'</div>';
+  }
   const m = S.month;
   let sentCount=0,pendingCount=0,noPhoneCount=0;
   const sentKeys = safeArr(DATA.waLog).map(l=>`${l.mo}:${l.bina}:${l.unit}`);
@@ -13076,6 +13114,7 @@ function updateTenantPhone(bname,tid,phone){
 }
 
 function waSendAndLog(bname,tid,mo,phone,msg){
+  if(!canUseWhatsApp()) return;        // PRO-FEATURE-GATING-0A
   window.open(`https://wa.me/${phone.replace(/\D/g,'')}?text=${encodeURIComponent(msg)}`,'_blank');
   logWA(bname,tid,mo);
   toast(t('waOpened'),'green');
@@ -14815,6 +14854,7 @@ async function checkLicenseStatus() {
   }
   licenseStatus = result;
   _renderLicenseStatus();
+  _applyProNavGates();
   if (result.ok) {
     _hideLicenseGateAnimated();
   } else {
