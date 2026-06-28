@@ -5270,9 +5270,10 @@ var STRINGS={
     wsBackupDownloadFailed:'İndirme başarısız.',wsBackupDownloadCancelled:'İndirme iptal edildi.',
     wsBackupApplyBtn:'Yedeği Uygula',wsBackupApplyCancel:'İptal',wsBackupApplyContinue:'Devam Et',
     wsBackupApplyConfirm1:'Bu bulut yedeği mevcut yerel verilerinizin yerine geçecek.',
-    wsBackupApplySafetyNote:'Uygulamadan önce otomatik güvenlik yedeği oluşturulacak.',
-    wsBackupApplyConfirm2:'Anlıyorum — bu yedeği uygula',
-    wsBackupApplying:'Yedek uygulanıyor…',wsBackupApplied:'Yedek uygulandı. Yeniden başlatılıyor…',
+    wsBackupApplySafetyNote:'Geri yüklemeden önce mevcut yerel verileriniz güvenlik yedeği olarak kaydedilecektir.',
+    wsBackupApplyCurrentData:'Mevcut verileriniz: {b} bina · {t} kiracı',
+    wsBackupApplyConfirm2:'Anlıyorum — yedeği geri yükle',
+    wsBackupApplying:'Yedek uygulanıyor…',wsBackupApplied:'Yedek geri yüklendi. Önceki verileriniz güvenlik yedeği olarak kaydedildi. Yeniden başlatılıyor…',
     wsBackupApplyPendingBlock:'Uygulamadan önce yerel değişiklikleri yedekleyin.',
     wsBackupApplyInFlight:'Yedeklemenin bitmesini bekleyin.',
     wsBackupApplyErr:'Yedek uygulanamadı.',
@@ -5901,9 +5902,10 @@ var STRINGS={
     wsBackupDownloadFailed:'Download failed.',wsBackupDownloadCancelled:'Download cancelled.',
     wsBackupApplyBtn:'Apply Backup',wsBackupApplyCancel:'Cancel',wsBackupApplyContinue:'Continue',
     wsBackupApplyConfirm1:'This will replace your current local data with the selected cloud backup.',
-    wsBackupApplySafetyNote:'A local safety backup will be created first.',
-    wsBackupApplyConfirm2:'I understand — apply this backup',
-    wsBackupApplying:'Applying backup…',wsBackupApplied:'Backup applied. Reloading…',
+    wsBackupApplySafetyNote:'Before restoring, your current local data will be saved as a safety backup.',
+    wsBackupApplyCurrentData:'Current data: {b} buildings · {t} tenants',
+    wsBackupApplyConfirm2:'I understand — restore this backup',
+    wsBackupApplying:'Applying backup…',wsBackupApplied:'Backup restored. Your previous data was saved as a safety backup. Reloading…',
     wsBackupApplyPendingBlock:'Back up local changes first before applying.',
     wsBackupApplyInFlight:'Wait for the current backup to finish.',
     wsBackupApplyErr:'Failed to apply backup.',
@@ -11329,7 +11331,16 @@ function renderWorkspaceCard() {
           var _apw1 = document.getElementById('ws-bkpl-ap-warn1-' + _li);
           if (_apw1) _apw1.textContent = t('wsBackupApplySafetyNote');
           var _aps1 = document.getElementById('ws-bkpl-ap-safe-' + _li);
-          if (_aps1) _aps1.textContent = ''; // handled in warn1
+          if (_aps1) {
+            // Show current local data summary so user knows what will be replaced.
+            // Uses BK/DATA which are always available; gracefully omits if empty.
+            var _curB = (typeof BK !== 'undefined' && BK) ? BK.length : 0;
+            var _curT = 0;
+            try { if (typeof BK !== 'undefined') BK.forEach(function(b){ _curT += ((DATA.tenants||{})[b]||[]).filter(function(x){return x.active!==false;}).length; }); } catch(_) {}
+            _aps1.textContent = (_curB > 0 || _curT > 0)
+              ? t('wsBackupApplyCurrentData').replace('{b}', String(_curB)).replace('{t}', String(_curT))
+              : '';
+          }
           var _apco = document.getElementById('ws-bkpl-ap-cont-' + _li);
           if (_apco) _apco.textContent = t('wsBackupApplyContinue');
           var _apc1 = document.getElementById('ws-bkpl-ap-canc1-' + _li);

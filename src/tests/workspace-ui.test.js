@@ -3323,6 +3323,64 @@ function register(test, assert, assertEqual) {
     assert(t2.canUseCloudBackup() && t2.canUseSync() && t2.canUseWhatsApp(), 'trial plan retains all Pro features');
   });
 
+  // ── CLOUD-BACKUP-RELIABILITY-0A: restore/apply UX hardening ─────────────────
+
+  test('CBR-0A: wsBackupApplyCurrentData key exists in both TR and EN', function() {
+    var n = (_rendererSrc.match(/wsBackupApplyCurrentData:/g) || []).length;
+    assert(n >= 2, 'wsBackupApplyCurrentData must be in TR and EN (found ' + n + ')');
+  });
+
+  test('CBR-0A: wsBackupApplySafetyNote mentions safety backup clearly', function() {
+    // Both TR and EN versions must clearly communicate a safety backup is made.
+    var trMatch = _rendererSrc.match(/wsBackupApplySafetyNote:'([^']+)'/);
+    var enMatch = _rendererSrc.match(/wsBackupApplySafetyNote:'([^']+)'/g);
+    assert(trMatch, 'wsBackupApplySafetyNote must exist');
+    assert((enMatch || []).length >= 2, 'wsBackupApplySafetyNote must exist in both TR and EN');
+    // Must mention safety backup concept
+    assert(/güvenlik|safety|backup|yedek/i.test(trMatch[1]),
+      'wsBackupApplySafetyNote must mention safety backup');
+  });
+
+  test('CBR-0A: wsBackupApplied post-apply message mentions safety backup', function() {
+    // Both TR and EN post-apply messages should mention the safety backup was created.
+    var allApplied = (_rendererSrc.match(/wsBackupApplied:'([^']+)'/g) || []);
+    assert(allApplied.length >= 2, 'wsBackupApplied must be in TR and EN (found ' + allApplied.length + ')');
+    allApplied.forEach(function(m) {
+      assert(/güvenlik|safety|yedek|backup/i.test(m), 'wsBackupApplied must mention safety: ' + m.slice(0,80));
+    });
+  });
+
+  test('CBR-0A: confirm1 panel uses wsBackupApplyCurrentData with {b} and {t} placeholders', function() {
+    // The _aps1 binding must replace {b} and {t} placeholders with counts.
+    var binding = _rendererSrc.match(/_aps1[\s\S]{0,900}/);
+    assert(binding, '_aps1 binding must exist');
+    assert(/wsBackupApplyCurrentData/.test(binding[0]), '_aps1 must use wsBackupApplyCurrentData');
+    assert(/replace.*\{b\}|replace.*\{t\}/.test(binding[0]), '_aps1 must replace {b} and {t} placeholders');
+  });
+
+  test('CBR-0A: confirm1 panel does not crash if no local data (graceful empty)', function() {
+    // The current-data binding must be guarded against empty BK/DATA.
+    var binding = _rendererSrc.match(/_aps1[\s\S]{0,900}/);
+    assert(binding, '_aps1 binding must exist');
+    // Guard: only shows text when curB>0 || curT>0
+    assert(/_curB > 0 \|\| _curT > 0|curB.*curT/.test(binding[0]),
+      '_aps1 must be guarded against zero-count scenario');
+    assert(/try\s*\{[\s\S]{0,250}\}\s*catch/.test(binding[0]),
+      '_aps1 current-data computation must be wrapped in try/catch');
+  });
+
+  test('CBR-0A: existing safety behaviors unchanged (dual-confirm, owner, safety backup)', function() {
+    // wsConfirmApply1 must still check applyState
+    var a1 = _rendererSrc.match(/function wsConfirmApply1\(\)[\s\S]*?\n\}/);
+    assert(a1, 'wsConfirmApply1 must exist');
+    assert(/applyState.*confirm1|confirm1.*applyState/.test(a1[0]), 'wsConfirmApply1 must check applyState');
+    // wsConfirmApply2 must still check owner role
+    var a2 = _rendererSrc.match(/async function wsConfirmApply2\(\)[\s\S]*?role.*owner/);
+    assert(a2, 'wsConfirmApply2 must still have owner role check');
+    // wsConfirmApply2 must still pass preRestoreRendererState
+    assert(/preRestoreRendererState/.test(_rendererSrc), 'preRestoreRendererState must still be passed to IPC');
+  });
+
   // ── 1F.6C UX polish: render order + reload behavior ─────────────────────────
 
   test('1F.6C render: wsConfirmManualBackup calls renderAutoBackupIndicator before renderWorkspaceCard', function() {
