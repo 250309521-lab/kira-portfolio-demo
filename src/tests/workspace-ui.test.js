@@ -3369,6 +3369,142 @@ function register(test, assert, assertEqual) {
     assert(t2.canUseCloudBackup() && t2.canUseSync() && t2.canUseWhatsApp(), 'trial plan retains all Pro features');
   });
 
+  // ── WHATSAPP-BETA-0A: phone normalization + beta safety ──────────────────────
+
+  // Extract _normalizeWAPhone and run it in a sandbox so we can call it directly.
+  function _evalNormalize(input) {
+    var m = _rendererSrc.match(/function _normalizeWAPhone\(raw\)\s*\{[\s\S]*?\n\}/);
+    assert(m, '_normalizeWAPhone function must be found in renderer source');
+    var fn = new Function('raw', m[0].replace(/^function _normalizeWAPhone\(raw\)\s*\{/, '').replace(/\}$/, ''));
+    return fn(input);
+  }
+
+  test('WA-0A: _normalizeWAPhone helper exists in renderer', function() {
+    assert(/function _normalizeWAPhone\(raw\)/.test(_rendererSrc), '_normalizeWAPhone must be defined');
+    assert(/WHATSAPP-BETA-0A/.test(_rendererSrc), 'WHATSAPP-BETA-0A marker must be present');
+  });
+
+  test('WA-0A: 05xxxxxxxxx (Turkish common format) → 905xxxxxxxxx', function() {
+    assert(_evalNormalize('05331234567') === '905331234567',
+      '05331234567 must normalize to 905331234567');
+  });
+
+  test('WA-0A: 5xxxxxxxxx (10 digits, no leading 0) → 905xxxxxxxxx', function() {
+    assert(_evalNormalize('5331234567') === '905331234567',
+      '5331234567 must normalize to 905331234567');
+  });
+
+  test('WA-0A: +905xxxxxxxxx (E.164 with +) → 905xxxxxxxxx (strip non-digits)', function() {
+    assert(_evalNormalize('+905331234567') === '905331234567',
+      '+905331234567 must normalize to 905331234567');
+  });
+
+  test('WA-0A: 905xxxxxxxxx (already correct) → 905xxxxxxxxx unchanged', function() {
+    assert(_evalNormalize('905331234567') === '905331234567',
+      '905331234567 must stay 905331234567');
+  });
+
+  test('WA-0A: spaced Turkish format → 905xxxxxxxxx', function() {
+    assert(_evalNormalize('90 533 123 4567') === '905331234567',
+      '"90 533 123 4567" must normalize to 905331234567');
+  });
+
+  test('WA-0A: 00905xxxxxxxxx (IDD prefix) → 905xxxxxxxxx', function() {
+    assert(_evalNormalize('00905331234567') === '905331234567',
+      '00905331234567 must normalize to 905331234567');
+  });
+
+  test('WA-0A: 0090 spaced (IDD + spaces) → 905xxxxxxxxx', function() {
+    assert(_evalNormalize('0090 533 123 4567') === '905331234567',
+      '"0090 533 123 4567" must normalize to 905331234567');
+  });
+
+  test('WA-0A: (533) 123-4567 (formatted local, 10 digits after strip) → 905xxxxxxxxx', function() {
+    assert(_evalNormalize('(533) 123-4567') === '905331234567',
+      '"(533) 123-4567" must normalize to 905331234567');
+  });
+
+  test('WA-0A: non-Turkish E.164 (+44...) passes through correctly', function() {
+    assert(_evalNormalize('+44 7911 123456') === '447911123456',
+      '+44 7911 123456 must normalize to 447911123456');
+  });
+
+  test('WA-0A: empty / non-digit / too-short → empty string', function() {
+    assert(_evalNormalize('') === '',           'empty → empty');
+    assert(_evalNormalize('abc') === '',         'non-digit → empty');
+    assert(_evalNormalize('12345') === '',       'too short → empty');
+    assert(_evalNormalize(null) === '',          'null → empty');
+    assert(_evalNormalize(undefined) === '',     'undefined → empty');
+  });
+
+  test('WA-0A: all wa.me URL call sites use _normalizeWAPhone (not bare .replace(/\\D/g))', function() {
+    // All wa.me links must go through the normalizer, not the old bare strip.
+    // We accept _normalizeWAPhone() calls at wa.me sites and also the helper definition itself.
+    var bareStrips = (_rendererSrc.match(/wa\.me[^`"]*?\.replace\(\/\\D\/g/g) || []).length;
+    assert(bareStrips === 0, 'no wa.me URL must use bare .replace(/\\D/g) — use _normalizeWAPhone');
+    // Each wa.me anchor/open must use _normalizeWAPhone
+    assert(/wa\.me\/\$\{_normalizeWAPhone/.test(_rendererSrc) ||
+           /wa\.me\/\$\{phone\}[\s\S]{0,20}normalizeWAPhone/.test(_rendererSrc),
+      'wa.me URLs must use _normalizeWAPhone output');
+  });
+
+  test('WA-0A: Send to All button hidden in both renderWA bodies', function() {
+    // Neither renderWA may render the sendAllWA() button for beta.
+    var cursor = 0, count = 0;
+    var rwCount = (_rendererSrc.match(/function renderWA\(\)/g) || []).length;
+    for (var ri = 0; ri < rwCount; ri++) {
+      var start = _rendererSrc.indexOf('function renderWA()', cursor);
+      var end   = _rendererSrc.indexOf('\n}', start) + 2;
+      var body  = _rendererSrc.slice(start, end);
+      if (/sendAllWA/.test(body) && /btn/.test(body) && !/WHATSAPP-BETA-0A.*hidden/.test(body)) count++;
+      cursor = end;
+    }
+    assert(count === 0, 'sendAllWA() button must not be rendered in either renderWA (found ' + count + ' active buttons)');
+    // The WHATSAPP-BETA-0A hidden comment must appear in the renderer
+    assert((_rendererSrc.match(/WHATSAPP-BETA-0A.*hidden/g) || []).length >= 2,
+      'WHATSAPP-BETA-0A hidden comment must appear in both renderWA bodies');
+  });
+
+  test('WA-0A: sendAllWA() function still present (not deleted)', function() {
+    assert(/function sendAllWA\(mo\)/.test(_rendererSrc), 'sendAllWA function must still exist');
+    assert(/canUseWhatsApp/.test(
+      (_rendererSrc.match(/function sendAllWA\(mo\)[\s\S]*?\n\}/) || [''])[0]
+    ), 'sendAllWA must still check canUseWhatsApp');
+  });
+
+  test('WA-0A: waAutoDesc copy no longer references server.js (TR and EN)', function() {
+    assert(!/waAutoDesc:.*server\.js/.test(_rendererSrc),
+      'waAutoDesc must not reference server.js in any language');
+    // Verify both TR and EN replacements exist
+    assert(/waAutoDesc:'WhatsApp mesajlar/.test(_rendererSrc), 'TR waAutoDesc updated');
+    assert(/waAutoDesc:'WhatsApp messages are sent manually/.test(_rendererSrc), 'EN waAutoDesc updated');
+  });
+
+  test('WA-0A: buildWAMsg returns non-empty Turkish message with name, month, amount', function() {
+    // Extract buildWAMsg body and run with a stub
+    var m = _rendererSrc.match(/function buildWAMsg\(bname,t,mo\)\s*\{([\s\S]*?)\n\}/);
+    assert(m, 'buildWAMsg must exist');
+    var BL = { 'b1': 'Test Bina' };
+    var TL = function(v) { return v + ' TL'; };
+    var fn = new Function('bname', 't', 'mo', 'BL', 'TL', 'return ' + m[1].trim().replace(/^return /, ''));
+    var result = fn('b1', { name: 'Ali Veli', unit: '101', rent: 2500 }, '2026-06', BL, TL);
+    assert(typeof result === 'string' && result.length > 0, 'buildWAMsg must return non-empty string');
+    assert(/Ali Veli/.test(result), 'message must contain tenant name');
+    assert(/2026-06/.test(result), 'message must contain month');
+    assert(/2500/.test(result), 'message must contain rent amount');
+  });
+
+  test('WA-0A: canUseWhatsApp() gating unchanged (regression)', function() {
+    // All three action handlers must still gate on canUseWhatsApp() as first line
+    function firstLine(name) {
+      var m = _rendererSrc.match(new RegExp('function ' + name + '\\([^)]*\\)\\s*\\{\\s*([^\\n]{0,120})'));
+      return m ? m[1] : '';
+    }
+    assert(/canUseWhatsApp/.test(firstLine('waMsg')),         'waMsg still gates canUseWhatsApp');
+    assert(/canUseWhatsApp/.test(firstLine('sendAllWA')),     'sendAllWA still gates canUseWhatsApp');
+    assert(/canUseWhatsApp/.test(firstLine('waSendAndLog')),  'waSendAndLog still gates canUseWhatsApp');
+  });
+
   // ── CLOUD-BACKUP-RELIABILITY-0A: restore/apply UX hardening ─────────────────
 
   test('CBR-0A: wsBackupApplyCurrentData key exists in both TR and EN', function() {

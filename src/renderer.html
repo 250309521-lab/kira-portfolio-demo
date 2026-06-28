@@ -5010,7 +5010,7 @@ var STRINGS={
     waTotalDebtors:'Toplam Borçlu',waNotSent:'Gönderilmedi',waSent:'Gönderildi',
     waNoPhoneLabel:'Telefon Yok',waTitle:'💬 WhatsApp Yönetimi',
     waSendAll:'📤 Hepsine Gönder',waAutoNote:'Otomatik hatırlatıcı:',waManualNote:'Manuel:',
-    waAutoDesc:'server.js çalışırken kira günü geçtikten sonra otomatik gönderir.',
+    waAutoDesc:'WhatsApp mesajları manuel gönderilir — gecikmiş kiracı kartlarındaki butona tıklayın.',
     waManualDesc:'Aşağıdaki butonlarla tek tek veya toplu gönderebilirsiniz. Telefon numarasını düzenleyebilirsiniz.',
     waNoOverdue:'için gecikmiş ödeme yok!',waRecentSends:'📋 Son Gönderimler',
     waSendBtn:'💬 WhatsApp Gönder',waNoPhoneMsg:'📵 Telefon girilmedi',waLogSent:'✓ Gönderildi',
@@ -5642,7 +5642,7 @@ var STRINGS={
     waTotalDebtors:'Total Debtors',waNotSent:'Not Sent',waSent:'Sent',
     waNoPhoneLabel:'No Phone',waTitle:'💬 WhatsApp Manager',
     waSendAll:'📤 Send to All',waAutoNote:'Auto reminder:',waManualNote:'Manual:',
-    waAutoDesc:'When server.js is running, sends automatically after rent due date passes.',
+    waAutoDesc:'WhatsApp messages are sent manually — click the button next to each overdue tenant.',
     waManualDesc:'Use the buttons below to send individually or in bulk. You can edit the phone number.',
     waNoOverdue:'no overdue payments!',waRecentSends:'📋 Recent Sends',
     waSendBtn:'💬 Send WhatsApp',waNoPhoneMsg:'📵 No phone entered',waLogSent:'✓ Sent',
@@ -12038,7 +12038,7 @@ function renderWA(){
     const p=getP(t.id,m);
     const st=getStatus(t,m);
     const msg=buildWAMsg(b,t,m);
-    const phone=(t.phone||'').replace(/\D/g,'');
+    const phone=_normalizeWAPhone(t.phone);
     return `<div class="wa-reminder-card">
       <div class="wa-reminder-hdr">
         <div style="flex:1">
@@ -12065,7 +12065,7 @@ function renderWA(){
   return monthBar()+`
   <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
     <div style="font-size:13px;font-weight:700;flex:1">💬 ${t('waTitle')} — ${monthLabel(m)}</div>
-    ${unpaid.length&&canEdit()?`<button class="btn btn-primary btn-sm" onclick="sendAllWA('${m}')">${t('waSendAll')} (${unpaid.length})</button>`:''}
+    ${''/* WHATSAPP-BETA-0A: batch Send to All hidden for closed beta. */}
   </div>
 
   <div style="background:rgba(37,211,102,.06);border:1px solid rgba(37,211,102,.15);border-radius:10px;padding:12px;margin-bottom:14px;font-size:11.5px;color:var(--text2)">
@@ -12081,6 +12081,21 @@ function renderWA(){
   `;
 }
 
+// WHATSAPP-BETA-0A: pure phone normalizer — strips non-digits, adds Turkish
+// country code (90) for 05xx/5xx local formats, strips leading 00 IDD prefix.
+// Never logs raw phone values. Returns '' for empty/invalid input.
+function _normalizeWAPhone(raw) {
+  var digits = (raw || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.slice(0, 2) === '00') digits = digits.slice(2);
+  // Turkish mobile with trunk prefix: 05xxxxxxxxxx (11 digits) → 905xxxxxxxxxx
+  if (digits.length === 11 && digits.charAt(0) === '0') digits = '90' + digits.slice(1);
+  // Turkish mobile without trunk prefix: 5xxxxxxxxxx (10 digits) → 905xxxxxxxxxx
+  if (digits.length === 10 && digits.charAt(0) === '5') digits = '90' + digits;
+  if (digits.length < 7) return '';
+  return digits;
+}
+
 function buildWAMsg(bname,t,mo){
   return `Merhaba ${t.name} Bey/Hanım, ${BL[bname]} ${t.unit} için ${mo} kira ödemeniz (${TL(t.rent)}) henüz görünmüyor. Rica etsek kontrol edip bilgi verebilir misiniz? Teşekkürler.`;
 }
@@ -12090,7 +12105,7 @@ function waMsg(bname,tid,mo){
   const t=(DATA.tenants[bname]||[]).find(x=>x.id===tid);
   if(!t) return;
   const msg=buildWAMsg(bname,t,mo);
-  const phone=(t.phone||'').replace(/\D/g,'');
+  const phone=_normalizeWAPhone(t.phone);
   const url=phone?`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`:`https://wa.me/?text=${encodeURIComponent(msg)}`;
   window.open(url,'_blank');
   logWA(bname,tid,mo);
@@ -12113,7 +12128,7 @@ function sendAllWA(mo){
     return isDue(t,mo)||getP(t.id,mo).paid<t.rent;
   }).forEach((t,i)=>{
     setTimeout(()=>{
-      const phone=(t.phone||'').replace(/\D/g,'');
+      const phone=_normalizeWAPhone(t.phone);
       if(phone){
         const msg=buildWAMsg(b,t,mo);
         window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`,'_blank');
@@ -13040,7 +13055,7 @@ function renderWA(){
     if(!t.active||t.rent===0) return false;
     return isDue(t,m)||getP(t.id,m).paid<t.rent;
   }).forEach(t=>{
-    const phone=(t.phone||'').replace(/\D/g,'');
+    const phone=_normalizeWAPhone(t.phone);
     const alreadySent=sentKeys.includes(`${m}:${BL[b]}:${t.unit}`);
     if(alreadySent) sentCount++;
     else if(!phone) noPhoneCount++;
@@ -13103,7 +13118,7 @@ function renderWA(){
   return monthBar()+`
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
     <div style="font-size:15px;font-weight:700;color:var(--i0);flex:1">${t('waTitle')} — ${monthLabel(m)}</div>
-    ${pendingCount>0&&canEdit()?`<button class="btn btn-primary btn-sm" onclick="sendAllWA('${m}')">${t('waSendAll')} (${pendingCount})</button>`:''}
+    ${''/* WHATSAPP-BETA-0A: batch Send to All hidden for closed beta. */}
   </div>
   <div class="wa-info-panel" style="background:rgba(37,211,102,.05);border:1px solid rgba(37,211,102,.12);border-radius:var(--r2);padding:12px 14px;margin-bottom:14px;font-size:12px;color:var(--i2);line-height:1.6">
     <b style="color:var(--i0)">${t('waAutoNote')}</b> ${t('waAutoDesc')}<br>
@@ -13126,7 +13141,7 @@ function updateTenantPhone(bname,tid,phone){
 
 function waSendAndLog(bname,tid,mo,phone,msg){
   if(!canUseWhatsApp()) return;        // PRO-FEATURE-GATING-0A
-  window.open(`https://wa.me/${phone.replace(/\D/g,'')}?text=${encodeURIComponent(msg)}`,'_blank');
+  window.open(`https://wa.me/${_normalizeWAPhone(phone)}?text=${encodeURIComponent(msg)}`,'_blank');
   logWA(bname,tid,mo);
   toast(t('waOpened'),'green');
 }
