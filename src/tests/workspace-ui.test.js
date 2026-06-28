@@ -3105,6 +3105,114 @@ function register(test, assert, assertEqual) {
     });
   });
 
+  // ── LICENSE-ENTITLEMENT-0A: central Basic vs Pro helpers ────────────────────
+  // All helpers are pure; we test them via a sandbox that mocks licenseStatus.
+
+  function _evalEntitlementHelpers(mockLicenseStatus) {
+    // Extract the helper block from renderer source and evaluate with mocked state.
+    var helperBlock = _rendererSrc.match(/function isLicensed\(\)[\s\S]*?function canUsePrioritySupport[\s\S]*?\}/);
+    assert(helperBlock, 'entitlement helper block must be found in renderer source');
+    var factory = new Function(
+      'licenseStatus',
+      helperBlock[0] + '\nreturn {isLicensed:isLicensed,getLicensePlan:getLicensePlan,' +
+        'isProUser:isProUser,canUseBasicApp:canUseBasicApp,canUseLocalBackup:canUseLocalBackup,' +
+        'canUseLocalRestore:canUseLocalRestore,canUseCloudAccount:canUseCloudAccount,' +
+        'canUseCloudBackup:canUseCloudBackup,canUseCloudBackupHistory:canUseCloudBackupHistory,' +
+        'canUseCloudBackupApply:canUseCloudBackupApply,canUseSync:canUseSync,' +
+        'canUseWhatsApp:canUseWhatsApp,canUsePrioritySupport:canUsePrioritySupport};'
+    );
+    return factory(mockLicenseStatus);
+  }
+  function _makeStatus(plan, ok) {
+    if (!ok) return { ok: false, reason: 'license_required' };
+    return { ok: true, license: { plan: plan } };
+  }
+
+  test('ENTITLEMENT: helper functions exist in renderer source', function() {
+    var helpers = ['isLicensed','getLicensePlan','isProUser','canUseBasicApp','canUseLocalBackup',
+      'canUseLocalRestore','canUseCloudAccount','canUseCloudBackup','canUseCloudBackupHistory',
+      'canUseCloudBackupApply','canUseSync','canUseWhatsApp','canUsePrioritySupport'];
+    helpers.forEach(function(h) {
+      assert(new RegExp('function ' + h + '\\(\\)').test(_rendererSrc), h + '() must exist in renderer');
+    });
+  });
+
+  test('ENTITLEMENT: missing / null license — all false/null', function() {
+    var h = _evalEntitlementHelpers(null);
+    assert(!h.isLicensed(),   'no license → isLicensed false');
+    assert(h.getLicensePlan() === null, 'no license → plan null');
+    assert(!h.isProUser(),    'no license → isProUser false');
+    assert(!h.canUseBasicApp(),   'no license → canUseBasicApp false');
+    assert(!h.canUseLocalBackup(),'no license → canUseLocalBackup false');
+    assert(!h.canUseCloudBackup(),'no license → canUseCloudBackup false');
+    assert(!h.canUseSync(),       'no license → canUseSync false');
+    assert(!h.canUseWhatsApp(),   'no license → canUseWhatsApp false');
+  });
+
+  test('ENTITLEMENT: invalid / expired license — all false/null', function() {
+    var h = _evalEntitlementHelpers({ ok: false, reason: 'expired' });
+    assert(!h.isLicensed(),      'expired → isLicensed false');
+    assert(h.getLicensePlan() === null, 'expired → plan null');
+    assert(!h.isProUser(),       'expired → isProUser false');
+    assert(!h.canUseBasicApp(),  'expired → canUseBasicApp false');
+    assert(!h.canUseCloudBackup(),'expired → canUseCloudBackup false');
+  });
+
+  test('ENTITLEMENT: standard plan — Basic true, Pro false', function() {
+    var h = _evalEntitlementHelpers(_makeStatus('standard', true));
+    assert(h.isLicensed(),                  'standard → isLicensed true');
+    assertEqual(h.getLicensePlan(), 'standard', 'standard → plan "standard"');
+    assert(!h.isProUser(),                  'standard → isProUser false');
+    assert(h.canUseBasicApp(),              'standard → canUseBasicApp true');
+    assert(h.canUseLocalBackup(),           'standard → canUseLocalBackup true');
+    assert(h.canUseLocalRestore(),          'standard → canUseLocalRestore true');
+    assert(!h.canUseCloudAccount(),         'standard → canUseCloudAccount false');
+    assert(!h.canUseCloudBackup(),          'standard → canUseCloudBackup false');
+    assert(!h.canUseCloudBackupHistory(),   'standard → canUseCloudBackupHistory false');
+    assert(!h.canUseCloudBackupApply(),     'standard → canUseCloudBackupApply false');
+    assert(!h.canUseSync(),                 'standard → canUseSync false');
+    assert(!h.canUseWhatsApp(),             'standard → canUseWhatsApp false');
+    assert(!h.canUsePrioritySupport(),      'standard → canUsePrioritySupport false');
+  });
+
+  test('ENTITLEMENT: pro plan — Basic and Pro both true', function() {
+    var h = _evalEntitlementHelpers(_makeStatus('pro', true));
+    assert(h.isLicensed(),                  'pro → isLicensed true');
+    assertEqual(h.getLicensePlan(), 'pro',  'pro → plan "pro"');
+    assert(h.isProUser(),                   'pro → isProUser true');
+    assert(h.canUseBasicApp(),              'pro → canUseBasicApp true');
+    assert(h.canUseLocalBackup(),           'pro → canUseLocalBackup true');
+    assert(h.canUseLocalRestore(),          'pro → canUseLocalRestore true');
+    assert(h.canUseCloudAccount(),          'pro → canUseCloudAccount true');
+    assert(h.canUseCloudBackup(),           'pro → canUseCloudBackup true');
+    assert(h.canUseCloudBackupHistory(),    'pro → canUseCloudBackupHistory true');
+    assert(h.canUseCloudBackupApply(),      'pro → canUseCloudBackupApply true');
+    assert(h.canUseSync(),                  'pro → canUseSync true');
+    assert(h.canUseWhatsApp(),              'pro → canUseWhatsApp true');
+    assert(h.canUsePrioritySupport(),       'pro → canUsePrioritySupport true');
+  });
+
+  test('ENTITLEMENT: trial plan — treated as Pro (internal testing)', function() {
+    var h = _evalEntitlementHelpers(_makeStatus('trial', true));
+    assert(h.isLicensed(),         'trial → isLicensed true');
+    assertEqual(h.getLicensePlan(), 'trial', 'trial → plan "trial"');
+    assert(h.isProUser(),          'trial → isProUser true (internal testing)');
+    assert(h.canUseLocalBackup(),  'trial → canUseLocalBackup true');
+    assert(h.canUseCloudBackup(),  'trial → canUseCloudBackup true');
+    assert(h.canUseSync(),         'trial → canUseSync true');
+    assert(h.canUseWhatsApp(),     'trial → canUseWhatsApp true');
+  });
+
+  test('ENTITLEMENT: helpers are pure — no IPC/network/DOM/storage access', function() {
+    var helperBlock = _rendererSrc.match(/function isLicensed\(\)[\s\S]*?function canUsePrioritySupport[\s\S]*?\}/);
+    assert(helperBlock, 'helper block found');
+    var src = helperBlock[0];
+    assert(!/invoke\(|fetch\(|axios|XMLHttpRequest|localStorage|document\./.test(src),
+      'helpers must not call IPC/network/DOM/storage');
+    assert(!/console\.(log|warn|error|info)/.test(src),
+      'helpers must not log anything');
+  });
+
   // ── 1F.6C UX polish: render order + reload behavior ─────────────────────────
 
   test('1F.6C render: wsConfirmManualBackup calls renderAutoBackupIndicator before renderWorkspaceCard', function() {

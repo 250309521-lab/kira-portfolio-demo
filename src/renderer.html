@@ -4585,6 +4585,26 @@ let licenseStatus    = null;
 let licenseChecked   = false;
 let licenseGateActive = false;
 
+// ── LICENSE-ENTITLEMENT-0A: central Basic vs Pro helpers ─────────────────────
+// Pure functions that read licenseStatus. No IPC, no network, no side effects.
+// PRO-FEATURE-GATING-0A will wire these into UI and action gates.
+function isLicensed()   { return licenseStatus != null && licenseStatus.ok === true; }
+function getLicensePlan(){ return (isLicensed() && licenseStatus.license) ? licenseStatus.license.plan : null; }
+// pro / trial count as Pro for internal testing; standard is Basic only.
+function isProUser()    { var p = getLicensePlan(); return p === 'pro' || p === 'trial'; }
+// Basic-tier features: always available to any valid licensed user.
+function canUseBasicApp()           { return isLicensed(); }
+function canUseLocalBackup()        { return isLicensed(); }
+function canUseLocalRestore()       { return isLicensed(); }
+// Pro-tier features: require isProUser().
+function canUseCloudAccount()       { return isProUser(); }
+function canUseCloudBackup()        { return isProUser(); }
+function canUseCloudBackupHistory() { return isProUser(); }
+function canUseCloudBackupApply()   { return isProUser(); }
+function canUseSync()               { return isProUser(); }
+function canUseWhatsApp()           { return isProUser(); }
+function canUsePrioritySupport()    { return isProUser(); }
+
 // ── CLOUD ACCOUNT UI — runtime-only; never persisted to localStorage ─────────
 var CLOUD_UI = {
   state:     'loading',
